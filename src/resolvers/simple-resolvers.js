@@ -222,7 +222,7 @@ export async function recoverOrphanedData(req) {
       .where('key', startsWith('macro-vars:'))
       .getMany();
 
-    // Find candidates: entries with matching excerptId that were recently accessed
+    // Find candidates: entries with matching excerptId and pageId (if available)
     const now = new Date();
     const candidates = [];
 
@@ -237,17 +237,43 @@ export async function recoverOrphanedData(req) {
 
       // Check if excerptId matches
       if (data.excerptId === excerptId) {
-        // Check if recently synced (within last 5 minutes - generous window)
-        if (data.lastSynced) {
-          const lastSyncTime = new Date(data.lastSynced);
-          const ageInSeconds = (now - lastSyncTime) / 1000;
+        // CRITICAL: Also check pageId if available - ensures we only recover data from the same page
+        // This prevents cross-page recovery when multiple Embeds use the same Source
+        if (pageId && data.pageId) {
+          // Normalize to strings for comparison (storage might have strings or numbers)
+          if (String(data.pageId) !== String(pageId)) {
+            continue; // Skip if pageId doesn't match
+          }
+        }
 
-          if (ageInSeconds < 300) { // 5 minutes
+        // Check if recently synced or updated (within last 30 minutes - more generous window)
+        // Use updatedAt as fallback if lastSynced is missing
+        const timestamp = data.lastSynced || data.updatedAt;
+        if (timestamp) {
+          const timestampTime = new Date(timestamp);
+          const ageInSeconds = (now - timestampTime) / 1000;
+
+          // Extended window to 30 minutes to catch cases where auto-save hasn't completed yet
+          // or where user drags macro shortly after making changes
+          if (ageInSeconds < 1800) { // 30 minutes
             candidates.push({
               localId: entryLocalId,
               data: data,
               ageInSeconds: ageInSeconds,
               updatedAt: data.updatedAt || data.lastSynced // Use updatedAt for tiebreaker
+            });
+          }
+        } else if (data.updatedAt) {
+          // Fallback: if no lastSynced, use updatedAt (for older entries)
+          const updatedTime = new Date(data.updatedAt);
+          const ageInSeconds = (now - updatedTime) / 1000;
+          
+          if (ageInSeconds < 1800) { // 30 minutes
+            candidates.push({
+              localId: entryLocalId,
+              data: data,
+              ageInSeconds: ageInSeconds,
+              updatedAt: data.updatedAt
             });
           }
         }
