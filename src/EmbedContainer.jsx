@@ -491,18 +491,27 @@ const App = () => {
                           (varsResultForLoading.customInsertions || []).length === 0 &&
                           (varsResultForLoading.internalNotes || []).length === 0;
 
-        if (isSuccess && hasNoData && selectedExcerptId) {
+        // CRITICAL: Attempt recovery even if excerptId is missing
+        // When a macro is dragged, excerptId may be lost, but we can still recover by pageId
+        if (isSuccess && hasNoData) {
           const pageId = context?.contentId || context?.extension?.content?.id;
 
+          // Try recovery with or without excerptId
+          // If excerptId is missing, recovery will search by pageId alone
           const recoveryResult = await invoke('recoverOrphanedData', {
             pageId: pageId,
-            excerptId: selectedExcerptId,
+            excerptId: selectedExcerptId || null, // Can be null - recovery will search by pageId
             currentLocalId: context.localId
           });
 
           if (recoveryResult.success && recoveryResult.recovered) {
             // Reload the data now that it's been migrated
             varsResultForLoading = await invoke('getVariableValues', { localId: effectiveLocalId });
+            
+            // CRITICAL: If excerptId was missing, set it from recovered data
+            if (!selectedExcerptId && recoveryResult.data?.excerptId) {
+              setSelectedExcerptId(recoveryResult.data.excerptId);
+            }
           }
         }
 
