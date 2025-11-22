@@ -205,6 +205,7 @@ const App = () => {
   const [customText, setCustomText] = useState('');
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [saveStatus, setSaveStatus] = useState('saved'); // 'saved', 'saving', or 'error'
+  const [isRecovering, setIsRecovering] = useState(false); // Tracks when recovery from drag-and-drop is in progress
   const [selectedTabIndex, setSelectedTabIndex] = useState(0); // Track active tab (0=Write, 1=Toggles, 2=Free Write)
   // View mode staleness detection state
   const [isStale, setIsStale] = useState(false);
@@ -466,23 +467,29 @@ const App = () => {
         const pageId = context?.contentId || context?.extension?.content?.id;
         
         if (pageId) {
-          const recoveryResult = await invoke('recoverOrphanedData', {
-            pageId: pageId,
-            excerptId: null, // Explicitly null - search by pageId alone
-            currentLocalId: context.localId
-          });
+          setIsRecovering(true); // Show loading state
+          
+          try {
+            const recoveryResult = await invoke('recoverOrphanedData', {
+              pageId: pageId,
+              excerptId: null, // Explicitly null - search by pageId alone
+              currentLocalId: context.localId
+            });
 
-          if (recoveryResult.success && recoveryResult.recovered) {
-            // Reload to get the recovered data
-            varsResult = await invoke('getVariableValues', { localId: effectiveLocalId });
-            
-            // CRITICAL: Set excerptId from recovered data
-            if (recoveryResult.data?.excerptId) {
-              setSelectedExcerptId(recoveryResult.data.excerptId);
+            if (recoveryResult.success && recoveryResult.recovered) {
+              // Reload to get the recovered data
+              varsResult = await invoke('getVariableValues', { localId: effectiveLocalId });
+              
+              // CRITICAL: Set excerptId from recovered data
+              if (recoveryResult.data?.excerptId) {
+                setSelectedExcerptId(recoveryResult.data.excerptId);
+              }
+              
+              // Invalidate React Query cache to force refresh
+              await queryClient.invalidateQueries({ queryKey: ['variableValues', effectiveLocalId] });
             }
-            
-            // Invalidate React Query cache to force refresh
-            await queryClient.invalidateQueries({ queryKey: ['variableValues', effectiveLocalId] });
+          } finally {
+            setIsRecovering(false); // Hide loading state
           }
         }
       }
@@ -946,6 +953,20 @@ const App = () => {
           </Text>
         )}
       </SectionMessage>
+    );
+  }
+
+  // Show recovery loading state when recovering from drag-and-drop
+  if (isRecovering) {
+    return (
+      <Box xcss={xcss({ padding: 'space.400', textAlign: 'center' })}>
+        <Stack space="space.200" alignInline="center">
+          <Spinner size="medium" label="Recovering Embed data..." />
+          <Text>
+            <Em>Restoring configuration after move...</Em>
+          </Text>
+        </Stack>
+      </Box>
     );
   }
 
