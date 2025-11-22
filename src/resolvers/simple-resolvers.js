@@ -216,6 +216,8 @@ export async function getCanonicalLocalId(req) {
 export async function recoverOrphanedData(req) {
   try {
     const { pageId, excerptId, currentLocalId } = req.payload;
+    
+    console.log('[recoverOrphanedData] Starting recovery', { pageId, excerptId, currentLocalId });
 
     // Query all macro-vars entries
     const allEntries = await storage.query()
@@ -325,6 +327,12 @@ export async function recoverOrphanedData(req) {
         }
       }
 
+      console.log('[recoverOrphanedData] Recovery successful', {
+        migratedFrom: orphanedEntry.localId,
+        excerptId: orphanedEntry.data.excerptId,
+        candidateCount: candidates.length
+      });
+      
       return {
         success: true,
         recovered: true,
@@ -333,6 +341,11 @@ export async function recoverOrphanedData(req) {
         candidateCount: candidates.length
       };
     } else {
+      console.log('[recoverOrphanedData] No candidates found', {
+        pageId,
+        excerptId,
+        reason: 'no_candidates'
+      });
       return {
         success: true,
         recovered: false,

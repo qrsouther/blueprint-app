@@ -442,6 +442,56 @@ const App = () => {
   // We do NOT invalidate on every mode switch - that would defeat caching!
   // The auto-save invalidation is sufficient to keep view mode fresh after edits.
 
+  // CRITICAL: Early recovery check - runs BEFORE excerptId is required
+  // This handles the drag-and-drop scenario where excerptId is nullified
+  // Must run early so recovery can restore excerptId before other effects need it
+  useEffect(() => {
+    if (!effectiveLocalId || !isEditing) {
+      return;
+    }
+
+    const attemptEarlyRecovery = async () => {
+      // Check if we have no data (orphaned state)
+      let varsResult = await invoke('getVariableValues', { localId: effectiveLocalId });
+      
+      const hasNoData = !varsResult.lastSynced &&
+                        !varsResult.excerptId &&
+                        Object.keys(varsResult.variableValues || {}).length === 0 &&
+                        Object.keys(varsResult.toggleStates || {}).length === 0 &&
+                        (varsResult.customInsertions || []).length === 0 &&
+                        (varsResult.internalNotes || []).length === 0;
+
+      // If we have no data AND no excerptId, attempt recovery by pageId alone
+      if (varsResult.success && hasNoData) {
+        const pageId = context?.contentId || context?.extension?.content?.id;
+        
+        if (pageId) {
+          const recoveryResult = await invoke('recoverOrphanedData', {
+            pageId: pageId,
+            excerptId: null, // Explicitly null - search by pageId alone
+            currentLocalId: context.localId
+          });
+
+          if (recoveryResult.success && recoveryResult.recovered) {
+            // Reload to get the recovered data
+            varsResult = await invoke('getVariableValues', { localId: effectiveLocalId });
+            
+            // CRITICAL: Set excerptId from recovered data
+            if (recoveryResult.data?.excerptId) {
+              setSelectedExcerptId(recoveryResult.data.excerptId);
+            }
+            
+            // Invalidate React Query cache to force refresh
+            await queryClient.invalidateQueries({ queryKey: ['variableValues', effectiveLocalId] });
+          }
+        }
+      }
+    };
+
+    attemptEarlyRecovery();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [effectiveLocalId, isEditing]); // Run when localId changes (new Embed instance)
+
   // Process excerpt data from React Query (runs in both Edit and View modes)
   // View Mode needs this to set excerptForViewMode with documentationLinks
   useEffect(() => {
