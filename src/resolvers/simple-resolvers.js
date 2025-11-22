@@ -14,6 +14,12 @@ import { saveVersion } from '../utils/version-manager.js';
 import { validateExcerptData, safeStorageSet } from '../utils/storage-validator.js';
 import { updateExcerptIndex } from '../utils/storage-utils.js';
 import { calculateContentHash } from '../utils/hash-utils.js';
+import {
+  logFunction,
+  logPhase,
+  logSuccess,
+  logFailure
+} from '../utils/forge-logger.js';
 
 /**
  * Detect variables from content (for UI to call)
@@ -217,7 +223,7 @@ export async function recoverOrphanedData(req) {
   try {
     const { pageId, excerptId, currentLocalId } = req.payload;
     
-    console.log('[recoverOrphanedData] Starting recovery', { pageId, excerptId, currentLocalId });
+    logFunction('recoverOrphanedData', 'Starting recovery', { pageId, excerptId, currentLocalId });
 
     // Query all macro-vars entries
     const allEntries = await storage.query()
@@ -226,7 +232,6 @@ export async function recoverOrphanedData(req) {
 
     // Find candidates: entries on the same page (pageId is required for recovery)
     // If excerptId is provided, also match by excerptId for more precise recovery
-    const now = new Date();
     const candidates = [];
 
     for (const entry of allEntries.results) {
@@ -256,36 +261,17 @@ export async function recoverOrphanedData(req) {
         continue; // Skip if excerptId doesn't match (when excerptId is provided)
       }
 
-      // Check if recently synced or updated (within last 30 minutes - more generous window)
-      // Use updatedAt as fallback if lastSynced is missing
+      // No time window restriction - if it's on the same page, it's a valid candidate
+      // We filter by pageId above, so there's no risk of cross-page contamination
+      // If there are multiple candidates, we'll pick the most recent one by updatedAt
+      // This ensures we can recover data even if the Embed was configured months ago
       const timestamp = data.lastSynced || data.updatedAt;
-      if (timestamp) {
-        const timestampTime = new Date(timestamp);
-        const ageInSeconds = (now - timestampTime) / 1000;
-
-        // Extended window to 30 minutes to catch cases where auto-save hasn't completed yet
-        // or where user drags macro shortly after making changes
-        if (ageInSeconds < 1800) { // 30 minutes
-          candidates.push({
-            localId: entryLocalId,
-            data: data,
-            ageInSeconds: ageInSeconds,
-            updatedAt: data.updatedAt || data.lastSynced // Use updatedAt for tiebreaker
-          });
-        }
-      } else if (data.updatedAt) {
-        // Fallback: if no lastSynced, use updatedAt (for older entries)
-        const updatedTime = new Date(data.updatedAt);
-        const ageInSeconds = (now - updatedTime) / 1000;
-        
-        if (ageInSeconds < 1800) { // 30 minutes
-          candidates.push({
-            localId: entryLocalId,
-            data: data,
-            ageInSeconds: ageInSeconds,
-            updatedAt: data.updatedAt
-          });
-        }
+      if (timestamp || data.updatedAt) {
+        candidates.push({
+          localId: entryLocalId,
+          data: data,
+          updatedAt: data.updatedAt || data.lastSynced || new Date(0).toISOString() // Use updatedAt for tiebreaker, fallback to epoch if missing
+        });
       }
     }
 
@@ -327,10 +313,11 @@ export async function recoverOrphanedData(req) {
         }
       }
 
-      console.log('[recoverOrphanedData] Recovery successful', {
+      logSuccess('recoverOrphanedData', 'Recovery successful', {
         migratedFrom: orphanedEntry.localId,
         excerptId: orphanedEntry.data.excerptId,
-        candidateCount: candidates.length
+        candidateCount: candidates.length,
+        currentLocalId
       });
       
       return {
@@ -341,10 +328,11 @@ export async function recoverOrphanedData(req) {
         candidateCount: candidates.length
       };
     } else {
-      console.log('[recoverOrphanedData] No candidates found', {
+      logPhase('recoverOrphanedData', 'No candidates found', {
         pageId,
         excerptId,
-        reason: 'no_candidates'
+        reason: 'no_candidates',
+        currentLocalId
       });
       return {
         success: true,
@@ -353,7 +341,284 @@ export async function recoverOrphanedData(req) {
       };
     }
   } catch (error) {
-    console.error('Error recovering orphaned data:', error);
+    logFailure('recoverOrphanedData', 'Error recovering orphaned data', error, {
+      pageId: req.payload?.pageId,
+      excerptId: req.payload?.excerptId,
+      currentLocalId: req.payload?.currentLocalId
+    });
+    return {
+      success: false,
+      error: error.message
+    };
+  }
+}
+
+/**
+ * Extract all active localIds from ADF content
+ * Recursively walks the ADF tree to find all extension nodes with localIds
+ * @param {Object} node - ADF node to search
+ * @param {Set<string>} activeLocalIds - Set to collect active localIds
+ */
+function extractActiveLocalIdsFromADF(node, activeLocalIds = new Set()) {
+  if (!node || typeof node !== 'object') {
+    return activeLocalIds;
+  }
+
+  // Check if this node is an extension (macro) with a localId
+  if (node.type === 'extension' || node.type === 'bodiedExtension') {
+    const extensionKey = node.attrs?.extensionKey || '';
+    const isOurMacro = extensionKey.includes('blueprint-standard-embed') ||
+                       extensionKey.includes('smart-excerpt-include') ||
+                       extensionKey.includes('blueprint-standard-embed-poc');
+
+    // Check for localId in various possible locations
+    const localId = node.attrs?.localId ||
+                    node.attrs?.parameters?.localId ||
+                    node.attrs?.parameters?.macroParams?.localId?.value;
+
+    if (localId && (isOurMacro || node.attrs?.extensionType === 'com.atlassian.ecosystem')) {
+      activeLocalIds.add(localId);
+    }
+  }
+
+  // Recursively check content array
+  if (Array.isArray(node.content)) {
+    for (const child of node.content) {
+      extractActiveLocalIdsFromADF(child, activeLocalIds);
+    }
+  }
+
+  // Also check marks array (some content nests in marks)
+  if (Array.isArray(node.marks)) {
+    for (const mark of node.marks) {
+      extractActiveLocalIdsFromADF(mark, activeLocalIds);
+    }
+  }
+
+  return activeLocalIds;
+}
+
+/**
+ * Detect deactivated Embeds on a page
+ * Deactivated Embeds are those that exist in storage but not in the page's ADF
+ */
+export async function detectDeactivatedEmbeds(req) {
+  try {
+    const { pageId, currentLocalId } = req.payload;
+
+    if (!pageId) {
+      return {
+        success: false,
+        error: 'pageId is required'
+      };
+    }
+
+    logFunction('detectDeactivatedEmbeds', 'Starting detection', { pageId, currentLocalId });
+
+    // Step 1: Query all macro-vars entries for this pageId
+    const allEntries = await storage.query()
+      .where('key', startsWith('macro-vars:'))
+      .getMany();
+
+    const pageEmbeds = [];
+    for (const entry of allEntries.results) {
+      const data = entry.value;
+      const entryLocalId = entry.key.replace('macro-vars:', '');
+
+      // Skip the current localId (the new Embed we're checking for)
+      if (entryLocalId === currentLocalId) {
+        continue;
+      }
+
+      // Filter by pageId
+      if (data.pageId && String(data.pageId) === String(pageId)) {
+        pageEmbeds.push({
+          localId: entryLocalId,
+          data: data
+        });
+      }
+    }
+
+    logPhase('detectDeactivatedEmbeds', `Found ${pageEmbeds.length} Embed(s) in storage for page ${pageId}`);
+
+    if (pageEmbeds.length === 0) {
+      return {
+        success: true,
+        deactivatedEmbeds: []
+      };
+    }
+
+    // Step 2: Fetch page's ADF to get active localIds
+    let activeLocalIds = new Set();
+    try {
+      const response = await api.asApp().requestConfluence(
+        route`/wiki/api/v2/pages/${pageId}?body-format=atlas_doc_format`,
+        {
+          headers: {
+            'Accept': 'application/json'
+          }
+        }
+      );
+
+      if (response.ok) {
+        const pageData = await response.json();
+        const adfBody = pageData?.body?.atlas_doc_format?.value;
+
+        if (adfBody) {
+          const adfDoc = typeof adfBody === 'string' ? JSON.parse(adfBody) : adfBody;
+          activeLocalIds = extractActiveLocalIdsFromADF(adfDoc);
+          logPhase('detectDeactivatedEmbeds', `Found ${activeLocalIds.size} active Embed(s) in page ADF`);
+        }
+      } else {
+        logPhase('detectDeactivatedEmbeds', `Failed to fetch page ADF (HTTP ${response.status}), assuming all are deactivated`);
+      }
+    } catch (adfError) {
+      logFailure('detectDeactivatedEmbeds', 'Error fetching page ADF', adfError, { pageId });
+      // Continue with detection - assume all are deactivated if ADF fetch fails
+    }
+
+    // Step 3: Compare storage entries with active localIds
+    const deactivatedEmbeds = [];
+    const now = new Date().toISOString();
+
+    for (const embed of pageEmbeds) {
+      const { localId, data } = embed;
+
+      // If localId is not in active set, it's deactivated
+      if (!activeLocalIds.has(localId)) {
+        // Set deactivatedAt timestamp if not already set
+        if (!data.deactivatedAt) {
+          data.deactivatedAt = now;
+          await storage.set(`macro-vars:${localId}`, data);
+          logPhase('detectDeactivatedEmbeds', `Marked Embed ${localId} as deactivated`);
+        }
+
+        // Fetch excerpt name for display
+        let excerptName = 'Unknown Source';
+        if (data.excerptId) {
+          try {
+            const excerpt = await storage.get(`excerpt:${data.excerptId}`);
+            if (excerpt && excerpt.name) {
+              excerptName = excerpt.name;
+            }
+          } catch (excerptError) {
+            logPhase('detectDeactivatedEmbeds', `Could not fetch excerpt name for ${data.excerptId}`, { error: excerptError.message });
+          }
+        }
+
+        deactivatedEmbeds.push({
+          localId: localId,
+          excerptId: data.excerptId || null,
+          excerptName: excerptName,
+          deactivatedAt: data.deactivatedAt || now,
+          lastUpdatedAt: data.updatedAt || data.lastSynced || now,
+          variableValues: data.variableValues || {},
+          toggleStates: data.toggleStates || {},
+          customInsertions: data.customInsertions || [],
+          internalNotes: data.internalNotes || []
+        });
+      }
+    }
+
+    // Sort by deactivatedAt (most recent first)
+    deactivatedEmbeds.sort((a, b) => {
+      const dateA = new Date(a.deactivatedAt);
+      const dateB = new Date(b.deactivatedAt);
+      return dateB - dateA; // Most recent first
+    });
+
+    logSuccess('detectDeactivatedEmbeds', `Found ${deactivatedEmbeds.length} deactivated Embed(s)`, {
+      pageId,
+      deactivatedCount: deactivatedEmbeds.length
+    });
+
+    return {
+      success: true,
+      deactivatedEmbeds: deactivatedEmbeds
+    };
+  } catch (error) {
+    logFailure('detectDeactivatedEmbeds', 'Error detecting deactivated Embeds', error, {
+      pageId: req.payload?.pageId,
+      currentLocalId: req.payload?.currentLocalId
+    });
+    return {
+      success: false,
+      error: error.message
+    };
+  }
+}
+
+/**
+ * Copy data from a deactivated Embed to a new Embed
+ */
+export async function copyDeactivatedEmbedData(req) {
+  try {
+    const { sourceLocalId, targetLocalId } = req.payload;
+
+    if (!sourceLocalId || !targetLocalId) {
+      return {
+        success: false,
+        error: 'sourceLocalId and targetLocalId are required'
+      };
+    }
+
+    logFunction('copyDeactivatedEmbedData', 'Copying Embed data', { sourceLocalId, targetLocalId });
+
+    // Step 1: Load source Embed data
+    const sourceKey = `macro-vars:${sourceLocalId}`;
+    const sourceData = await storage.get(sourceKey);
+
+    if (!sourceData) {
+      return {
+        success: false,
+        error: `Source Embed ${sourceLocalId} not found`
+      };
+    }
+
+    // Step 2: Copy metadata to target
+    const now = new Date().toISOString();
+    const targetData = {
+      excerptId: sourceData.excerptId,
+      variableValues: sourceData.variableValues || {},
+      toggleStates: sourceData.toggleStates || {},
+      customInsertions: sourceData.customInsertions || [],
+      internalNotes: sourceData.internalNotes || [],
+      updatedAt: now,
+      lastSynced: sourceData.lastSynced || null,
+      syncedContentHash: sourceData.syncedContentHash || null,
+      syncedContent: sourceData.syncedContent || null,
+      pageId: sourceData.pageId || null,
+      // Preserve redline fields if they exist
+      redlineStatus: sourceData.redlineStatus || 'reviewable',
+      approvedContentHash: sourceData.approvedContentHash || null,
+      approvedBy: sourceData.approvedBy || null,
+      approvedAt: sourceData.approvedAt || null,
+      statusHistory: sourceData.statusHistory || []
+    };
+
+    await storage.set(`macro-vars:${targetLocalId}`, targetData);
+
+    // Step 3: Copy cache if it exists
+    const sourceCacheKey = `macro-cache:${sourceLocalId}`;
+    const sourceCache = await storage.get(sourceCacheKey);
+    if (sourceCache) {
+      await storage.set(`macro-cache:${targetLocalId}`, sourceCache);
+      logPhase('copyDeactivatedEmbedData', 'Copied cached content', { targetLocalId });
+    }
+
+    logSuccess('copyDeactivatedEmbedData', 'Successfully copied Embed data', {
+      sourceLocalId,
+      targetLocalId
+    });
+
+    return {
+      success: true
+    };
+  } catch (error) {
+    logFailure('copyDeactivatedEmbedData', 'Error copying Embed data', error, {
+      sourceLocalId: req.payload?.sourceLocalId,
+      targetLocalId: req.payload?.targetLocalId
+    });
     return {
       success: false,
       error: error.message

@@ -21,6 +21,8 @@ import {
   getVariableValues as getVariableValuesResolver,
   getCanonicalLocalId as getCanonicalLocalIdResolver,
   recoverOrphanedData as recoverOrphanedDataResolver,
+  detectDeactivatedEmbeds as detectDeactivatedEmbedsResolver,
+  copyDeactivatedEmbedData as copyDeactivatedEmbedDataResolver,
   getCachedContent as getCachedContentResolver,
   saveCachedContent as saveCachedContentResolver,
   getCategories as getCategoriesResolver,
@@ -212,6 +214,12 @@ resolver.define('getCanonicalLocalId', getCanonicalLocalIdResolver);
 
 // Recover orphaned data after macro has been moved (localId changed) - DEPRECATED
 resolver.define('recoverOrphanedData', recoverOrphanedDataResolver);
+
+// Detect deactivated Embeds on a page (for user-controlled recovery)
+resolver.define('detectDeactivatedEmbeds', detectDeactivatedEmbedsResolver);
+
+// Copy data from a deactivated Embed to a new Embed
+resolver.define('copyDeactivatedEmbedData', copyDeactivatedEmbedDataResolver);
 
 // Get all excerpts with full details (for admin page)
 resolver.define('getAllExcerpts', getAllExcerptsResolver);

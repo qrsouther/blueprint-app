@@ -111,6 +111,7 @@ import { EnhancedDiffView } from './components/EnhancedDiffView';
 import { UpdateAvailableBanner } from './components/embed/UpdateAvailableBanner';
 import { EmbedViewMode } from './components/embed/EmbedViewMode';
 import { EmbedEditMode } from './components/embed/EmbedEditMode';
+import { DeactivatedEmbedsSelector } from './components/embed/DeactivatedEmbedsSelector';
 
 // Import embed styles
 import {
@@ -207,6 +208,11 @@ const App = () => {
   const [saveStatus, setSaveStatus] = useState('saved'); // 'saved', 'saving', or 'error'
   const [isRecovering, setIsRecovering] = useState(false); // Tracks when recovery from drag-and-drop is in progress
   const [selectedTabIndex, setSelectedTabIndex] = useState(0); // Track active tab (0=Write, 1=Toggles, 2=Free Write)
+  // Deactivated Embeds state (for user-controlled recovery)
+  const [deactivatedEmbeds, setDeactivatedEmbeds] = useState([]);
+  const [showDeactivatedSelector, setShowDeactivatedSelector] = useState(false);
+  const [isLoadingDeactivated, setIsLoadingDeactivated] = useState(false);
+  const [isRestoringEmbed, setIsRestoringEmbed] = useState(false); // Loading state during restore operation
   // View mode staleness detection state
   const [isStale, setIsStale] = useState(false);
   const [isCheckingStaleness, setIsCheckingStaleness] = useState(false); // Tracks when staleness check is running
@@ -443,61 +449,85 @@ const App = () => {
   // We do NOT invalidate on every mode switch - that would defeat caching!
   // The auto-save invalidation is sufficient to keep view mode fresh after edits.
 
-  // CRITICAL: Early recovery check - runs BEFORE excerptId is required
-  // This handles the drag-and-drop scenario where excerptId is nullified
-  // Must run early so recovery can restore excerptId before other effects need it
+  // Detect deactivated Embeds when Embed has no data (user-controlled recovery)
+  // This replaces the automatic recovery mechanism with a user-controlled approach
   useEffect(() => {
-    if (!effectiveLocalId || !isEditing) {
+    // Only check for deactivated Embeds if:
+    // - In edit mode
+    // - Embed has no data (no excerptId, no variableValues, etc.)
+    // - Not already loading
+    if (!effectiveLocalId || !isEditing || isLoadingDeactivated) {
       return;
     }
 
-    const attemptEarlyRecovery = async () => {
-      // Check if we have no data (orphaned state)
-      let varsResult = await invoke('getVariableValues', { localId: effectiveLocalId });
-      
-      const hasNoData = !varsResult.lastSynced &&
-                        !varsResult.excerptId &&
-                        Object.keys(varsResult.variableValues || {}).length === 0 &&
-                        Object.keys(varsResult.toggleStates || {}).length === 0 &&
-                        (varsResult.customInsertions || []).length === 0 &&
-                        (varsResult.internalNotes || []).length === 0;
+    // Wait for React Query to finish loading
+    if (isLoadingVariableValues) {
+      return;
+    }
 
-      // If we have no data AND no excerptId, attempt recovery by pageId alone
-      if (varsResult.success && hasNoData) {
-        const pageId = context?.contentId || context?.extension?.content?.id;
+    // Check if Embed has data - if it does, don't show deactivated selector
+    const hasData = variableValuesData && (
+      variableValuesData.excerptId ||
+      (variableValuesData.variableValues && Object.keys(variableValuesData.variableValues).length > 0) ||
+      (variableValuesData.toggleStates && Object.keys(variableValuesData.toggleStates).length > 0) ||
+      (variableValuesData.customInsertions && variableValuesData.customInsertions.length > 0) ||
+      (variableValuesData.internalNotes && variableValuesData.internalNotes.length > 0)
+    );
+
+    if (hasData) {
+      // Embed already has data - don't show deactivated selector
+      setShowDeactivatedSelector(false);
+      return;
+    }
+
+    // Check storage directly to confirm no data
+    const checkForDeactivatedEmbeds = async () => {
+      setIsLoadingDeactivated(true);
+      try {
+        const varsResult = await invoke('getVariableValues', { localId: effectiveLocalId });
         
-        if (pageId) {
-          setIsRecovering(true); // Show loading state
+        const hasNoData = !varsResult.lastSynced &&
+                          !varsResult.excerptId &&
+                          Object.keys(varsResult.variableValues || {}).length === 0 &&
+                          Object.keys(varsResult.toggleStates || {}).length === 0 &&
+                          (varsResult.customInsertions || []).length === 0 &&
+                          (varsResult.internalNotes || []).length === 0;
+
+        if (varsResult.success && hasNoData) {
+          const pageId = context?.contentId || context?.extension?.content?.id;
           
-          try {
-            const recoveryResult = await invoke('recoverOrphanedData', {
+          if (pageId) {
+            // Detect deactivated Embeds
+            const detectionResult = await invoke('detectDeactivatedEmbeds', {
               pageId: pageId,
-              excerptId: null, // Explicitly null - search by pageId alone
               currentLocalId: context.localId
             });
 
-            if (recoveryResult.success && recoveryResult.recovered) {
-              // Reload to get the recovered data
-              varsResult = await invoke('getVariableValues', { localId: effectiveLocalId });
-              
-              // CRITICAL: Set excerptId from recovered data
-              if (recoveryResult.data?.excerptId) {
-                setSelectedExcerptId(recoveryResult.data.excerptId);
-              }
-              
-              // Invalidate React Query cache to force refresh
-              await queryClient.invalidateQueries({ queryKey: ['variableValues', effectiveLocalId] });
+            if (detectionResult.success && detectionResult.deactivatedEmbeds && detectionResult.deactivatedEmbeds.length > 0) {
+              setDeactivatedEmbeds(detectionResult.deactivatedEmbeds);
+              setShowDeactivatedSelector(true);
+            } else {
+              setDeactivatedEmbeds([]);
+              setShowDeactivatedSelector(false);
             }
-          } finally {
-            setIsRecovering(false); // Hide loading state
           }
+        } else {
+          // Embed has data - don't show selector
+          setDeactivatedEmbeds([]);
+          setShowDeactivatedSelector(false);
         }
+      } catch (error) {
+        logger.errors('[EmbedContainer] Error detecting deactivated Embeds:', error);
+        setDeactivatedEmbeds([]);
+        setShowDeactivatedSelector(false);
+      } finally {
+        setIsLoadingDeactivated(false);
       }
     };
 
-    attemptEarlyRecovery();
+    checkForDeactivatedEmbeds();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [effectiveLocalId, isEditing]); // Run when localId changes (new Embed instance)
+  }, [effectiveLocalId, isEditing, isLoadingVariableValues, variableValuesData]);
 
   // Process excerpt data from React Query (runs in both Edit and View modes)
   // View Mode needs this to set excerptForViewMode with documentationLinks
@@ -956,19 +986,8 @@ const App = () => {
     );
   }
 
-  // Show recovery loading state when recovering from drag-and-drop
-  if (isRecovering) {
-    return (
-      <Box xcss={xcss({ padding: 'space.400', textAlign: 'center' })}>
-        <Stack space="space.200" alignInline="center">
-          <Spinner size="medium" label="Recovering Embed data..." />
-          <Text>
-            <Em>Restoring configuration after move...</Em>
-          </Text>
-        </Stack>
-      </Box>
-    );
-  }
+  // NOTE: Automatic recovery UI removed - replaced with user-controlled DeactivatedEmbedsSelector
+  // The isRecovering state is kept for backwards compatibility but is no longer used
 
   // Show spinner while loading in view mode
   if (!content && !isEditing) {
@@ -1084,6 +1103,78 @@ const App = () => {
     }
   };
 
+  // Handler for selecting a deactivated Embed to copy data from
+  const handleDeactivatedEmbedSelect = async (sourceLocalId) => {
+    if (!sourceLocalId || !effectiveLocalId || isRestoringEmbed) {
+      return;
+    }
+
+    setIsRestoringEmbed(true);
+
+    try {
+      // Copy data from deactivated Embed
+      const copyResult = await invoke('copyDeactivatedEmbedData', {
+        sourceLocalId: sourceLocalId,
+        targetLocalId: effectiveLocalId
+      });
+
+      if (copyResult.success) {
+        // Get the copied data directly to update component state immediately
+        const varsResult = await invoke('getVariableValues', { localId: effectiveLocalId });
+        
+        if (varsResult.success) {
+          // Update component state directly with copied data
+          // This ensures UI updates immediately without waiting for React Query
+          if (varsResult.excerptId) {
+            setSelectedExcerptId(varsResult.excerptId);
+          }
+          if (varsResult.variableValues && Object.keys(varsResult.variableValues).length > 0) {
+            setVariableValues(varsResult.variableValues);
+          }
+          if (varsResult.toggleStates && Object.keys(varsResult.toggleStates).length > 0) {
+            setToggleStates(varsResult.toggleStates);
+          }
+          if (varsResult.customInsertions && Array.isArray(varsResult.customInsertions) && varsResult.customInsertions.length > 0) {
+            setCustomInsertions(varsResult.customInsertions);
+          }
+          if (varsResult.internalNotes && Array.isArray(varsResult.internalNotes) && varsResult.internalNotes.length > 0) {
+            setInternalNotes(varsResult.internalNotes);
+          }
+
+          // Reset the sync guard to allow future syncs if needed
+          hasLoadedInitialDataRef.current = false;
+        }
+
+        // Invalidate React Query to keep cache in sync
+        await queryClient.invalidateQueries({ queryKey: ['variableValues', effectiveLocalId] });
+        await queryClient.invalidateQueries({ queryKey: ['cachedContent', effectiveLocalId] });
+
+        // Hide selector only after successful restore
+        setShowDeactivatedSelector(false);
+        setDeactivatedEmbeds([]);
+
+        logger.saves('[EmbedContainer] Successfully copied data from deactivated Embed', {
+          sourceLocalId,
+          targetLocalId: effectiveLocalId
+        });
+      } else {
+        logger.errors('[EmbedContainer] Failed to copy deactivated Embed data:', copyResult.error);
+        alert('Failed to restore data from deactivated Embed. Please try again.');
+      }
+    } catch (error) {
+      logger.errors('[EmbedContainer] Error copying deactivated Embed data:', error);
+      alert('Error restoring data from deactivated Embed. Please try again.');
+    } finally {
+      setIsRestoringEmbed(false);
+    }
+  };
+
+  // Handler for dismissing the deactivated Embeds selector
+  const handleDeactivatedEmbedDismiss = () => {
+    setShowDeactivatedSelector(false);
+    // Keep deactivatedEmbeds in state in case user wants to open it again
+  };
+
   // Handler for updating to latest version (defined before edit mode rendering)
   const handleUpdateToLatest = async () => {
     if (!selectedExcerptId || !effectiveLocalId) {
@@ -1167,8 +1258,36 @@ const App = () => {
 
   // EDIT MODE: Show variable inputs and preview
   if (isEditing) {
+    const pageId = context?.contentId || context?.extension?.content?.id;
+    
     return (
-      <EmbedEditMode
+      <Fragment>
+        {/* Loading indicator while checking for deactivated Embeds */}
+        {isLoadingDeactivated && (
+          <Box xcss={xcss({ padding: 'space.200', marginBottom: 'space.200' })}>
+            <Stack space="space.100" alignInline="center">
+              <Inline space="space.100" alignBlock="center">
+                <Spinner size="small" />
+                <Text size="xsmall" color="color.text.subtle">
+                  Checking for deactivated Embed data...
+                </Text>
+              </Inline>
+            </Stack>
+          </Box>
+        )}
+
+        {/* Deactivated Embeds Selector - shown when Embed has no data */}
+        {showDeactivatedSelector && deactivatedEmbeds.length > 0 && (
+          <DeactivatedEmbedsSelector
+            localId={effectiveLocalId}
+            pageId={pageId}
+            deactivatedEmbeds={deactivatedEmbeds}
+            onSelect={handleDeactivatedEmbedSelect}
+            onDismiss={handleDeactivatedEmbedDismiss}
+            isRestoring={isRestoringEmbed}
+          />
+        )}
+        <EmbedEditMode
         excerpt={excerpt}
         availableExcerpts={availableExcerpts}
         isLoadingExcerpts={isLoadingExcerpts}
@@ -1195,6 +1314,7 @@ const App = () => {
         getPreviewContent={getPreviewContent}
         getRawPreviewContent={getRawPreviewContent}
       />
+      </Fragment>
     );
   }
 
