@@ -12,6 +12,7 @@
 import { storage, startsWith } from '@forge/api';
 import { Queue } from '@forge/events';
 import { generateUUID } from '../utils.js';
+import { logFunction, logPhase, logSuccess, logFailure, logWarning } from '../utils/forge-logger.js';
 
 /**
  * Helper: Fetch all pages from a storage query cursor
@@ -66,9 +67,8 @@ async function getAllStorageKeys() {
     try {
       const keys = await getAllKeysWithPrefix(prefix);
       allKeys.push(...keys);
-      console.log(`[EXPORT] Found ${keys.length} keys with prefix "${prefix}"`);
     } catch (error) {
-      console.warn(`[EXPORT] Error querying prefix "${prefix}":`, error);
+      logWarning('getAllStorageKeys', 'Error querying prefix', { prefix, error: error.message });
       // Continue with other prefixes
     }
   }
@@ -98,15 +98,14 @@ async function getAllStorageKeys() {
  * @param {Object} req - Request object (no payload needed)
  * @returns {Object} { success: boolean, data: string, summary: Object, error?: string }
  */
-export async function exportAllStorageData(req) {
+export async function exportAllStorageData() {
   const startTime = Date.now();
   
   try {
-    console.log('[EXPORT] Starting full storage export...');
+    logFunction('exportAllStorageData', 'START', {});
 
     // Get all storage keys
     const allKeys = await getAllStorageKeys();
-    console.log(`[EXPORT] Found ${allKeys.length} total storage keys`);
 
     // Organize data by type for easier inspection
     const organizedData = {
@@ -199,7 +198,7 @@ export async function exportAllStorageData(req) {
         chunks.push(jsonString.slice(i, i + CHUNK_SIZE_CHARS));
       }
       
-      console.log(`[EXPORT] Chunking export into ${chunks.length} chunks`);
+      logPhase('exportAllStorageData', 'Chunking export', { chunkCount: chunks.length });
       
       // Store each chunk (wrap in object to ensure proper storage)
       // Validate size after JSON stringification to ensure under 245,760 character limit
@@ -211,14 +210,14 @@ export async function exportAllStorageData(req) {
         
         if (jsonStringified.length > MAX_CHARS) {
           // This shouldn't happen with 120K chunks, but handle it gracefully
-          console.warn(`[EXPORT] Chunk ${i} too large after JSON stringification: ${jsonStringified.length} chars`);
+          logWarning('exportAllStorageData', 'Chunk too large after JSON stringification', { chunkIndex: i, size: jsonStringified.length });
           throw new Error(`Chunk ${i} exceeds storage limit after JSON encoding (${jsonStringified.length} > ${MAX_CHARS} chars). This indicates the chunk size needs to be reduced further.`);
         }
         
         try {
           await storage.set(chunkKey, chunkWrapper);
         } catch (chunkError) {
-          console.error(`[EXPORT] Error storing chunk ${i}:`, chunkError);
+          logFailure('exportAllStorageData', 'Error storing chunk', chunkError, { chunkIndex: i });
           throw new Error(`Failed to store chunk ${i}: ${chunkError.message}`);
         }
       }
@@ -231,22 +230,18 @@ export async function exportAllStorageData(req) {
         chunkSizeChars: CHUNK_SIZE_CHARS
       };
       await storage.set(`${exportKey}-metadata`, metadata);
-      
-      console.log(`[EXPORT] Stored export in ${chunks.length} chunks with metadata`);
     } else {
       // Small enough to store in single key (wrap in object)
       try {
         await storage.set(exportKey, { data: jsonString });
-        console.log(`[EXPORT] Stored export at key: ${exportKey}`);
       } catch (storeError) {
-        console.error('[EXPORT] Error storing export:', storeError);
+        logFailure('exportAllStorageData', 'Error storing export', storeError);
         throw new Error(`Failed to store export: ${storeError.message}`);
       }
     }
     
     const elapsed = Date.now() - startTime;
-    console.log(`[EXPORT] Export complete in ${elapsed}ms`);
-    console.log(`[EXPORT] Total keys: ${allKeys.length}, JSON size: ${(jsonSize / 1024).toFixed(2)} KB`);
+    logSuccess('exportAllStorageData', 'Export complete', { duration: `${elapsed}ms`, totalKeys: allKeys.length, jsonSizeKB: (jsonSize / 1024).toFixed(2) });
 
     return {
       success: true,
@@ -259,7 +254,7 @@ export async function exportAllStorageData(req) {
       elapsed: elapsed
     };
   } catch (error) {
-    console.error('[EXPORT] Error exporting storage:', error);
+    logFailure('exportAllStorageData', 'Error exporting storage', error);
     const elapsed = Date.now() - startTime;
     
     // Provide helpful error messages
@@ -318,7 +313,7 @@ export async function getExportMetadata(req) {
       };
     }
   } catch (error) {
-    console.error('[EXPORT] Error fetching export metadata:', error);
+    logFailure('getExportMetadata', 'Error fetching export metadata', error);
     return {
       success: false,
       error: error.message,
@@ -337,10 +332,8 @@ export async function getExportMetadata(req) {
  * @param {Object} req - Request object (no payload needed)
  * @returns {Object} { success: boolean, jobId: string, progressId: string, error?: string }
  */
-export async function startStorageExport(req) {
+export async function startStorageExport() {
   try {
-    console.log('[EXPORT] Starting storage export async job...');
-
     // Generate IDs for tracking
     const progressId = generateUUID();
     const exportId = Date.now();
@@ -361,7 +354,7 @@ export async function startStorageExport(req) {
       body: { progressId, exportId }
     });
 
-    console.log(`[EXPORT] Job queued: jobId=${jobId}, progressId=${progressId}, exportId=${exportId}`);
+    logSuccess('startStorageExport', 'Job queued', { jobId, progressId, exportId });
 
     // Return immediately - worker will process in background
     return {
@@ -373,7 +366,7 @@ export async function startStorageExport(req) {
     };
 
   } catch (error) {
-    console.error('[EXPORT] Error starting export job:', error);
+    logFailure('startStorageExport', 'Error starting export job', error);
     return {
       success: false,
       error: error.message
@@ -415,7 +408,7 @@ export async function getExportProgress(req) {
       progress
     };
   } catch (error) {
-    console.error('[EXPORT] Error fetching export progress:', error);
+    logFailure('getExportProgress', 'Error fetching export progress', error);
     return {
       success: false,
       error: error.message
@@ -522,7 +515,7 @@ export async function getExportChunk(req) {
       };
     }
   } catch (error) {
-    console.error('[EXPORT] Error fetching export chunk:', error);
+    logFailure('getExportChunk', 'Error fetching export chunk', error);
     return {
       success: false,
       error: error.message,

@@ -1,5 +1,7 @@
 # Bug: Toggle Markers Visible in Include Macro Published View
 
+> **⚠️ ARCHIVED** - This bug has been resolved. Code references in this document may be outdated due to refactoring. This document is kept for historical reference and root cause analysis.
+
 **Status:** ✅ RESOLVED (v6.31)
 **Date Discovered:** 2025-10-30
 **Date Resolved:** 2025-10-30

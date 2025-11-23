@@ -7,9 +7,8 @@
  */
 
 import api, { route } from '@forge/api';
-import { getExcerpt } from './storage.js';
-
-console.log('[PAGE-PUBLISH-MODULE] Module loaded! Handler will be registered for page updates.');
+import { storage } from '@forge/api';
+import { logFunction, logPhase, logSuccess, logFailure } from './utils/forge-logger.js';
 
 // Helper function to escape regex special characters
 function escapeRegex(string) {
@@ -55,19 +54,14 @@ function renderExcerptContent(excerpt, variableValues = {}) {
   return content;
 }
 
-export async function handler(event, context) {
-  console.log('='.repeat(80));
-  console.log('[PAGE-PUBLISH] TRIGGER FIRED! Event received');
-  console.log('[PAGE-PUBLISH] Event type:', event?.eventType);
-  console.log('[PAGE-PUBLISH] Full event:', JSON.stringify(event, null, 2));
-  console.log('='.repeat(80));
-
+export async function handler(event) {
+  const { content, updateTrigger } = event;
+  const pageId = content?.id || null; // Extract for use in catch block
+  const pageTitle = content?.title;
+  
   try {
-    const { content, updateTrigger } = event;
-    const pageId = content?.id;
-    const pageTitle = content?.title;
 
-    console.log(`[PAGE-PUBLISH] Page "${pageTitle}" (${pageId}) was updated. Trigger: ${updateTrigger}`);
+    logFunction('pagePublishedHandler', 'TRIGGER FIRED', { eventType: event?.eventType, pageId, pageTitle, updateTrigger });
 
     // Step 1: Get the current page content
     const pageResponse = await api.asApp().requestConfluence(
@@ -81,15 +75,13 @@ export async function handler(event, context) {
 
     if (!pageResponse.ok) {
       const errorText = await pageResponse.text();
-      console.error(`[PAGE-PUBLISH] Failed to get page: ${pageResponse.status} - ${errorText}`);
+      logFailure('pagePublishedHandler', 'Failed to get page', new Error(errorText), { pageId, status: pageResponse.status });
       return;
     }
 
     const pageData = await pageResponse.json();
     const currentBody = pageData.body.storage.value;
     const currentVersion = pageData.version.number;
-
-    console.log(`[PAGE-PUBLISH] Got page version ${currentVersion}, body length: ${currentBody.length}`);
 
     // Step 2: Find all Blueprint App Include macros in the page
     const includeMacroPattern = /<ac:structured-macro[^>]*ac:name="smart-excerpt-include"[^>]*ac:macro-id="([^"]+)"[^>]*>(.*?)<\/ac:structured-macro>/gs;
@@ -101,8 +93,6 @@ export async function handler(event, context) {
       const macroBody = match[2];
       const params = parseMacroParameters(match[0]);
 
-      console.log(`[PAGE-PUBLISH] Found Include macro ${macroId}`, params);
-
       macros.push({
         fullMatch: match[0],
         macroId,
@@ -112,10 +102,7 @@ export async function handler(event, context) {
       });
     }
 
-    console.log(`[PAGE-PUBLISH] Found ${macros.length} Include macro(s) in page`);
-
     if (macros.length === 0) {
-      console.log(`[PAGE-PUBLISH] No Include macros found, skipping injection`);
       return;
     }
 
@@ -124,22 +111,17 @@ export async function handler(event, context) {
     let injectionCount = 0;
 
     for (const macro of macros.reverse()) { // Reverse to maintain indices
-      console.log(`[PAGE-PUBLISH] Processing Include macro ${macro.macroId}`);
-
       const excerptId = macro.params.excerptId;
       if (!excerptId) {
-        console.log(`[PAGE-PUBLISH] Macro ${macro.macroId} has no excerptId configured, skipping`);
         continue;
       }
 
       // Load the excerpt
-      const excerpt = await getExcerpt(excerptId);
+      const excerpt = await storage.get(`excerpt:${excerptId}`);
       if (!excerpt) {
-        console.error(`[PAGE-PUBLISH] Excerpt ${excerptId} not found for macro ${macro.macroId}`);
+        logFailure('pagePublishedHandler', 'Excerpt not found', new Error('Excerpt not found'), { pageId, macroId: macro.macroId, excerptId });
         continue;
       }
-
-      console.log(`[PAGE-PUBLISH] Loaded excerpt "${excerpt.name}" for macro ${macro.macroId}`);
 
       // Render content with variable substitution
       const variableValues = macro.params.variableValues || {};
@@ -164,14 +146,12 @@ ${renderedContent}
       const afterMacroSection = modifiedBody.substring(afterMacroPos, nextMacroPos);
 
       if (injectedPattern.test(afterMacroSection)) {
-        console.log(`[PAGE-PUBLISH] Updating existing injected content for macro ${macro.macroId}`);
         // Replace the first occurrence after this macro
         const beforeMacro = modifiedBody.substring(0, afterMacroPos);
         const afterSection = modifiedBody.substring(afterMacroPos);
         const updatedAfterSection = afterSection.replace(injectedPattern, injectedContent);
         modifiedBody = beforeMacro + updatedAfterSection;
       } else {
-        console.log(`[PAGE-PUBLISH] Inserting new injected content for macro ${macro.macroId}`);
         // Insert after the macro
         modifiedBody =
           modifiedBody.substring(0, afterMacroPos) +
@@ -183,12 +163,11 @@ ${renderedContent}
     }
 
     if (injectionCount === 0) {
-      console.log(`[PAGE-PUBLISH] No injections performed`);
       return;
     }
 
     // Step 4: Update the page with injected content
-    console.log(`[PAGE-PUBLISH] Updating page with ${injectionCount} injection(s)`);
+    logPhase('pagePublishedHandler', 'Updating page with injected content', { pageId, injectionCount });
 
     const updateResponse = await api.asApp().requestConfluence(
       route`/wiki/api/v2/pages/${pageId}`,
@@ -216,15 +195,14 @@ ${renderedContent}
 
     if (!updateResponse.ok) {
       const errorText = await updateResponse.text();
-      console.error(`[PAGE-PUBLISH] Failed to update page: ${updateResponse.status} - ${errorText}`);
+      logFailure('pagePublishedHandler', 'Failed to update page', new Error(errorText), { pageId, status: updateResponse.status });
       return;
     }
 
     const updatedPage = await updateResponse.json();
-    console.log(`[PAGE-PUBLISH] Successfully injected ${injectionCount} excerpt(s)! New version: ${updatedPage.version.number}`);
+    logSuccess('pagePublishedHandler', 'Successfully injected excerpts', { pageId, injectionCount, newVersion: updatedPage.version.number });
 
   } catch (error) {
-    console.error('[PAGE-PUBLISH] Error:', error);
-    console.error('[PAGE-PUBLISH] Stack trace:', error.stack);
+    logFailure('pagePublishedHandler', 'Error', error, { pageId });
   }
 }

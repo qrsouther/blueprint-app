@@ -19,6 +19,7 @@
 
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { invoke } from '@forge/bridge';
+import { logger } from '../utils/logger.js';
 
 /**
  * Hook for fetching current user context
@@ -87,7 +88,7 @@ export const useExcerptsQuery = () => {
           orphanedUsage = orphanedResult.orphanedUsage;
         }
       } catch (err) {
-        console.error('[REACT-QUERY-ADMIN] Failed to load orphaned usage:', err);
+        logger.errors('Failed to load orphaned usage:', err);
       }
 
       return { excerpts: sanitized, orphanedUsage };
@@ -140,40 +141,32 @@ export const useSaveCategoriesMutation = () => {
 
   return useMutation({
     mutationFn: async (categories) => {
-      console.log('[REACT-QUERY-ADMIN] 💾 Saving categories:', categories);
       await invoke('saveCategories', { categories });
       return categories;
     },
     // STEP 1-4: onMutate runs before mutation, sets optimistic state
     onMutate: async (newCategories) => {
-      console.log('[REACT-QUERY-ADMIN] 🔄 onMutate: Starting optimistic update');
-
       // STEP 1: Cancel any outgoing refetches (prevents race conditions)
       await queryClient.cancelQueries({ queryKey: ['categories'] });
-      console.log('[REACT-QUERY-ADMIN] ✅ Cancelled outgoing queries');
 
       // STEP 2: Snapshot the previous value
       const previousCategories = queryClient.getQueryData(['categories']);
-      console.log('[REACT-QUERY-ADMIN] 📸 Snapshot previous:', previousCategories);
 
       // STEP 3: Optimistically update to the new value
       queryClient.setQueryData(['categories'], newCategories);
-      console.log('[REACT-QUERY-ADMIN] ⚡ Optimistic update applied:', newCategories);
 
       // STEP 4: Return context with rollback data
       return { previousCategories };
     },
     // STEP 5: Rollback on error
     onError: (error, newCategories, context) => {
-      console.error('[REACT-QUERY-ADMIN] ❌ Mutation failed, rolling back:', error);
+      logger.errors('Mutation failed, rolling back:', error);
       if (context?.previousCategories) {
         queryClient.setQueryData(['categories'], context.previousCategories);
-        console.log('[REACT-QUERY-ADMIN] ↩️ Rolled back to:', context.previousCategories);
       }
     },
     // STEP 6: Always refetch after error or success to ensure sync with server
     onSettled: () => {
-      console.log('[REACT-QUERY-ADMIN] 🔄 Invalidating categories query');
       queryClient.invalidateQueries({ queryKey: ['categories'] });
     }
   });
@@ -249,7 +242,7 @@ export const useDeleteExcerptMutation = () => {
       queryClient.removeQueries({ queryKey: ['excerpt', excerptId, 'usage'] });
     },
     onError: (error, excerptId, context) => {
-      console.error('[REACT-QUERY-ADMIN] Delete failed:', error);
+      logger.errors('Delete failed:', error);
       // Rollback optimistic update on error
       if (context?.previousExcerpts) {
         queryClient.setQueryData(['excerpts', 'list'], context.previousExcerpts);
@@ -280,12 +273,12 @@ export const useCheckAllSourcesMutation = () => {
       }
       return result;
     },
-    onSuccess: (result) => {
+    onSuccess: () => {
       // Invalidate excerpts to show updated orphan status
       queryClient.invalidateQueries({ queryKey: ['excerpts', 'list'] });
     },
     onError: (error) => {
-      console.error('[REACT-QUERY-ADMIN] Check All Sources failed:', error);
+      logger.errors('Check All Sources failed:', error);
     }
   });
 };
@@ -315,7 +308,7 @@ export const useCheckAllIncludesMutation = () => {
       queryClient.invalidateQueries({ queryKey: ['excerpt'] });
     },
     onError: (error) => {
-      console.error('[REACT-QUERY-ADMIN] Check All Includes failed:', error);
+      logger.errors('Check All Includes failed:', error);
     }
   });
 };
@@ -412,7 +405,7 @@ export const useCreateTestPageMutation = () => {
       return result;
     },
     onError: (error) => {
-      console.error('[REACT-QUERY-ADMIN] Create Test Page failed:', error);
+      logger.errors('Create Test Page failed:', error);
     }
   });
 };

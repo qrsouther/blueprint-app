@@ -1,3 +1,4 @@
+/* eslint-disable no-console */
 /**
  * Migration Resolver Functions
  *
@@ -6,6 +7,8 @@
  * This module contains all one-time migration operations for converting from
  * MultiExcerpt to Blueprint App. These functions will be used ONCE during the
  * initial production setup, then can be safely deleted.
+ *
+ * Note: Console statements are intentionally left for migration debugging.
  *
  * DELETION CHECKLIST (after production migration complete):
  * 1. Delete this entire file (migration-resolvers.js)
@@ -32,6 +35,7 @@ import api, { route } from '@forge/api';
 import { generateUUID } from '../utils.js';
 import { updateExcerptIndex } from '../utils/storage-utils.js';
 import { storageToPlainText, cleanMultiExcerptMacros } from '../utils/migration-utils.js';
+import { logFunction, logSuccess, logFailure } from '../utils/forge-logger.js';
 
 /**
  * Import a MultiExcerpt as a Blueprint App
@@ -71,7 +75,7 @@ export async function importFromMultiExcerpt(req) {
     // Update index
     await updateExcerptIndex(excerpt);
 
-    console.log('MultiExcerpt imported successfully:', name);
+    logSuccess('importFromMultiExcerpt', 'MultiExcerpt imported successfully', { name, excerptId });
 
     // Track this migration
     const tracker = await storage.get('migration-tracker') || { multiExcerpts: [] };
@@ -90,7 +94,7 @@ export async function importFromMultiExcerpt(req) {
       name
     };
   } catch (error) {
-    console.error('Error importing MultiExcerpt:', error);
+    logFailure('importFromMultiExcerpt', 'Error importing MultiExcerpt', error, { name });
     return {
       success: false,
       error: error.message
@@ -115,13 +119,13 @@ export async function trackMigration(req) {
     });
     await storage.set('migration-tracker', tracker);
 
-    console.log('Migration tracked:', name);
+    logSuccess('trackMigration', 'Migration tracked', { name });
 
     return {
       success: true
     };
   } catch (error) {
-    console.error('Error tracking migration:', error);
+    logFailure('trackMigration', 'Error tracking migration', error);
     return {
       success: false,
       error: error.message
@@ -132,7 +136,7 @@ export async function trackMigration(req) {
 /**
  * Scan for MultiExcerpt Include macros across Confluence
  */
-export async function scanMultiExcerptIncludes(req) {
+export async function scanMultiExcerptIncludes() {
   try {
     const progressId = generateUUID();
 
@@ -268,7 +272,7 @@ export async function bulkImportSources(req) {
       };
     }
 
-    console.log(`Starting bulk import of ${sources.length} sources...`);
+    logFunction('bulkImportSources', 'START', { sourceCount: sources.length });
 
     const imported = [];
     const errors = [];
@@ -1889,7 +1893,7 @@ export async function testMultiExcerptPageFetch(req) {
  */
 export async function importFromParsedJson(req) {
   try {
-    const { sources, deleteOldMigrations, spaceKey: providedSpaceKey, createPage = true } = req.payload;
+    const { sources, deleteOldMigrations, spaceKey: providedSpaceKey } = req.payload;
 
     if (!sources || !Array.isArray(sources)) {
       return {
@@ -2436,7 +2440,7 @@ export async function migrateStep2MigrateContent(req) {
     const blueprintRegex = /<ac:adf-extension><ac:adf-node type="bodied-extension">[\s\S]*?<ac:adf-parameter key="excerpt-name">([^<]+)<\/ac:adf-parameter>[\s\S]*?<ac:adf-content>([\s\S]*?)<\/ac:adf-content>[\s\S]*?<\/ac:adf-node><\/ac:adf-extension>/g;
 
     let updatedCount = 0;
-    const updatedStorage = storageContent.replace(blueprintRegex, (match, excerptName, currentContent) => {
+    const updatedStorage = storageContent.replace(blueprintRegex, (match, excerptName) => {
       const newContent = contentMap.get(excerptName);
 
       if (newContent) {
@@ -2635,24 +2639,24 @@ export async function createTestEmbedsPage(req) {
     const dates = ['2024-01-15', '2024-02-20', '2024-03-10', '2024-04-05', '2024-05-25'];
     const venues = ['Stadium Alpha', 'Arena Beta', 'Center Gamma', 'Park Delta'];
 
-    function randomWord() {
+    const randomWord = () => {
       const words = [...adjectives, ...nouns];
       return words[Math.floor(Math.random() * words.length)];
-    }
+    };
 
-    function randomTwoWords() {
+    const randomTwoWords = () => {
       return `${randomWord()} ${randomWord()}`;
-    }
+    };
 
-    function randomDate() {
+    const randomDate = () => {
       return dates[Math.floor(Math.random() * dates.length)];
-    }
+    };
 
-    function randomVenue() {
+    const randomVenue = () => {
       return venues[Math.floor(Math.random() * venues.length)];
-    }
+    };
 
-    function generateRandomValue(variableName) {
+    const generateRandomValue = (variableName) => {
       // Try to generate contextually appropriate random values
       if (variableName.includes('date')) return randomDate();
       if (variableName.includes('venue')) return randomVenue();
@@ -2837,7 +2841,7 @@ export async function dumpFirstSourceMacro(req) {
  * Populate content for all migrated Sources by fetching ADF from their pages
  * Converts Storage Format XML to ADF JSON format for proper rendering
  */
-export async function populateSourceContent(req) {
+export async function populateSourceContent() {
   try {
     console.log('📥 Starting content population for migrated Sources...');
 

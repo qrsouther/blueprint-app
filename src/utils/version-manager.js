@@ -33,7 +33,7 @@
  * @module version-manager
  */
 
-import { storage, startsWith } from '@forge/api';
+import { startsWith } from '@forge/api';
 import {
   logFunction,
   logSuccess,
@@ -71,7 +71,7 @@ function generateVersionId(excerptId, timestamp) {
  * @param {string} versionId - The version ID
  * @returns {Object} Parsed components: { excerptId, timestamp }
  */
-function parseVersionId(versionId) {
+export function parseVersionId(versionId) {
   const parts = versionId.split(':');
   if (parts.length !== 3 || parts[0] !== 'version') {
     throw new Error(`Invalid version ID format: ${versionId}`);
@@ -464,34 +464,88 @@ export async function restoreVersion(storageInstance, versionId) {
  * @param {number} retentionDays - Number of days to retain versions (default: 14)
  * @returns {Promise<Object>} Result: { success: boolean, prunedCount: number, errors: Array }
  */
-export async function pruneExpiredVersions(storageInstance, retentionDays = DEFAULT_RETENTION_DAYS) {
+export async function pruneExpiredVersions(storageInstance, retentionDays = DEFAULT_RETENTION_DAYS, options = {}) {
   const FUNCTION_NAME = 'pruneExpiredVersions';
-  logFunction(FUNCTION_NAME, 'START', { retentionDays });
+  const { onlySourceVersions = false, sourceRetentionMinutes = null, maxPages = null, maxVersions = null } = options;
+  
+  logFunction(FUNCTION_NAME, 'START', { retentionDays, onlySourceVersions, sourceRetentionMinutes, maxPages });
 
   try {
     const now = Date.now();
-    const retentionMs = retentionDays * 24 * 60 * 60 * 1000;
+    
+    // If sourceRetentionMinutes is provided, use it for Source versions (one-time cleanup)
+    // Otherwise use retentionDays for all versions
+    const retentionMs = sourceRetentionMinutes 
+      ? sourceRetentionMinutes * 60 * 1000  // Convert minutes to milliseconds
+      : retentionDays * 24 * 60 * 60 * 1000; // Convert days to milliseconds
     const cutoffTime = now - retentionMs;
 
-    logPhase(FUNCTION_NAME, `Pruning versions older than ${retentionDays} days`, {
-      cutoffDate: new Date(cutoffTime).toISOString()
+    const retentionDescription = sourceRetentionMinutes 
+      ? `${sourceRetentionMinutes} minutes`
+      : `${retentionDays} days`;
+    
+    logPhase(FUNCTION_NAME, `Pruning versions older than ${retentionDescription}`, {
+      cutoffDate: new Date(cutoffTime).toISOString(),
+      onlySourceVersions,
+      maxPages: maxPages || 'all',
+      maxVersions: maxVersions || 'all'
     });
 
-    // Query all version snapshots
-    const versionsQuery = await storageInstance.query()
+    // Query version snapshots with pagination
+    // If maxVersions is set, only process that many versions (for piecemeal processing)
+    // This ensures we make progress through the entire dataset, not just the first pages
+    const allVersions = [];
+    let cursor = await storageInstance.query()
       .where('key', startsWith('version:'))
       .getMany();
+    let pageCount = 1;
 
-    logPhase(FUNCTION_NAME, `Found ${versionsQuery.results.length} total version snapshot(s)`);
+    // Add first page
+    allVersions.push(...(cursor.results || []));
+
+    // Paginate through ALL pages, but limit total versions processed if maxVersions is set
+    while (cursor.nextCursor && (maxVersions === null || allVersions.length < maxVersions)) {
+      cursor = await storageInstance.query()
+        .where('key', startsWith('version:'))
+        .cursor(cursor.nextCursor)
+        .getMany();
+      allVersions.push(...(cursor.results || []));
+      pageCount++;
+      
+      // Log progress every 10 pages to avoid flooding logs
+      if (pageCount % 10 === 0) {
+        logPhase(FUNCTION_NAME, `Processed ${pageCount} pages, found ${allVersions.length} version(s) so far`);
+      }
+      
+      // Stop if we've reached the version limit
+      if (maxVersions !== null && allVersions.length >= maxVersions) {
+        break;
+      }
+    }
+
+    // Trim to maxVersions if we exceeded it
+    if (maxVersions !== null && allVersions.length > maxVersions) {
+      allVersions.splice(maxVersions);
+    }
+
+    const hasMorePages = cursor.nextCursor;
+    logPhase(FUNCTION_NAME, `Found ${allVersions.length} total version snapshot(s) across ${pageCount} page(s)${hasMorePages ? ' (more pages available)' : ''}`);
 
     let prunedCount = 0;
     let skippedCount = 0;
     const errors = [];
 
     // Check each version
-    for (const entry of versionsQuery.results) {
+    for (const entry of allVersions) {
       try {
         const versionSnapshot = entry.value;
+        
+        // If onlySourceVersions is true, skip Embed versions (macro-vars)
+        if (onlySourceVersions && versionSnapshot.entityType !== 'excerpt') {
+          skippedCount++;
+          continue;
+        }
+        
         const versionTimestamp = new Date(versionSnapshot.timestamp).getTime();
 
         if (versionTimestamp < cutoffTime) {
@@ -519,13 +573,17 @@ export async function pruneExpiredVersions(storageInstance, retentionDays = DEFA
       }
     }
 
-    // Update last prune time
-    await storageInstance.set('last-prune-time', new Date().toISOString());
+    // Update last prune time (only if processing all versions, not piecemeal)
+    if (maxVersions === null && maxPages === null) {
+      await storageInstance.set('last-prune-time', new Date().toISOString());
+    }
 
     logSuccess(FUNCTION_NAME, `Pruning complete`, {
       pruned: prunedCount,
       kept: skippedCount,
-      errors: errors.length
+      errors: errors.length,
+      pagesProcessed: pageCount,
+      hasMorePages: hasMorePages
     });
 
     logFunction(FUNCTION_NAME, 'END', { success: true, prunedCount });
@@ -534,7 +592,12 @@ export async function pruneExpiredVersions(storageInstance, retentionDays = DEFA
       success: true,
       prunedCount,
       skippedCount,
-      errors
+      errors,
+      pagesProcessed: pageCount,
+      hasMorePages: hasMorePages,
+      message: hasMorePages 
+        ? `Pruned ${prunedCount} version(s) from ${pageCount} page(s). More pages available - run again to continue.`
+        : `Pruned ${prunedCount} version(s) from ${pageCount} page(s).`
     };
 
   } catch (error) {
@@ -560,7 +623,21 @@ async function pruneExpiredVersionsIfNeeded(storageInstance) {
 
   try {
     const lastPruneTime = await storageInstance.get('last-prune-time');
+    const lastSourcePruneTime = await storageInstance.get('last-source-prune-time');
 
+    // One-time cleanup: Prune all old Source versions (2-minute retention)
+    // This will run once after deployment to clean up old Source version data
+    if (!lastSourcePruneTime) {
+      logPhase(FUNCTION_NAME, 'First run: Pruning all old Source versions (2-minute retention)');
+      await pruneExpiredVersions(storageInstance, DEFAULT_RETENTION_DAYS, {
+        onlySourceVersions: true,
+        sourceRetentionMinutes: 2
+      });
+      await storageInstance.set('last-source-prune-time', new Date().toISOString());
+      // Continue with normal pruning for Embed versions
+    }
+
+    // Normal pruning for Embed versions (14-day retention)
     if (!lastPruneTime) {
       // Never pruned, run now
       logPhase(FUNCTION_NAME, 'No prune history found, running pruning now');

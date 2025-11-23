@@ -46,6 +46,7 @@ import {
 import { router } from '@forge/bridge';
 import { useConfluenceUserQuery, useSetRedlineStatusMutation, usePostRedlineCommentMutation } from '../../hooks/redline-hooks';
 import { EmbedViewMode } from '../embed/EmbedViewMode';
+import { logger } from '../../utils/logger.js';
 import {
   cleanAdfForRenderer,
   filterContentByToggles,
@@ -247,7 +248,7 @@ function RedlineQueueCardComponent({ embedData, currentUserId, onStatusChange })
         onStatusChange(embedData.localId, newStatus);
       }
     } catch (error) {
-      console.error('[RedlineQueueCard] Failed to set status:', error);
+      logger.errors('[RedlineQueueCard] Failed to set status:', error);
       // Error handling is done by the mutation hook
     }
   };
@@ -280,7 +281,7 @@ function RedlineQueueCardComponent({ embedData, currentUserId, onStatusChange })
         } catch (commentErr) {
           // Check if error is due to missing text placement
           const errorMessage = commentErr.message || String(commentErr);
-          console.error('[RedlineQueueCard] Comment posting failed:', errorMessage);
+          logger.errors('[RedlineQueueCard] Comment posting failed:', errorMessage);
 
           if (errorMessage.includes('Could not find suitable text near Embed')) {
             // Show specific error for missing text placement
@@ -309,7 +310,7 @@ function RedlineQueueCardComponent({ embedData, currentUserId, onStatusChange })
         setCommentText('');
       }
     } catch (error) {
-      console.error('[RedlineQueueCard] Failed to submit with comment:', error);
+      logger.errors('[RedlineQueueCard] Failed to submit with comment:', error);
       // Still clear form even if status change failed
       setActiveCommentAction(null);
       setCommentText('');
@@ -331,7 +332,7 @@ function RedlineQueueCardComponent({ embedData, currentUserId, onStatusChange })
         setCommentText('');
         setPostedCommentId(null);
       } catch (error) {
-        console.error('[RedlineQueueCard] Failed to navigate to comment:', error);
+        logger.errors('[RedlineQueueCard] Failed to navigate to comment:', error);
       }
     }
   }, [postedCommentId, embedData.pageId]);
@@ -357,24 +358,14 @@ function RedlineQueueCardComponent({ embedData, currentUserId, onStatusChange })
 
     let processedContent = rawContent;
     if (isAdf) {
-      // TODO: Fix for GitHub issue #2 - Free Write paragraph insertion position with enabled toggles
+      // Fix for GitHub issue #2 - Free Write paragraph insertion position with enabled toggles
       // FIX: Insert custom paragraphs BEFORE toggle filtering (same as EmbedContainer.jsx fix above)
       // This is less critical here since it's admin view-only, but should be consistent.
-      //
-      // COMMENTED OUT FIX (to be tested):
-      // // Apply transformations in order: variables → custom insertions → internal notes → toggles → clean
-      // processedContent = substituteVariablesInAdf(processedContent, embedData.variableValues || {});
-      // processedContent = insertCustomParagraphsInAdf(processedContent, embedData.customInsertions || []);
-      // processedContent = insertInternalNotesInAdf(processedContent, embedData.internalNotes || []);
-      // processedContent = filterContentByToggles(processedContent, embedData.toggleStates || {});
-      // processedContent = cleanAdfForRenderer(processedContent);
-      
-      // CURRENT (BUGGY) BEHAVIOR:
-      // Apply transformations in order: toggles → variables → custom insertions → internal notes → clean
-      processedContent = filterContentByToggles(processedContent, embedData.toggleStates || {});
+      // Apply transformations in order: variables → custom insertions → internal notes → toggles → clean
       processedContent = substituteVariablesInAdf(processedContent, embedData.variableValues || {});
       processedContent = insertCustomParagraphsInAdf(processedContent, embedData.customInsertions || []);
       processedContent = insertInternalNotesInAdf(processedContent, embedData.internalNotes || []);
+      processedContent = filterContentByToggles(processedContent, embedData.toggleStates || {});
       processedContent = cleanAdfForRenderer(processedContent);
     }
 

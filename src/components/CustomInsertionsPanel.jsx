@@ -85,19 +85,12 @@ export const CustomInsertionsPanel = ({
   // This ensures users can only position custom content relative to source content
   let originalContent = excerpt?.content;
   if (originalContent && typeof originalContent === 'object' && originalContent.type === 'doc') {
-    // TODO: Fix for GitHub issue #2 - Free Write paragraph insertion position with enabled toggles
+    // Fix for GitHub issue #2 - Free Write paragraph insertion position with enabled toggles
     // FIX: Extract paragraphs from ORIGINAL content (before toggle filtering) so paragraph indices
     // match the original structure. This allows insertions to be placed inside toggle blocks.
     // Only apply variable substitution for display purposes, but don't filter toggles yet.
-    // 
-    // COMMENTED OUT FIX (to be tested):
-    // originalContent = substituteVariablesInAdf(originalContent, variableValues);
-    // // Don't filter toggles here - extract from original structure
-    
-    // CURRENT (BUGGY) BEHAVIOR:
-    // Apply variable substitution and toggle filtering to show accurate text
-    originalContent = filterContentByToggles(originalContent, toggleStates);
     originalContent = substituteVariablesInAdf(originalContent, variableValues);
+    // Don't filter toggles here - extract from original structure
   }
 
   const paragraphs = extractParagraphsFromAdf(originalContent);

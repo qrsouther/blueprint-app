@@ -14,6 +14,7 @@
 
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { invoke } from '@forge/bridge';
+import { logger } from '../utils/logger.js';
 import {
   filterContentByToggles,
   substituteVariablesInAdf,
@@ -91,7 +92,7 @@ export const useSaveVariableValues = () => {
       queryClient.invalidateQueries({ queryKey: ['variableValues', variables.localId] });
     },
     onError: (error) => {
-      console.error('[REACT-QUERY-MUTATION] Save failed:', error);
+      logger.errors('Save failed:', error);
     }
   });
 };
@@ -237,22 +238,14 @@ export const useCachedContent = (
       const isAdf = freshContent && typeof freshContent === 'object' && freshContent.type === 'doc';
 
       if (isAdf) {
-        // TODO: Fix for GitHub issue #2 - Free Write paragraph insertion position with enabled toggles
+        // Fix for GitHub issue #2 - Free Write paragraph insertion position with enabled toggles
         // FIX: Insert custom paragraphs BEFORE toggle filtering (same as EmbedContainer.jsx fix above)
-        //
-        // COMMENTED OUT FIX (to be tested):
-        // // Insert custom paragraphs and internal notes into original content (before toggle filtering)
-        // freshContent = substituteVariablesInAdf(freshContent, loadedVariableValues);
-        // freshContent = insertCustomParagraphsInAdf(freshContent, loadedCustomInsertions);
-        // freshContent = insertInternalNotesInAdf(freshContent, loadedInternalNotes);
-        // // Then filter toggles (this will preserve insertions inside enabled toggles)
-        // freshContent = filterContentByToggles(freshContent, loadedToggleStates);
-        
-        // CURRENT (BUGGY) BEHAVIOR:
-        freshContent = filterContentByToggles(freshContent, loadedToggleStates);
+        // Insert custom paragraphs and internal notes into original content (before toggle filtering)
         freshContent = substituteVariablesInAdf(freshContent, loadedVariableValues);
         freshContent = insertCustomParagraphsInAdf(freshContent, loadedCustomInsertions);
         freshContent = insertInternalNotesInAdf(freshContent, loadedInternalNotes);
+        // Then filter toggles (this will preserve insertions inside enabled toggles)
+        freshContent = filterContentByToggles(freshContent, loadedToggleStates);
       } else {
         // For plain text, filter toggles
         const toggleRegex = /\{\{toggle:([^}]+)\}\}([\s\S]*?)\{\{\/toggle:\1\}\}/g;

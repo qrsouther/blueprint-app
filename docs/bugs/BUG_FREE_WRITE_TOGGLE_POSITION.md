@@ -1,9 +1,13 @@
 # Bug: Free Write Paragraph Insertion Position with Enabled Toggles
 
-**Status:** Documented - To Fix
+> **⚠️ ARCHIVED** - This bug has been resolved. Code references in this document may be outdated due to refactoring. This document is kept for historical reference and root cause analysis.
+
+**Status:** ✅ FIXED
 **Date Discovered:** 2025-10-30
+**Date Fixed:** 2025-11-22
 **Discovered During:** Phase 2 refactoring testing
 **Priority:** Medium
+**GitHub Issue:** #2
 
 ## Problem
 
@@ -28,11 +32,14 @@ Paragraph 1: Hello world
 
 {{toggle:advanced}}
 Paragraph 2: This is advanced content
-My custom insertion
 {{/toggle:advanced}}
+
+My custom insertion
 
 Paragraph 3: Final paragraph
 ```
+
+**Important:** The custom paragraph should appear **after** the toggle block (outside the `{{/toggle:advanced}}` marker), not inside it. This ensures the custom paragraph is always visible regardless of toggle state.
 
 ## Actual Behavior
 
@@ -51,16 +58,24 @@ My custom insertion
 
 ## Root Cause Analysis
 
-**Likely cause:** The paragraph extraction logic in `extractParagraphsFromAdf()` (src/include-display.jsx:483-536) may not be correctly handling paragraphs that are inside toggle blocks when the toggle is enabled.
+**Root cause:** The paragraph extraction and insertion logic was processing content in the wrong order. When toggles were filtered FIRST (before custom paragraph insertion), the paragraph index mapping became misaligned with the original document structure.
 
-When toggles are filtered/processed by `filterContentByToggles()`, the paragraph index mapping used by the Free Write insertion logic may become misaligned with the actual rendered content structure.
+**The Problem:**
+- **Buggy order:** Filter toggles → Substitute variables → Insert custom paragraphs
+- When toggles were filtered first, the document structure changed, causing paragraph indices to be calculated incorrectly
+- Custom paragraphs were then inserted at the wrong position (end of document)
+
+**The Fix:**
+- **Fixed order:** Substitute variables → Insert custom paragraphs → Filter toggles
+- By inserting custom paragraphs BEFORE toggle filtering, the insertion logic works on the original structure (with toggle markers intact)
+- This allows correct paragraph position calculation, and the custom paragraph is inserted at the right location
+- Toggle filtering then preserves the insertion outside the toggle block
 
 **Relevant Code:**
-- `src/include-display.jsx:483-536` - `extractParagraphsFromAdf()` function
-- `src/include-display.jsx:440-479` - `insertCustomParagraphsInAdf()` function
-- `src/include-display.jsx:173-325` - `filterContentByToggles()` function
-
-**Hypothesis:** The Free Write logic extracts paragraph indices AFTER toggle filtering, but toggle filtering changes the document structure, causing paragraph position calculations to be incorrect for content that was inside toggle blocks.
+- `src/components/CustomInsertionsPanel.jsx` - Extract paragraphs from original content before toggle filtering
+- `src/EmbedContainer.jsx` - Insert custom paragraphs before toggle filtering (3 locations)
+- `src/hooks/embed-hooks.js` - Insert custom paragraphs before toggle filtering
+- `src/components/admin/RedlineQueueCard.jsx` - Insert custom paragraphs before toggle filtering
 
 ## Steps to Reproduce
 
@@ -92,12 +107,30 @@ When toggles are filtered/processed by `filterContentByToggles()`, the paragraph
 - **Functionality:** Medium - Feature works but produces unexpected results
 - **Workaround:** Users can manually edit content or insert at different positions
 
-## Next Steps
+## Fix Implementation
 
-1. 🔍 Debug `extractParagraphsFromAdf()` to understand how it counts paragraphs within toggle blocks
-2. 🔧 Fix paragraph index calculation to account for toggle filtering
-3. 🧪 Add test case for Free Write insertion with enabled toggles
-4. 🚀 Deploy fix to dev environment
+**Files Modified:**
+1. `src/components/CustomInsertionsPanel.jsx` - Extract paragraphs from original content (before toggle filtering)
+2. `src/EmbedContainer.jsx` - Changed order of operations in 3 locations:
+   - `getPreviewContent()` - Preview content generation
+   - `getRawPreviewContent()` - Raw preview for diff view
+   - Fresh content generation for view mode
+3. `src/hooks/embed-hooks.js` - Changed order in cached content generation
+4. `src/components/admin/RedlineQueueCard.jsx` - Changed order in admin preview
+
+**Change Summary:**
+Changed the order of ADF processing operations from:
+- ❌ Filter toggles → Substitute variables → Insert custom paragraphs
+- ✅ Substitute variables → Insert custom paragraphs → Filter toggles
+
+**Testing:**
+✅ Tested and verified - Custom paragraphs now appear in the correct position (after toggle blocks, outside toggle markers) and remain visible regardless of toggle state.
+
+## Resolution
+
+**Status:** ✅ FIXED and TESTED
+**Resolution Date:** 2025-11-22
+**Verification:** Custom paragraphs correctly inserted after toggle blocks, outside toggle markers, ensuring they remain visible regardless of toggle state.
 
 ## Related Code
 

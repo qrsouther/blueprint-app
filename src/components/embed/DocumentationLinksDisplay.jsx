@@ -37,6 +37,7 @@ import {
 } from '@forge/react';
 import { router } from '@forge/bridge';
 import { useConfluenceUserQuery } from '../../hooks/redline-hooks';
+import { logger } from '../../utils/logger.js';
 
 const checkingTextStyle = xcss({
   color: 'background.accent.gray.subtler', // Light gray design token
@@ -150,7 +151,7 @@ export function DocumentationLinksDisplay({
                   try {
                     await router.open(link.url);
                   } catch (err) {
-                    console.error('[DOCUMENTATION-LINK] Navigation error:', err);
+                    logger.errors('[DOCUMENTATION-LINK] Navigation error:', err);
                   }
                 }}
                 style={{
@@ -174,7 +175,7 @@ export function DocumentationLinksDisplay({
                   try {
                     await router.open(link.url);
                   } catch (err) {
-                    console.error('[DOCUMENTATION-LINK] Navigation error:', err);
+                    logger.errors('[DOCUMENTATION-LINK] Navigation error:', err);
                   }
                 }}
               >

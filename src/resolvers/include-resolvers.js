@@ -37,7 +37,56 @@ export async function saveVariableValues(req) {
   try {
     const { localId, excerptId, variableValues, toggleStates, customInsertions, internalNotes, pageId: explicitPageId } = req.payload;
     
-    const functionStartTime = Date.now();
+    // Input validation
+    if (!localId || typeof localId !== 'string' || localId.trim() === '') {
+      logFailure('saveVariableValues', 'Validation failed: localId is required and must be a non-empty string', new Error('Invalid localId'));
+      return {
+        success: false,
+        error: 'localId is required and must be a non-empty string'
+      };
+    }
+
+    if (!excerptId || typeof excerptId !== 'string' || excerptId.trim() === '') {
+      logFailure('saveVariableValues', 'Validation failed: excerptId is required and must be a non-empty string', new Error('Invalid excerptId'));
+      return {
+        success: false,
+        error: 'excerptId is required and must be a non-empty string'
+      };
+    }
+
+    // Validate optional fields if provided
+    if (variableValues !== undefined && (typeof variableValues !== 'object' || Array.isArray(variableValues) || variableValues === null)) {
+      logFailure('saveVariableValues', 'Validation failed: variableValues must be an object', new Error('Invalid variableValues type'));
+      return {
+        success: false,
+        error: 'variableValues must be an object'
+      };
+    }
+
+    if (toggleStates !== undefined && (typeof toggleStates !== 'object' || Array.isArray(toggleStates) || toggleStates === null)) {
+      logFailure('saveVariableValues', 'Validation failed: toggleStates must be an object', new Error('Invalid toggleStates type'));
+      return {
+        success: false,
+        error: 'toggleStates must be an object'
+      };
+    }
+
+    if (customInsertions !== undefined && !Array.isArray(customInsertions)) {
+      logFailure('saveVariableValues', 'Validation failed: customInsertions must be an array', new Error('Invalid customInsertions type'));
+      return {
+        success: false,
+        error: 'customInsertions must be an array'
+      };
+    }
+
+    if (internalNotes !== undefined && !Array.isArray(internalNotes)) {
+      logFailure('saveVariableValues', 'Validation failed: internalNotes must be an array', new Error('Invalid internalNotes type'));
+      return {
+        success: false,
+        error: 'internalNotes must be an array'
+      };
+    }
+    
     const key = `macro-vars:${localId}`;
     const now = new Date().toISOString();
 
@@ -139,7 +188,6 @@ export async function saveVariableValues(req) {
     // OPTIMIZATION: Run usage tracking asynchronously in the background to avoid blocking the save
     // This significantly improves auto-save performance (removes ~500-1500ms Confluence API call latency)
     const usageTrackingPromise = (async () => {
-      const usageTrackingStartTime = Date.now();
       try {
         // Get page context - use explicit pageId if provided (from Admin page), otherwise use context
         const pageId = explicitPageId || req.context?.extension?.content?.id;

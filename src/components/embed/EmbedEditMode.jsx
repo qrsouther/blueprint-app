@@ -64,6 +64,7 @@ import { VariableConfigPanel } from '../VariableConfigPanel';
 import { ToggleConfigPanel } from '../ToggleConfigPanel';
 import { CustomInsertionsPanel } from '../CustomInsertionsPanel';
 import { DocumentationLinksDisplay } from './DocumentationLinksDisplay';
+import { logger } from '../../utils/logger.js';
 import {
   excerptSelectorStyle,
   previewBoxStyle,
@@ -207,7 +208,7 @@ export function EmbedEditMode({
                   await router.open(contentLink);
                 }
               } catch (err) {
-                console.error('[VIEW-SOURCE] Navigation error:', err);
+                logger.errors('[VIEW-SOURCE] Navigation error:', err);
               }
             }}
           >

@@ -8,6 +8,7 @@
 
 import { storage, startsWith } from '@forge/api';
 import { updateProgress } from './helpers/progress-tracker.js';
+import { logFunction, logPhase, logSuccess, logFailure, logWarning } from '../utils/forge-logger.js';
 
 /**
  * Helper: Fetch all pages from a storage query cursor
@@ -56,9 +57,8 @@ async function getAllStorageKeys() {
     try {
       const keys = await getAllKeysWithPrefix(prefix);
       allKeys.push(...keys);
-      console.log(`[EXPORT WORKER] Found ${keys.length} keys with prefix "${prefix}"`);
     } catch (error) {
-      console.warn(`[EXPORT WORKER] Error querying prefix "${prefix}":`, error);
+      logWarning('storageExportWorker', 'Error querying prefix', { prefix, error: error.message });
       // Continue with other prefixes
     }
   }
@@ -92,14 +92,14 @@ export async function handler(event) {
   const { progressId, exportId } = payload;
 
   if (!progressId || !exportId) {
-    console.error('[EXPORT WORKER] Missing progressId or exportId');
+    logFailure('storageExportWorker', 'Missing progressId or exportId', new Error('Missing required parameters'));
     return;
   }
 
   const startTime = Date.now();
 
   try {
-    console.log(`[EXPORT WORKER] Starting export job ${exportId} (progressId: ${progressId})`);
+    logFunction('storageExportWorker', 'START', { progressId, exportId });
 
     // Phase 1: Initializing (0-5%)
     await updateProgress(progressId, {
@@ -120,7 +120,6 @@ export async function handler(event) {
     });
 
     const allKeys = await getAllStorageKeys();
-    console.log(`[EXPORT WORKER] Found ${allKeys.length} total storage keys`);
 
     await updateProgress(progressId, {
       phase: 'organizing',
@@ -249,7 +248,7 @@ export async function handler(event) {
         chunks.push(jsonString.slice(i, i + CHUNK_SIZE_CHARS));
       }
       
-      console.log(`[EXPORT WORKER] Chunking export into ${chunks.length} chunks`);
+      logPhase('storageExportWorker', 'Chunking export', { chunkCount: chunks.length });
       
       // Store each chunk
       for (let i = 0; i < chunks.length; i++) {
@@ -282,12 +281,9 @@ export async function handler(event) {
         chunkSizeChars: CHUNK_SIZE_CHARS
       };
       await storage.set(`${exportKey}-metadata`, metadata);
-      
-      console.log(`[EXPORT WORKER] Stored export in ${chunks.length} chunks with metadata`);
     } else {
       // Store as single key
       await storage.set(exportKey, { data: jsonString });
-      console.log(`[EXPORT WORKER] Stored export at key: ${exportKey}`);
     }
 
     // Phase 7: Complete (95-100%)
@@ -311,11 +307,10 @@ export async function handler(event) {
       }
     });
 
-    console.log(`[EXPORT WORKER] Export complete in ${elapsed}ms`);
-    console.log(`[EXPORT WORKER] Total keys: ${allKeys.length}, JSON size: ${(jsonSize / 1024).toFixed(2)} KB`);
+    logSuccess('storageExportWorker', 'Export complete', { elapsed: `${elapsed}ms`, totalKeys: allKeys.length, jsonSizeKB: (jsonSize / 1024).toFixed(2) });
 
   } catch (error) {
-    console.error('[EXPORT WORKER] Fatal error:', error);
+    logFailure('storageExportWorker', 'Fatal error', error, { progressId, exportId });
     const elapsed = Date.now() - startTime;
     
     await updateProgress(progressId, {

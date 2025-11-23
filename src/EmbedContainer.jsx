@@ -654,23 +654,14 @@ const App = () => {
         const isAdf = freshContent && typeof freshContent === 'object' && freshContent.type === 'doc';
 
     if (isAdf) {
-      // TODO: Fix for GitHub issue #2 - Free Write paragraph insertion position with enabled toggles
+      // Fix for GitHub issue #2 - Free Write paragraph insertion position with enabled toggles
       // FIX: Insert custom paragraphs BEFORE toggle filtering (same as previewContent fix above)
-      //
-      // COMMENTED OUT FIX (to be tested):
-      // // Insert custom paragraphs and internal notes into original content (before toggle filtering)
-      // freshContent = substituteVariablesInAdf(freshContent, loadedVariableValues);
-      // freshContent = insertCustomParagraphsInAdf(freshContent, loadedCustomInsertions);
-      // freshContent = insertInternalNotesInAdf(freshContent, loadedInternalNotes);
-      // // Then filter toggles (this will preserve insertions inside enabled toggles)
-      // freshContent = filterContentByToggles(freshContent, loadedToggleStates);
-      
-      // CURRENT (BUGGY) BEHAVIOR:
-      // First filter toggles, then substitute variables, insert custom paragraphs, then internal notes
-      freshContent = filterContentByToggles(freshContent, loadedToggleStates);
+      // Insert custom paragraphs and internal notes into original content (before toggle filtering)
       freshContent = substituteVariablesInAdf(freshContent, loadedVariableValues);
       freshContent = insertCustomParagraphsInAdf(freshContent, loadedCustomInsertions);
       freshContent = insertInternalNotesInAdf(freshContent, loadedInternalNotes);
+      // Then filter toggles (this will preserve insertions inside enabled toggles)
+      freshContent = filterContentByToggles(freshContent, loadedToggleStates);
         } else {
           // For plain text, filter toggles first
           const toggleRegex = /\{\{toggle:([^}]+)\}\}([\s\S]*?)\{\{\/toggle:\1\}\}/g;
@@ -1008,26 +999,16 @@ const App = () => {
     const isAdf = previewContent && typeof previewContent === 'object' && previewContent.type === 'doc';
 
     if (isAdf) {
-      // TODO: Fix for GitHub issue #2 - Free Write paragraph insertion position with enabled toggles
+      // Fix for GitHub issue #2 - Free Write paragraph insertion position with enabled toggles
       // FIX: Insert custom paragraphs BEFORE toggle filtering so they can be placed inside toggle blocks.
       // The insertion logic needs to work on the original structure (with toggle markers) so it knows
       // where toggle boundaries are. Then toggle filtering will preserve the insertion if the toggle is enabled.
-      //
-      // COMMENTED OUT FIX (to be tested):
-      // // Insert custom paragraphs and internal notes into original content (before toggle filtering)
-      // previewContent = substituteVariablesInAdf(previewContent, variableValues);
-      // previewContent = insertCustomParagraphsInAdf(previewContent, customInsertions);
-      // previewContent = insertInternalNotesInAdf(previewContent, internalNotes);
-      // // Then filter toggles (this will preserve insertions inside enabled toggles)
-      // previewContent = filterContentByToggles(previewContent, toggleStates);
-      // return cleanAdfForRenderer(previewContent);
-      
-      // CURRENT (BUGGY) BEHAVIOR:
-      // First filter toggles, substitute variables, insert custom paragraphs, then internal notes
-      previewContent = filterContentByToggles(previewContent, toggleStates);
+      // Insert custom paragraphs and internal notes into original content (before toggle filtering)
       previewContent = substituteVariablesInAdf(previewContent, variableValues);
       previewContent = insertCustomParagraphsInAdf(previewContent, customInsertions);
       previewContent = insertInternalNotesInAdf(previewContent, internalNotes);
+      // Then filter toggles (this will preserve insertions inside enabled toggles)
+      previewContent = filterContentByToggles(previewContent, toggleStates);
       return cleanAdfForRenderer(previewContent);
     } else {
       // For plain text, filter toggles first
@@ -1065,24 +1046,14 @@ const App = () => {
     const isAdf = previewContent && typeof previewContent === 'object' && previewContent.type === 'doc';
 
     if (isAdf) {
-      // TODO: Fix for GitHub issue #2 - Free Write paragraph insertion position with enabled toggles
+      // Fix for GitHub issue #2 - Free Write paragraph insertion position with enabled toggles
       // FIX: Insert custom paragraphs BEFORE toggle filtering (same as getPreviewContent fix above)
-      //
-      // COMMENTED OUT FIX (to be tested):
-      // // Insert custom paragraphs and internal notes into original content (before toggle filtering)
-      // previewContent = substituteVariablesInAdf(previewContent, variableValues);
-      // previewContent = insertCustomParagraphsInAdf(previewContent, customInsertions);
-      // previewContent = insertInternalNotesInAdf(previewContent, internalNotes);
-      // // Then filter toggles (removes disabled content) but DON'T strip markers
-      // previewContent = filterContentByToggles(previewContent, toggleStates);
-      // return cleanAdfForRenderer(previewContent);
-      
-      // CURRENT (BUGGY) BEHAVIOR:
-      // Filter toggles (removes disabled content) but DON'T strip markers
-      previewContent = filterContentByToggles(previewContent, toggleStates);
+      // Insert custom paragraphs and internal notes into original content (before toggle filtering)
       previewContent = substituteVariablesInAdf(previewContent, variableValues);
       previewContent = insertCustomParagraphsInAdf(previewContent, customInsertions);
       previewContent = insertInternalNotesInAdf(previewContent, internalNotes);
+      // Then filter toggles (removes disabled content) but DON'T strip markers
+      previewContent = filterContentByToggles(previewContent, toggleStates);
       return cleanAdfForRenderer(previewContent);
     } else {
       // For plain text

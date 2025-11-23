@@ -1,19 +1,15 @@
-import ForgeUI, {
+/* eslint-disable no-unused-vars */
+import {
   render,
-  Fragment,
-  Form,
-  Select,
-  Option,
-  TextField,
-  Text,
   useState,
-  useEffect
+  useEffect,
+  Fragment
 } from '@forge/ui';
 import { invoke } from '@forge/bridge';
 
 const App = () => {
   const [excerpts, setExcerpts] = useState([]);
-  const [selectedExcerptId, setSelectedExcerptId] = useState(null);
+  const [, setSelectedExcerptId] = useState(null);
   const [selectedExcerpt, setSelectedExcerpt] = useState(null);
   const [variableValues, setVariableValues] = useState({});
   const [isLoading, setIsLoading] = useState(true);

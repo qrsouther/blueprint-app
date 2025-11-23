@@ -325,14 +325,16 @@ export const sortExcerpts = (excerpts, sortBy, usageCounts = {}) => {
         return a.name.localeCompare(b.name);
       case 'name-desc':
         return b.name.localeCompare(a.name);
-      case 'usage-high':
+      case 'usage-high': {
         const usageA = usageCounts[a.id] || 0;
         const usageB = usageCounts[b.id] || 0;
         return usageB - usageA;
-      case 'usage-low':
+      }
+      case 'usage-low': {
         const usageALow = usageCounts[a.id] || 0;
         const usageBLow = usageCounts[b.id] || 0;
         return usageALow - usageBLow;
+      }
       case 'category':
         return (a.category || 'General').localeCompare(b.category || 'General');
       default:

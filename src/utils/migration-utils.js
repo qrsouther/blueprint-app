@@ -36,7 +36,7 @@ export function decodeTemplateData(templateDataString) {
 
     return parsed;
   } catch (error) {
-    console.error('Error decoding templateData:', error);
+    // Silently return null on decode failure (expected during migration)
     return null;
   }
 }
@@ -97,9 +97,6 @@ export function cleanMultiExcerptMacros(storageContent) {
   let cleaned = storageContent;
 
   // Count opening and closing structured-macro tags before cleaning
-  const initialOpenCount = (cleaned.match(/<ac:structured-macro/g) || []).length;
-  const initialCloseCount = (cleaned.match(/<\/ac:structured-macro>/g) || []).length;
-
   // Step 1: Remove multiexcerpt macro opening tags (with parameters)
   // This regex finds the opening tag and all parameters up to the rich-text-body
   cleaned = cleaned.replace(/<ac:structured-macro[^>]*ac:name="multiexcerpt-macro"[^>]*>[\s\S]*?<ac:rich-text-body>/g, '');

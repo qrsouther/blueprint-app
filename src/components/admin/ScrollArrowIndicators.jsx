@@ -12,6 +12,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { Box, Icon, Pressable, xcss } from '@forge/react';
+import { logger } from '../../utils/logger.js';
 
 // Arrow button container style
 // Note: transform and cursor must be inline styles as xcss doesn't support them
@@ -117,7 +118,7 @@ export function ScrollArrowIndicators({ scrollContainerRef }) {
         // Also check on window resize
         window.addEventListener('resize', updateArrowVisibility);
       } catch (error) {
-        console.warn('ScrollArrowIndicators: Failed to setup observers', error);
+        logger.errors('ScrollArrowIndicators: Failed to setup observers', error);
       }
     };
 

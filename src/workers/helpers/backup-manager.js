@@ -11,6 +11,7 @@
  */
 
 import { storage, startsWith } from '@forge/api';
+import { logFunction, logSuccess, logFailure } from '../../utils/forge-logger.js';
 
 /**
  * Create a full backup of all embed configurations before running destructive operations
@@ -21,18 +22,15 @@ export async function createBackupSnapshot(operation = 'checkAllIncludes') {
   const timestamp = new Date().toISOString();
   const backupId = `backup-${timestamp}`;
 
-  console.log(`[BACKUP] Creating full system backup...`);
-  console.log(`[BACKUP] Backup ID: ${backupId}`);
-
   try {
+    logFunction('createBackupSnapshot', 'START', { backupId, operation });
+
     // Query all active embed configurations
     const allKeys = await storage.query()
       .where('key', startsWith('macro-vars:'))
       .getMany();
 
     const embedCount = allKeys.results.length;
-
-    console.log(`[BACKUP] Found ${embedCount} embed configurations to backup`);
 
     // Save backup metadata
     await storage.set(`${backupId}:metadata`, {
@@ -44,28 +42,19 @@ export async function createBackupSnapshot(operation = 'checkAllIncludes') {
       version: '1.0'
     });
 
-    console.log(`[BACKUP] Saved backup metadata`);
-
     // Save each embed configuration to backup namespace
     let savedCount = 0;
     for (const entry of allKeys.results) {
       const localId = entry.key.replace('macro-vars:', '');
       await storage.set(`${backupId}:embed:${localId}`, entry.value);
       savedCount++;
-
-      // Log progress every 10 embeds
-      if (savedCount % 10 === 0) {
-        console.log(`[BACKUP] Progress: ${savedCount}/${embedCount} embeds backed up`);
-      }
     }
 
-    console.log(`[BACKUP] ✅ Backup complete: ${backupId}`);
-    console.log(`[BACKUP] Backed up ${savedCount} embed configurations`);
-    console.log(`[BACKUP] Backup can be used to restore data if needed`);
+    logSuccess('createBackupSnapshot', 'Backup complete', { backupId, savedCount });
 
     return backupId;
   } catch (error) {
-    console.error(`[BACKUP] ❌ Failed to create backup:`, error);
+    logFailure('createBackupSnapshot', 'Failed to create backup', error, { backupId, operation });
     throw new Error(`Backup creation failed: ${error.message}`);
   }
 }
@@ -76,9 +65,9 @@ export async function createBackupSnapshot(operation = 'checkAllIncludes') {
  * @returns {Promise<{success: boolean, restored: number, error?: string}>}
  */
 export async function restoreFromBackup(backupId) {
-  console.log(`[BACKUP] Restoring from backup: ${backupId}`);
-
   try {
+    logFunction('restoreFromBackup', 'START', { backupId });
+
     // Verify backup exists
     const metadata = await storage.get(`${backupId}:metadata`);
     if (!metadata) {
@@ -95,20 +84,16 @@ export async function restoreFromBackup(backupId) {
       const localId = entry.key.replace(`${backupId}:embed:`, '');
       await storage.set(`macro-vars:${localId}`, entry.value);
       restoredCount++;
-
-      if (restoredCount % 10 === 0) {
-        console.log(`[BACKUP] Restored ${restoredCount}/${backupKeys.results.length} embeds`);
-      }
     }
 
-    console.log(`[BACKUP] ✅ Restore complete: ${restoredCount} embeds restored`);
+    logSuccess('restoreFromBackup', 'Restore complete', { backupId, restoredCount });
 
     return {
       success: true,
       restored: restoredCount
     };
   } catch (error) {
-    console.error(`[BACKUP] ❌ Restore failed:`, error);
+    logFailure('restoreFromBackup', 'Restore failed', error, { backupId });
     return {
       success: false,
       restored: 0,

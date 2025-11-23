@@ -9,6 +9,7 @@
  */
 
 import { storage } from '@forge/api';
+import { logSuccess, logFailure, logWarning } from '../../utils/forge-logger.js';
 
 /**
  * Attempt to repair a broken reference by looking up excerptId from macro-vars
@@ -16,28 +17,24 @@ import { storage } from '@forge/api';
  * @returns {Promise<{repaired: boolean, excerptId?: string, excerpt?: Object, error?: string}>}
  */
 export async function attemptReferenceRepair(include) {
-  console.log(`[CHECK-MACRO] ⚠️ No excerptId in usage data for localId ${include.localId}`);
-  console.log(`[CHECK-MACRO] 🔧 Attempting to repair from macro-vars storage...`);
+  logWarning('attemptReferenceRepair', 'No excerptId in usage data', { localId: include.localId });
 
   // Try to repair: read the actual excerptId from macro-vars storage
   const macroVars = await storage.get(`macro-vars:${include.localId}`);
   const actualExcerptId = macroVars?.excerptId;
 
   if (!actualExcerptId) {
-    console.log(`[CHECK-MACRO] ❌ BROKEN: No excerptId found in macro-vars either - truly broken`);
+    logFailure('attemptReferenceRepair', 'No excerptId found in macro-vars either', new Error('Truly broken'), { localId: include.localId });
     return {
       repaired: false,
       error: 'No excerptId in usage data or macro-vars storage'
     };
   }
 
-  console.log(`[CHECK-MACRO] ✅ Found excerptId in macro-vars: ${actualExcerptId}`);
-  console.log(`[CHECK-MACRO] 🔧 Repairing usage tracking...`);
-
   // Verify the excerpt exists
   const excerpt = await storage.get(`excerpt:${actualExcerptId}`);
   if (!excerpt) {
-    console.log(`[CHECK-MACRO] ❌ BROKEN: Excerpt ${actualExcerptId} not found - orphaned reference`);
+    logFailure('attemptReferenceRepair', 'Excerpt not found - orphaned reference', new Error('Referenced excerpt not found'), { localId: include.localId, excerptId: actualExcerptId });
     return {
       repaired: false,
       error: 'Referenced excerpt not found (from macro-vars)',
@@ -70,7 +67,7 @@ export async function attemptReferenceRepair(include) {
 
   await storage.set(usageKey, usageData);
 
-  console.log(`[CHECK-MACRO] ✅ REPAIRED: Updated usage tracking for localId ${include.localId} with excerptId ${actualExcerptId}`);
+  logSuccess('attemptReferenceRepair', 'Repaired usage tracking', { localId: include.localId, excerptId: actualExcerptId });
 
   return {
     repaired: true,
@@ -106,15 +103,12 @@ export function buildRepairedRecord(localId, pageId, pageTitle, excerptId, excer
  */
 export async function checkExcerptExists(excerptId) {
   const excerpt = await storage.get(`excerpt:${excerptId}`);
-  console.log(`[CHECK-MACRO] Looking up excerpt:${excerptId} - Found: ${!!excerpt}`);
 
   if (!excerpt) {
-    console.log(`[CHECK-MACRO] ❌ BROKEN: Referenced excerpt ${excerptId} not found in storage`);
-    console.log(`[CHECK-MACRO] This usually means the Source was deleted or the usage tracking is stale`);
+    logWarning('checkExcerptExists', 'Referenced excerpt not found in storage', { excerptId });
     return { exists: false };
   }
 
-  console.log(`[CHECK-MACRO] ✅ Excerpt "${excerpt.name}" found`);
   return { exists: true, excerpt };
 }
 

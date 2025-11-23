@@ -28,6 +28,7 @@ import { invoke, view, router } from '@forge/bridge';
 import { QueryClient, QueryClientProvider, useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useCategoriesQuery } from './hooks/admin-hooks';
 import { StableTextfield } from './components/common/StableTextfield';
+import { logger } from './utils/logger.js';
 
 // Create a client
 const queryClient = new QueryClient({
@@ -45,26 +46,11 @@ const useExcerptQuery = (excerptId, enabled) => {
   return useQuery({
     queryKey: ['excerpt', excerptId],
     queryFn: async () => {
-      console.log('[source-config] Fetching excerpt:', excerptId);
       const result = await invoke('getExcerpt', { excerptId });
-
-      console.log('[source-config] getExcerpt result:', {
-        success: result?.success,
-        hasExcerpt: !!result?.excerpt,
-        excerptKeys: result?.excerpt ? Object.keys(result.excerpt) : [],
-        excerptName: result?.excerpt?.name,
-        excerptCategory: result?.excerpt?.category
-      });
 
       if (!result.success || !result.excerpt) {
         throw new Error('Failed to load excerpt');
       }
-
-      console.log('[source-config] Returning excerpt data:', {
-        id: result.excerpt.id,
-        name: result.excerpt.name,
-        category: result.excerpt.category
-      });
 
       return result.excerpt;
     },
@@ -120,7 +106,7 @@ const useSaveExcerptMutation = () => {
 
         return result;
       } catch (error) {
-        console.error('[REACT-QUERY-SOURCE] Save error:', error);
+        logger.errors('Save error:', error);
         throw error;
       }
     },
@@ -131,7 +117,7 @@ const useSaveExcerptMutation = () => {
       queryClient.invalidateQueries({ queryKey: ['excerpts', 'list'] });
     },
     onError: (error) => {
-      console.error('[REACT-QUERY-SOURCE] Save failed:', error);
+      logger.errors('Save failed:', error);
     }
   });
 };
@@ -167,10 +153,6 @@ const App = () => {
   // Get query client for cache invalidation
   const queryClient = useQueryClient();
 
-  // DEBUG: Log when excerptName state changes
-  useEffect(() => {
-    console.log('[source-config] excerptName state changed to:', excerptName);
-  }, [excerptName]);
 
   // Invalidate cache on mount to ensure we always fetch fresh data from storage
   useEffect(() => {
@@ -227,28 +209,10 @@ const App = () => {
     // Only process data when loading is complete (loading guard ensures this)
     // When excerpt data is available, always use storage values (authoritative source)
     if (!isLoadingExcerpt) {
-      // DEBUG: Log what we received
-      console.log('[source-config] Loading excerpt data:', {
-        excerptId,
-        hasExcerptData: !!excerptData,
-        excerptDataKeys: excerptData ? Object.keys(excerptData) : [],
-        excerptName: excerptData?.name,
-        excerptCategory: excerptData?.category,
-        configExcerptName: config.excerptName
-      });
-
       if (excerptData) {
         // Data loaded successfully - use storage values (authoritative source)
         const storageName = excerptData.name;
         const storageCategory = excerptData.category;
-        
-        // DEBUG: Log the values we're processing
-        console.log('[source-config] Processing storage values:', {
-          storageName,
-          storageNameType: typeof storageName,
-          storageCategory,
-          storageCategoryType: typeof storageCategory
-        });
         
         // Determine the name to use - always prefer storage value
         let nameToSet = '';
@@ -257,9 +221,6 @@ const App = () => {
         } else if (config.excerptName) {
           nameToSet = String(config.excerptName).trim();
         }
-        
-        // DEBUG: Log what we're setting
-        console.log('[source-config] Setting excerptName to:', nameToSet);
         
         // Always update state (React will handle batching and only update if different)
         // This ensures the field always reflects the current data from storage
@@ -338,7 +299,7 @@ const App = () => {
           setDetectedVariables(result.variables);
         }
       } catch (err) {
-        console.error('Error detecting variables:', err);
+        logger.errors('Error detecting variables:', err);
       }
     };
 
@@ -360,7 +321,7 @@ const App = () => {
           setDetectedToggles(result.toggles);
         }
       } catch (err) {
-        console.error('Error detecting toggles:', err);
+        logger.errors('Error detecting toggles:', err);
       }
     };
 
@@ -425,14 +386,14 @@ const App = () => {
             await view.submit({ config: configToSubmit });
             resolve();
           } catch (error) {
-            console.error('[REACT-QUERY-SOURCE] Error submitting config:', error);
+            logger.errors('Error submitting config:', error);
             // Still resolve to allow modal to close even if submit fails
             // The data is already saved to storage, so this is just updating the macro config
             resolve();
           }
         },
         onError: (error) => {
-          console.error('[REACT-QUERY-SOURCE] Failed to save excerpt:', error);
+          logger.errors('Failed to save excerpt:', error);
           reject(error);
         }
       });
@@ -770,7 +731,7 @@ const App = () => {
                   
                   await router.open(pathToNavigate);
                 } catch (err) {
-                  console.error('Navigation error:', err);
+                  logger.errors('Navigation error:', err);
                 }
               }}
             >

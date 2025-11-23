@@ -1,5 +1,8 @@
 # MultiExcerpt to Blueprint Standards Migration Guide
 
+> **⚠️ FUNCTIONALLY IRRELEVANT - HISTORICAL RECORD ONLY**  
+> This document describes an ADF-based migration approach that is no longer in use. Migration is now performed through the Migration Tools modal in the Admin UI. This document is preserved only as a historical record of the migration planning and process.
+
 This guide provides step-by-step instructions for migrating MultiExcerpt macros from the old app to Blueprint Standards.
 
 ## Overview
@@ -263,3 +266,4 @@ For issues or questions:
 2. Check troubleshooting section
 3. Review forge logs for detailed error messages
 4. Contact development team
+

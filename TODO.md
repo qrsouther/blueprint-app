@@ -7,45 +7,36 @@ This file tracks ongoing tasks, future enhancements, and technical debt for the 
 ## Current Sprint / Active Work
 
 ### Fix Free Write Paragraph Insertion Position with Enabled Toggles (GitHub Issue #2)
-**Status:** Fix Implemented (Commented Out) - Ready for Testing
+**Status:** ✅ COMPLETE - Fix Implemented and Tested
 **Priority:** Medium
-**Estimated Effort:** 30 minutes testing + verification
+**Completion Date:** 2025-11-22
 **GitHub Issue:** https://github.com/qrsouther/blueprint-app/issues/2
 
 **Context:**
-When a toggle is enabled and a user attempts to insert a Free Write paragraph at the END of that toggle's text content, the custom paragraph is incorrectly appended to the END of the entire Embed macro content instead of being inserted at the position the user selected (which should be directly after the toggle content).
+When a toggle is enabled and a user attempts to insert a Free Write paragraph at the END of that toggle's text content, the custom paragraph was incorrectly appended to the END of the entire Embed macro content instead of being inserted at the position the user selected (which should be directly after the toggle content, outside the toggle block).
+
+**Expected Behavior:**
+Custom paragraphs inserted "After paragraph X" (where X is inside a toggle block) should appear:
+- After the toggle's paragraph content
+- **Outside** the toggle block (after `{{/toggle:name}}` marker)
+- This ensures the custom paragraph is always visible regardless of toggle state
 
 **Fix Implementation:**
-The fix has been implemented but commented out in the following files:
-- `src/components/CustomInsertionsPanel.jsx` (line 89) - Extract paragraphs from original content before toggle filtering
-- `src/embed-display.jsx` (lines 580-582, 311-313, 622-624) - Insert custom paragraphs before toggle filtering (3 locations: getPreviewContent, freshContent generation, getRawPreviewContent)
-- `src/hooks/embed-hooks.js` (lines 230-232) - Insert custom paragraphs before toggle filtering
-- `src/components/admin/RedlineQueueCard.jsx` (line 360) - Insert custom paragraphs before toggle filtering (admin view, less critical but should be consistent)
-
-**Action Required:**
-1. Uncomment the fix code in all locations (marked with `// COMMENTED OUT FIX (to be tested):`)
-2. Remove or comment out the `// CURRENT (BUGGY) BEHAVIOR:` sections
-3. Test the fix:
-   - Create a Source macro with toggle content (e.g., `{{toggle:advanced}}Paragraph 2{{/toggle:advanced}}`)
-   - Create an Embed macro referencing that Source
-   - Enable the toggle in the Embed
-   - Go to Free Write tab
-   - Select "After paragraph 2" from dropdown
-   - Add custom text and verify it appears INSIDE the toggle block (before `{{/toggle:advanced}}`)
-4. Verify paragraph indices match between extraction and insertion
-5. Test edge cases:
-   - Multiple toggles
-   - Nested toggles
-   - Insertions at various positions
-6. Update bug document: `docs/bugs/BUG_FREE_WRITE_TOGGLE_POSITION.md` to mark as fixed
-7. Close GitHub issue #2
+The fix was implemented and uncommented in the following files:
+- ✅ `src/components/CustomInsertionsPanel.jsx` - Extract paragraphs from original content before toggle filtering
+- ✅ `src/EmbedContainer.jsx` - Insert custom paragraphs before toggle filtering (3 locations: getPreviewContent, freshContent generation, getRawPreviewContent)
+- ✅ `src/hooks/embed-hooks.js` - Insert custom paragraphs before toggle filtering
+- ✅ `src/components/admin/RedlineQueueCard.jsx` - Insert custom paragraphs before toggle filtering (admin view)
 
 **Technical Details:**
 The fix changes the order of operations:
 - **Before (buggy):** Filter toggles → Substitute variables → Insert custom paragraphs
 - **After (fixed):** Substitute variables → Insert custom paragraphs → Filter toggles
 
-This allows the insertion logic to work on the original structure (with toggle markers) so it knows where toggle boundaries are. Then toggle filtering preserves the insertion if the toggle is enabled.
+This allows the insertion logic to work on the original structure (with toggle markers) so it knows where toggle boundaries are. The custom paragraph is inserted at the correct position, and then toggle filtering preserves it outside the toggle block.
+
+**Test Results:**
+✅ Test passed - Custom paragraphs now appear in the correct position (after toggle blocks, outside toggle markers) and remain visible regardless of toggle state.
 
 **Related Files:**
 - `docs/bugs/BUG_FREE_WRITE_TOGGLE_POSITION.md` - Bug documentation
@@ -658,6 +649,51 @@ Add a unique background color to the Admin page when running in Development envi
 - `src/index.js` - Resolver registration (line 927)
 
 **Note:** Code is kept in place for future exploration but currently non-functional. See TODO comments in `admin-page.jsx` for details.
+
+---
+
+### Form Input Validation UI Improvements
+**Status:** Planned - Backend validation working, frontend UI pending
+**Priority:** Low (backend validation prevents data corruption)
+**Estimated Effort:** Small to Medium (2-4 hours per form)
+
+**Current State:**
+- ✅ Backend validation is fully implemented and working correctly
+- ✅ Invalid data (null, empty strings, wrong types) is prevented from being saved
+- ✅ Validation errors are logged and returned to frontend
+- ⚠️ Frontend validation UI is partially implemented but not fully functional
+- ⚠️ Errors currently display via browser alerts instead of native Forge UI Kit components
+
+**Forms Affected:**
+- `CreateEditSourceModal.jsx` - Source name, category, documentation links
+- `EmbedEditMode.jsx` - Variable values, toggle states, custom insertions
+- Other configuration modals with form inputs
+
+**Planned Improvements:**
+- [ ] Fix frontend validation state management (validationErrors state properly initialized and updated)
+- [ ] Display validation errors using Forge UI Kit `SectionMessage` components instead of browser alerts
+- [ ] Show red borders (`isInvalid` prop) on invalid input fields
+- [ ] Display inline error messages below invalid fields using `Text` components
+- [ ] Clear validation errors when user starts typing (already partially implemented)
+- [ ] Prevent form submission when validation errors exist (frontend check before API call)
+- [ ] Ensure consistent validation behavior across all forms
+
+**Technical Notes:**
+- Backend validation in `src/resolvers/excerpt-resolvers.js` and `src/resolvers/include-resolvers.js` is working correctly
+- Frontend validation logic exists in `CreateEditSourceModal.jsx` but UI feedback isn't displaying properly
+- `StableTextfield` component supports `isInvalid` prop for visual feedback
+- Forge UI Kit `SectionMessage` with `appearance="error"` should be used for general errors
+- Individual field errors should use `Text` component with `color="color.text.danger"`
+
+**Why Low Priority:**
+Backend validation successfully prevents invalid data from being saved, which is the critical requirement. Frontend UI improvements are a UX enhancement that makes errors more visible and user-friendly, but don't affect data integrity.
+
+**Related Files:**
+- `src/components/admin/CreateEditSourceModal.jsx` - Source configuration form
+- `src/components/embed/EmbedEditMode.jsx` - Embed configuration form
+- `src/components/common/StableTextfield.jsx` - Form input component
+- `src/resolvers/excerpt-resolvers.js` - Backend validation for Sources
+- `src/resolvers/include-resolvers.js` - Backend validation for Embeds
 
 ---
 

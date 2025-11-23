@@ -21,6 +21,7 @@ import { invoke } from '@forge/bridge';
 import { QueryClient, QueryClientProvider, useQueryClient } from '@tanstack/react-query';
 import { useQuery } from '@tanstack/react-query';
 import { DocumentationLinksDisplay } from './components/embed/DocumentationLinksDisplay';
+import { logger } from './utils/logger.js';
 
 // Create a client for React Query
 const queryClient = new QueryClient({
@@ -138,7 +139,6 @@ const App = () => {
           // If content actually changed (not just a re-render), invalidate the cache
           // This forces a re-fetch with the new contentHash
           if (!result.unchanged) {
-            console.log('[Source] Content changed, invalidating excerpt cache');
             await queryClient.invalidateQueries({ 
               queryKey: ['excerpt', config.excerptId] 
             });
@@ -148,7 +148,7 @@ const App = () => {
       } catch (err) {
         // Only log unexpected errors
         if (err && err.message && !err.message.includes('not found')) {
-          console.error('[Source] Error:', err);
+          logger.errors('Error:', err);
         }
       } finally {
         updateInProgressRef.current = false;
@@ -193,7 +193,7 @@ const App = () => {
 
   // Show error state if excerpt fetch failed
   if (excerptError) {
-    console.error('[Source] Error loading excerpt:', excerptError);
+    logger.errors('Error loading excerpt:', excerptError);
     // Still render body content even if metadata failed
   }
 

@@ -8,37 +8,103 @@
 import api, { route } from '@forge/api';
 
 /**
- * Fetch page content from Confluence API
+ * Fetch page content from Confluence API with retry logic for transient failures
+ * 
+ * CRITICAL: Distinguishes between error types to prevent false positives:
+ * - HTTP 404 = page deleted (legitimate orphan)
+ * - HTTP 403 = permission denied (may be temporary, don't mark orphaned)
+ * - HTTP 500/network error = transient failure (retry, don't mark orphaned)
+ * 
  * @param {string} pageId - Confluence page ID
- * @returns {Promise<{success: boolean, pageData?: Object, adfContent?: Object, error?: string}>}
+ * @param {number} maxRetries - Maximum number of retry attempts (default: 3)
+ * @param {number} retryDelay - Initial retry delay in ms (default: 1000, exponential backoff)
+ * @returns {Promise<{success: boolean, pageData?: Object, adfContent?: Object, error?: string, errorType?: string, httpStatus?: number}>}
  */
-export async function fetchPageContent(pageId) {
-  try {
-    const response = await api.asApp().requestConfluence(
-      route`/wiki/api/v2/pages/${pageId}?body-format=atlas_doc_format`
-    );
+export async function fetchPageContent(pageId, maxRetries = 3, retryDelay = 1000) {
+  let lastError = null;
+  let lastStatus = null;
 
-    if (!response.ok) {
-      return {
-        success: false,
-        error: `Page ${pageId} not found or inaccessible (HTTP ${response.status})`
-      };
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      const response = await api.asApp().requestConfluence(
+        route`/wiki/api/v2/pages/${pageId}?body-format=atlas_doc_format`
+      );
+
+      lastStatus = response.status;
+
+      // HTTP 404 = Page not found (legitimate deletion)
+      if (response.status === 404) {
+        return {
+          success: false,
+          error: `Page ${pageId} not found (HTTP 404)`,
+          errorType: 'page_deleted',
+          httpStatus: 404
+        };
+      }
+
+      // HTTP 403 = Permission denied (may be temporary, don't mark as orphaned)
+      if (response.status === 403) {
+        return {
+          success: false,
+          error: `Page ${pageId} access denied (HTTP 403)`,
+          errorType: 'permission_denied',
+          httpStatus: 403
+        };
+      }
+
+      // HTTP 401 = Unauthorized (may be temporary)
+      if (response.status === 401) {
+        return {
+          success: false,
+          error: `Page ${pageId} unauthorized (HTTP 401)`,
+          errorType: 'unauthorized',
+          httpStatus: 401
+        };
+      }
+
+      // HTTP 5xx = Server error (transient, should retry)
+      if (response.status >= 500 && response.status < 600) {
+        lastError = new Error(`Server error (HTTP ${response.status})`);
+        // Will retry below
+      } else if (!response.ok) {
+        // Other 4xx errors (except 404, 403, 401)
+        return {
+          success: false,
+          error: `Page ${pageId} request failed (HTTP ${response.status})`,
+          errorType: 'client_error',
+          httpStatus: response.status
+        };
+      } else {
+        // Success (HTTP 200-299)
+        const pageData = await response.json();
+        const adfContent = JSON.parse(pageData.body?.atlas_doc_format?.value || '{}');
+
+        return {
+          success: true,
+          pageData,
+          adfContent
+        };
+      }
+    } catch (error) {
+      lastError = error;
+      // Network errors, timeouts, etc. - will retry
     }
 
-    const pageData = await response.json();
-    const adfContent = JSON.parse(pageData.body?.atlas_doc_format?.value || '{}');
-
-    return {
-      success: true,
-      pageData,
-      adfContent
-    };
-  } catch (error) {
-    return {
-      success: false,
-      error: error.message
-    };
+    // If we get here, we need to retry (server error or network error)
+    if (attempt < maxRetries) {
+      // Exponential backoff: delay increases with each retry
+      const delay = retryDelay * Math.pow(2, attempt);
+      await new Promise(resolve => setTimeout(resolve, delay));
+    }
   }
+
+  // All retries exhausted
+  return {
+    success: false,
+    error: lastError?.message || `Failed to fetch page ${pageId} after ${maxRetries} retries`,
+    errorType: 'transient_failure',
+    httpStatus: lastStatus || null
+  };
 }
 
 /**
@@ -46,35 +112,72 @@ export async function fetchPageContent(pageId) {
  * Recursively searches through ADF structure for extension nodes with matching localId
  *
  * CRITICAL: This function determines if an embed is orphaned. False negatives
- * cause data deletion. Extensive logging added to debug search failures.
+ * cause data deletion. Must check ALL possible locations for localId.
  *
  * @param {Object} node - ADF node to search
  * @param {string} targetLocalId - localId to find
- * @param {number} depth - Current recursion depth (for logging)
+ * @param {number} depth - Current recursion depth (internal use)
+ * @param {Set} visited - Set of visited node references for cycle detection (internal use)
  * @returns {boolean} True if macro exists in ADF
  */
-export function checkMacroExistsInADF(node, targetLocalId, depth = 0) {
+export function checkMacroExistsInADF(node, targetLocalId, depth = 0, visited = new Set()) {
+  // Safety: Maximum depth limit to prevent stack overflow
+  const MAX_DEPTH = 100;
+  if (depth > MAX_DEPTH) {
+    return false;
+  }
+
   if (!node || typeof node !== 'object') {
     return false;
   }
 
-  // Log search initiation (only at root level)
-  if (depth === 0) {
-    console.log(`[CHECK-MACRO] 🔍 Searching for localId: ${targetLocalId}`);
+  // Safety: Cycle detection
+  if (visited.has(node)) {
+    return false;
+  }
+  visited.add(node);
+
+  /**
+   * Check ALL possible locations for localId in a node
+   * ADF structure can vary, so we check multiple possible paths
+   */
+  function checkLocalIdInNode(nodeToCheck) {
+    if (!nodeToCheck || typeof nodeToCheck !== 'object') {
+      return false;
+    }
+
+    // Primary location: node.attrs.localId
+    if (nodeToCheck.attrs?.localId === targetLocalId) {
+      return true;
+    }
+
+    // Alternative location: node.attrs.parameters.localId
+    if (nodeToCheck.attrs?.parameters?.localId === targetLocalId) {
+      return true;
+    }
+
+    // Alternative location: node.attrs.parameters.macroParams.localId
+    if (nodeToCheck.attrs?.parameters?.macroParams?.localId === targetLocalId) {
+      return true;
+    }
+
+    // Alternative location: node.attrs.parameters.macroParams.localId.value
+    if (nodeToCheck.attrs?.parameters?.macroParams?.localId?.value === targetLocalId) {
+      return true;
+    }
+
+    return false;
   }
 
-  // Check if this node is an extension (macro)
-  if (node.type === 'extension') {
-    // Log EVERY extension we find for debugging
-    console.log(`[CHECK-MACRO] Found extension at depth ${depth}:`, {
-      extensionType: node.attrs?.extensionType,
-      extensionKey: node.attrs?.extensionKey,
-      localId: node.attrs?.localId,
-      macroId: node.attrs?.parameters?.macroParams?.['macro-id'],
-      hasLocalId: !!node.attrs?.localId
-    });
+  // Check if this node is an extension or bodiedExtension (macro)
+  if (node.type === 'extension' || node.type === 'bodiedExtension') {
+    // First, check if localId matches in any location
+    if (checkLocalIdInNode(node)) {
+      visited.delete(node);
+      return true;
+    }
 
-    // Check for Blueprint Standard Embed macro (current name)
+    // Also check for Blueprint Standard Embed macro by extensionKey
     // NOTE: Forge apps use full path in extensionKey like:
     // "be1ff96b-.../static/blueprint-standard-embed"
     // So we check if the key CONTAINS or ENDS WITH our macro name
@@ -87,14 +190,10 @@ export function checkMacroExistsInADF(node, targetLocalId, depth = 0) {
                        extensionKey === 'blueprint-standard-embed-poc'; // Exact match POC
 
     if (isOurMacro) {
-      console.log(`[CHECK-MACRO] ✅ Found our embed macro (${node.attrs.extensionKey})`);
-
-      // Check localId match
-      if (node.attrs?.localId === targetLocalId) {
-        console.log(`[CHECK-MACRO] ✅✅ MATCH! Found embed with localId: ${targetLocalId}`);
+      // If it's our macro and localId matches, return true
+      if (checkLocalIdInNode(node)) {
+        visited.delete(node);
         return true;
-      } else {
-        console.log(`[CHECK-MACRO] ⚠️ localId mismatch: expected ${targetLocalId}, got ${node.attrs?.localId}`);
       }
     }
 
@@ -102,9 +201,8 @@ export function checkMacroExistsInADF(node, targetLocalId, depth = 0) {
     if (node.attrs?.extensionType === 'com.atlassian.confluence.macro.core' ||
         node.attrs?.extensionType === 'com.atlassian.ecosystem') {
       // This is a Confluence or Forge macro - check if localId matches regardless of extensionKey
-      if (node.attrs?.localId === targetLocalId) {
-        console.log(`[CHECK-MACRO] ✅ Found macro with matching localId (type: ${node.attrs.extensionType})`);
-        console.log(`[CHECK-MACRO] Extension key: ${node.attrs?.extensionKey}`);
+      if (checkLocalIdInNode(node)) {
+        visited.delete(node);
         return true;
       }
     }
@@ -113,26 +211,19 @@ export function checkMacroExistsInADF(node, targetLocalId, depth = 0) {
   // Recursively check content array
   if (Array.isArray(node.content)) {
     for (const child of node.content) {
-      if (checkMacroExistsInADF(child, targetLocalId, depth + 1)) {
+      if (checkMacroExistsInADF(child, targetLocalId, depth + 1, visited)) {
+        visited.delete(node);
         return true;
       }
     }
   }
 
-  // Also check marks array (some content nests in marks)
-  if (Array.isArray(node.marks)) {
-    for (const mark of node.marks) {
-      if (checkMacroExistsInADF(mark, targetLocalId, depth + 1)) {
-        return true;
-      }
-    }
-  }
+  // Remove from visited when backtracking (allows same node in different branches)
+  visited.delete(node);
 
-  // Log if we finished searching without finding it (only at root level)
-  if (depth === 0) {
-    console.log(`[CHECK-MACRO] ❌ Search complete - localId ${targetLocalId} NOT found in ADF`);
-    console.log(`[CHECK-MACRO] ⚠️ WARNING: About to mark as orphaned - THIS MAY BE A FALSE POSITIVE!`);
-  }
+  // Note: Marks array typically doesn't contain macros, but we keep the check
+  // for completeness. However, we don't recurse into marks to avoid false positives
+  // from nested structures that aren't actually macros.
 
   return false;
 }

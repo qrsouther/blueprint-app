@@ -47,6 +47,7 @@ import {
 import { invoke } from '@forge/bridge';
 import { useQueryClient } from '@tanstack/react-query';
 import { StableTextfield } from '../common/StableTextfield';
+import { logger } from '../../utils/logger.js';
 
 // Controlled TextArea wrapper for JSON editing
 // TextArea from @forge/react uses defaultValue (uncontrolled), so we need to sync via ref
@@ -234,7 +235,7 @@ const ControlledTextArea = React.forwardRef(({ value, onChange, placeholder, isD
           textareaElement.style.lineHeight = '1.5';
         } catch (e) {
           // Ignore style errors
-          console.warn('[ControlledTextArea] Could not apply styles:', e);
+          logger.errors('[ControlledTextArea] Could not apply styles:', e);
         }
       }
     };
@@ -536,7 +537,7 @@ export function StorageBrowser() {
     const actualTextarea = getTextareaElement();
     
     if (!actualTextarea || actualTextarea.tagName !== 'TEXTAREA') {
-      console.error('[Find] Could not find textarea element', {
+      logger.errors('[Find] Could not find textarea element', {
         ref: textAreaRef.current,
         allTextareas: Array.from(document.querySelectorAll('textarea')).map(ta => ({
           height: window.getComputedStyle(ta).height,
@@ -862,7 +863,6 @@ export function StorageBrowser() {
           queryClient.invalidateQueries({ queryKey: ['excerpt', excerptId, 'usage'] });
         }
         
-        console.log('[StorageBrowser] Invalidated React Query caches after JSON edit');
       } else {
         // Hide success message on failure
         setIsSuccessMessageDismissed(true);

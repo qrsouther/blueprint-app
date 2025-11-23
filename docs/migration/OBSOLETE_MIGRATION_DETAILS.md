@@ -1,6 +1,7 @@
 # Obsolete Migration Details
 
-> **Note:** This migration workflow was used for the initial production installation. It is preserved here for historical reference but is no longer needed for ongoing operations.
+> **⚠️ FUNCTIONALLY IRRELEVANT - HISTORICAL RECORD ONLY**  
+> This migration workflow was used for the initial production installation. It is preserved here for historical reference but is no longer needed for ongoing operations. Migration is now performed through the Migration Tools modal in the Admin UI.
 
 ## 🔄 MultiExcerpt to Blueprint App Migration
 

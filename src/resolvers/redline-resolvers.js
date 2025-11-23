@@ -32,6 +32,7 @@
 import { storage, startsWith } from '@forge/api';
 import api, { route } from '@forge/api';
 import { listVersions } from '../utils/version-manager.js';
+import { logPhase, logSuccess, logFailure, logWarning } from '../utils/forge-logger.js';
 
 /**
  * Get redline queue with filtering, sorting, and grouping
@@ -62,7 +63,7 @@ export async function getRedlineQueue(req) {
       cursor = batch.nextCursor;
     } while (cursor);
 
-    console.log(`[getRedlineQueue] Fetched ${allKeys.length} total Embed configs`);
+    logPhase('getRedlineQueue', 'Fetched Embed configs', { count: allKeys.length });
 
     // Load all Embed configs
     const embedConfigs = await Promise.all(
@@ -86,7 +87,7 @@ export async function getRedlineQueue(req) {
             );
             pageData = await pageResponse.json();
           } catch (error) {
-            console.error(`Failed to fetch page ${config.pageId}:`, error);
+            logWarning('getRedlineQueue', 'Failed to fetch page', { pageId: config.pageId, error: error.message });
           }
         }
 
@@ -148,10 +149,11 @@ export async function getRedlineQueue(req) {
     // Sort
     filteredEmbeds.sort((a, b) => {
       switch (sortBy) {
-        case 'status':
+        case 'status': {
           // Reviewable is highest priority (appears first)
           const statusOrder = { 'reviewable': 0, 'needs-revision': 1, 'pre-approved': 2, 'approved': 3 };
           return statusOrder[a.redlineStatus] - statusOrder[b.redlineStatus];
+        }
 
         case 'page':
           return a.pageTitle.localeCompare(b.pageTitle);
@@ -199,7 +201,7 @@ export async function getRedlineQueue(req) {
     return { embeds: filteredEmbeds, groups: null };
 
   } catch (error) {
-    console.error('[getRedlineQueue] Error:', error);
+    logFailure('getRedlineQueue', 'Error loading redline queue', error);
     throw new Error(`Failed to load redline queue: ${error.message}`);
   }
 }
@@ -254,9 +256,9 @@ export async function setRedlineStatus(req) {
         const latestVersion = versionsResult.versions[0];
         approvedContentHash = latestVersion.contentHash;
 
-        console.log(`[setRedlineStatus] Approving Embed ${localId} with contentHash: ${approvedContentHash}`);
+        logPhase('setRedlineStatus', 'Approving Embed with contentHash', { localId, contentHash: approvedContentHash });
       } else {
-        console.warn(`[setRedlineStatus] No version history found for Embed ${localId}, cannot set approvedContentHash`);
+        logWarning('setRedlineStatus', 'No version history found for Embed', { localId });
         // Still allow approval, but without contentHash tracking
         approvedContentHash = null;
       }
@@ -289,7 +291,7 @@ export async function setRedlineStatus(req) {
 
     await storage.set(configKey, updatedConfig);
 
-    console.log(`[setRedlineStatus] Embed ${localId}: ${previousStatus} → ${status} (by ${userId})`);
+    logSuccess('setRedlineStatus', 'Status updated', { localId, previousStatus, newStatus: status, userId });
 
     return {
       success: true,
@@ -300,7 +302,7 @@ export async function setRedlineStatus(req) {
     };
 
   } catch (error) {
-    console.error('[setRedlineStatus] Error:', error);
+    logFailure('setRedlineStatus', 'Error setting redline status', error);
     throw new Error(`Failed to set redline status: ${error.message}`);
   }
 }
@@ -341,11 +343,11 @@ export async function bulkSetRedlineStatus(req) {
         localId,
         error: error.message
       });
-      console.error(`[bulkSetRedlineStatus] Failed for ${localId}:`, error);
+      logFailure('bulkSetRedlineStatus', 'Failed to update status', error, { localId });
     }
   }
 
-  console.log(`[bulkSetRedlineStatus] Completed: ${results.updated} updated, ${results.failed} failed`);
+  logSuccess('bulkSetRedlineStatus', 'Bulk update completed', { updated: results.updated, failed: results.failed });
 
   return results;
 }
@@ -387,7 +389,7 @@ export async function checkRedlineStale(req) {
     const versionsResult = await listVersions(storage, localId);
 
     if (!versionsResult.success || versionsResult.versions.length === 0) {
-      console.warn(`[checkRedlineStale] No version history found for Embed ${localId}`);
+      logWarning('checkRedlineStale', 'No version history found for Embed', { localId });
       return {
         isStale: false,
         reason: 'No version history available',
@@ -410,7 +412,7 @@ export async function checkRedlineStale(req) {
     };
 
   } catch (error) {
-    console.error('[checkRedlineStale] Error:', error);
+    logFailure('checkRedlineStale', 'Error checking redline staleness', error);
     throw new Error(`Failed to check redline staleness: ${error.message}`);
   }
 }
@@ -465,7 +467,7 @@ export async function getConfluenceUser(req) {
     };
 
   } catch (error) {
-    console.error('[getConfluenceUser] Error:', error);
+    logFailure('getConfluenceUser', 'Error fetching Confluence user', error, { accountId });
     // Return fallback data instead of throwing
     return {
       accountId,
@@ -485,7 +487,7 @@ export async function getConfluenceUser(req) {
  *
  * @returns {Object} { reviewable: 10, preApproved: 5, needsRevision: 3, approved: 50, total: 68 }
  */
-export async function getRedlineStats(req) {
+export async function getRedlineStats() {
   try {
     // Get all macro-vars:* keys with pagination
     let allKeys = [];
@@ -501,8 +503,6 @@ export async function getRedlineStats(req) {
       allKeys = allKeys.concat(batch.results);
       cursor = batch.nextCursor;
     } while (cursor);
-
-    console.log(`[getRedlineStats] Fetched ${allKeys.length} total Embed configs`);
 
     const stats = {
       reviewable: 0,
@@ -538,7 +538,7 @@ export async function getRedlineStats(req) {
     return stats;
 
   } catch (error) {
-    console.error('[getRedlineStats] Error:', error);
+    logFailure('getRedlineStats', 'Error getting redline stats', error);
     throw new Error(`Failed to get redline stats: ${error.message}`);
   }
 }
@@ -554,7 +554,7 @@ export async function getRedlineStats(req) {
  * @returns {Object} { success: true, commentId, location }
  */
 export async function postRedlineComment(req) {
-  const { localId, pageId, commentText, userId } = req.payload;
+  const { localId, pageId, commentText } = req.payload;
 
   if (!localId) {
     throw new Error('localId is required');
@@ -570,7 +570,7 @@ export async function postRedlineComment(req) {
 
   try {
     // Step 1: Fetch page content (ADF) from Confluence
-    console.log(`[postRedlineComment] Fetching page ${pageId} content...`);
+    logPhase('postRedlineComment', 'Fetching page content', { pageId });
 
     const pageResponse = await api.asUser().requestConfluence(
       route`/wiki/api/v2/pages/${pageId}?body-format=atlas_doc_format`
@@ -596,7 +596,7 @@ export async function postRedlineComment(req) {
       throw new Error(`Failed to parse ADF content: ${parseError.message}`);
     }
 
-    console.log(`[postRedlineComment] Fetched page "${pageData.title}", parsed ADF with ${adfContent?.content?.length || 0} top-level nodes`);
+    logPhase('postRedlineComment', 'Fetched and parsed page ADF', { pageTitle: pageData.title, nodeCount: adfContent?.content?.length || 0 });
 
     // Step 2: Navigate ADF to find the Embed macro and nearby text for inline comment
     const { textSelection, matchCount, matchIndex } = findTextNearEmbed(adfContent, localId);
@@ -605,7 +605,7 @@ export async function postRedlineComment(req) {
       throw new Error(`Could not find suitable text near Embed ${localId} for inline comment`);
     }
 
-    console.log(`[postRedlineComment] Found text selection: "${textSelection}" (match ${matchIndex + 1} of ${matchCount})`);
+    logPhase('postRedlineComment', 'Found text selection for inline comment', { textSelection, matchIndex: matchIndex + 1, matchCount });
 
     // Step 3: Post inline comment to Confluence
     const commentBody = {
@@ -620,8 +620,6 @@ export async function postRedlineComment(req) {
         textSelectionMatchIndex: matchIndex
       }
     };
-
-    console.log(`[postRedlineComment] Posting inline comment...`);
 
     const commentResponse = await api.asUser().requestConfluence(
       route`/wiki/api/v2/inline-comments`,
@@ -642,7 +640,7 @@ export async function postRedlineComment(req) {
 
     const commentData = await commentResponse.json();
 
-    console.log(`[postRedlineComment] Successfully posted comment ${commentData.id}`);
+    logSuccess('postRedlineComment', 'Successfully posted inline comment', { commentId: commentData.id, pageId, localId });
 
     return {
       success: true,
@@ -652,7 +650,7 @@ export async function postRedlineComment(req) {
     };
 
   } catch (error) {
-    console.error('[postRedlineComment] Error:', error);
+    logFailure('postRedlineComment', 'Error posting inline comment', error, { pageId, localId });
     throw new Error(`Failed to post inline comment: ${error.message}`);
   }
 }
@@ -671,9 +669,6 @@ export async function postRedlineComment(req) {
  * @returns {Object} { textSelection, matchCount, matchIndex } or { textSelection: null }
  */
 function findTextNearEmbed(adfContent, targetLocalId) {
-  console.log(`[findTextNearEmbed] 🔍 Starting search for Embed with localId: ${targetLocalId}`);
-  console.log(`[findTextNearEmbed] ADF root type: ${adfContent?.type}, has content: ${Array.isArray(adfContent?.content)}`);
-
   // Track all content nodes in order for finding previous/next elements
   const contentNodes = [];
   let embedNodeIndex = -1;
@@ -683,21 +678,9 @@ function findTextNearEmbed(adfContent, targetLocalId) {
   function walkAdf(node, depth = 0) {
     if (!node || typeof node !== 'object') return;
 
-    // Debug: Log all extension nodes we encounter
+    // Count extension nodes
     if (node.type === 'extension') {
       extensionNodesFound++;
-      console.log(`[findTextNearEmbed] Found extension node #${extensionNodesFound}:`, JSON.stringify({
-        type: node.type,
-        extensionType: node.attrs?.extensionType,
-        extensionKey: node.attrs?.extensionKey,
-        parametersStructure: Object.keys(node.attrs?.parameters || {}),
-        fullParameters: node.attrs?.parameters,
-        macroParams: node.attrs?.parameters?.macroParams,
-        localIdPath1: node.attrs?.parameters?.macroParams?.localId?.value,
-        localIdPath2: node.attrs?.parameters?.macroParams?.localId,
-        localIdPath3: node.attrs?.parameters?.localId,
-        allAttrs: node.attrs
-      }, null, 2));
     }
 
     // Check if this is our target Embed macro
@@ -710,11 +693,6 @@ function findTextNearEmbed(adfContent, targetLocalId) {
       node.type === 'extension' &&
       nodeLocalId === targetLocalId
     ) {
-      console.log(`[findTextNearEmbed] ✅ FOUND TARGET EMBED at node ${contentNodes.length}, localId at: ${
-        node.attrs?.localId ? 'attrs.localId' :
-        node.attrs?.parameters?.localId ? 'attrs.parameters.localId' :
-        'attrs.parameters.macroParams.localId.value'
-      }`);
       embedNodeIndex = contentNodes.length;
     }
 
@@ -729,14 +707,10 @@ function findTextNearEmbed(adfContent, targetLocalId) {
 
   walkAdf(adfContent);
 
-  console.log(`[findTextNearEmbed] 📊 Search complete - found ${extensionNodesFound} extension nodes total, collected ${contentNodes.length} content nodes`);
-
   if (embedNodeIndex === -1) {
-    console.warn(`[findTextNearEmbed] ❌ Could not find Embed with localId ${targetLocalId} among ${extensionNodesFound} extension nodes`);
+    logWarning('findTextNearEmbed', 'Could not find Embed with localId', { targetLocalId, extensionNodesFound });
     return { textSelection: null };
   }
-
-  console.log(`[findTextNearEmbed] Found Embed at node index ${embedNodeIndex}`);
 
   // Strategy 1: Look backwards for the closest heading
   for (let i = embedNodeIndex - 1; i >= 0; i--) {
@@ -745,7 +719,6 @@ function findTextNearEmbed(adfContent, targetLocalId) {
       const headingText = extractText(node);
       if (headingText && headingText.trim().length > 0) {
         const { matchCount, matchIndex } = countTextOccurrences(adfContent, headingText);
-        console.log(`[findTextNearEmbed] Using heading: "${headingText}"`);
         return { textSelection: headingText, matchCount, matchIndex };
       }
     }
@@ -758,13 +731,12 @@ function findTextNearEmbed(adfContent, targetLocalId) {
       const paraText = extractText(node);
       if (paraText && paraText.trim().length > 0) {
         const { matchCount, matchIndex } = countTextOccurrences(adfContent, paraText);
-        console.log(`[findTextNearEmbed] Using paragraph: "${paraText}"`);
         return { textSelection: paraText, matchCount, matchIndex };
       }
     }
   }
 
-  console.warn(`[findTextNearEmbed] Could not find suitable text near Embed`);
+  logWarning('findTextNearEmbed', 'Could not find suitable text near Embed', { targetLocalId });
   return { textSelection: null };
 }
 

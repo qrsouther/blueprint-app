@@ -7,8 +7,13 @@
 **ALL deployments MUST go to PRODUCTION environment.**
 
 ```bash
-# CORRECT - Always use this:
-forge deploy --environment production --no-verify
+# CORRECT - Always use this (generates build timestamp automatically):
+npm run deploy
+# OR
+npm run deploy:prod
+
+# ALTERNATIVE - If you must use forge directly, generate timestamp first:
+node scripts/generate-build-timestamp.js && forge deploy --environment production --no-verify
 
 # WRONG - Never use development:
 forge deploy --environment development  # ❌ NEVER DO THIS
@@ -23,16 +28,22 @@ forge deploy                             # ❌ Defaults to development
 
 ## Deployment Checklist
 
-Before every `forge deploy`:
-1. ✅ Verify command includes `--environment production`
-2. ✅ Run `forge deploy --environment production --no-verify`
-3. ✅ Wait for deployment to complete
-4. ✅ Ask user to hard refresh (Cmd+Shift+R) to clear cache
-5. ✅ Verify changes in browser
+Before every deployment:
+1. ✅ Run `npm run deploy` (automatically generates build timestamp)
+2. ✅ Wait for deployment to complete
+3. ✅ Ask user to hard refresh (Cmd+Shift+R) to clear cache
+4. ✅ Verify changes in browser (check build timestamp is updated)
 
 ## Common Mistakes to Avoid
 
+- ❌ Running `forge deploy` directly (bypasses build timestamp generation)
 - ❌ Deploying to development by default
 - ❌ Forgetting `--environment production` flag
 - ❌ Assuming user's browser will auto-update (requires hard refresh)
 - ❌ Not verifying which environment is active before testing
+
+## Build Timestamp
+
+The deployment process automatically generates a build timestamp that appears on the admin page loading screen. This timestamp shows when the app was built/deployed and is automatically updated each time you run `npm run deploy` or `npm run deploy:prod`.
+
+If you run `forge deploy` directly, the timestamp won't update. Always use `npm run deploy` to ensure the timestamp is generated.

@@ -6,7 +6,7 @@
  */
 
 import { storage, startsWith } from '@forge/api';
-import api, { route } from '@forge/api';
+import { logFunction, logSuccess, logFailure, logWarning } from '../utils/forge-logger.js';
 
 /**
  * Backfill redlineStatus and pageId for all existing Embeds
@@ -19,9 +19,9 @@ import api, { route } from '@forge/api';
  *
  * @returns {Object} Migration result with counts
  */
-export async function backfillRedlineFields(req) {
+export async function backfillRedlineFields() {
   try {
-    console.log('[REDLINE-MIGRATION] Starting backfill...');
+    logFunction('backfillRedlineFields', 'START', {});
 
     // Get all macro-vars:* keys
     const allKeys = await storage.query()
@@ -45,7 +45,6 @@ export async function backfillRedlineFields(req) {
           updates.redlineStatus = 'reviewable';
           updates.statusHistory = [];
           needsUpdate = true;
-          console.log(`[REDLINE-MIGRATION] Adding redlineStatus for ${localId}`);
         }
 
         // Backfill pageId if missing - try to get from usage data
@@ -60,11 +59,10 @@ export async function backfillRedlineFields(req) {
               if (ref && ref.pageId) {
                 updates.pageId = ref.pageId;
                 needsUpdate = true;
-                console.log(`[REDLINE-MIGRATION] Adding pageId ${ref.pageId} for ${localId}`);
               }
             }
           } catch (err) {
-            console.warn(`[REDLINE-MIGRATION] Failed to lookup pageId for ${localId}:`, err.message);
+            logWarning('backfillRedlineFields', 'Failed to lookup pageId', { localId, error: err.message });
           }
         }
 
@@ -76,7 +74,7 @@ export async function backfillRedlineFields(req) {
           skipped++;
         }
       } catch (error) {
-        console.error(`[REDLINE-MIGRATION] Error processing ${localId}:`, error);
+        logFailure('backfillRedlineFields', 'Error processing Embed', error, { localId });
         errors++;
       }
     }
@@ -90,11 +88,11 @@ export async function backfillRedlineFields(req) {
       message: `Backfilled ${updated} Embeds, skipped ${skipped}, ${errors} errors`
     };
 
-    console.log('[REDLINE-MIGRATION] Complete:', result);
+    logSuccess('backfillRedlineFields', 'Migration complete', { updated, skipped, errors, total: allKeys.results.length });
     return result;
 
   } catch (error) {
-    console.error('[REDLINE-MIGRATION] Migration failed:', error);
+    logFailure('backfillRedlineFields', 'Migration failed', error);
     return {
       success: false,
       error: error.message,

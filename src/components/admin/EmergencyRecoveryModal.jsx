@@ -47,6 +47,7 @@ import {
 } from '@forge/react';
 import { invoke } from '@forge/bridge';
 import { StableTextfield } from '../common/StableTextfield';
+import { logger } from '../../utils/logger.js';
 
 // Item container styling
 const deletedItemStyle = xcss({
@@ -120,7 +121,6 @@ export function EmergencyRecoveryModal({ isOpen, onClose, initialTab = 'deleted-
   // Update active tab when modal opens with new initialTab
   useEffect(() => {
     if (isOpen && initialTab) {
-      console.log('[EmergencyRecovery] Setting active tab to:', initialTab);
       setActiveTab(initialTab);
     }
   }, [isOpen, initialTab]);
@@ -128,7 +128,6 @@ export function EmergencyRecoveryModal({ isOpen, onClose, initialTab = 'deleted-
   // Update version localId when UUID is provided
   useEffect(() => {
     if (isOpen && autoLoadEmbedUuid) {
-      console.log('[EmergencyRecovery] Setting version localId to:', autoLoadEmbedUuid);
       setVersionLocalId(autoLoadEmbedUuid);
     }
   }, [isOpen, autoLoadEmbedUuid]);
@@ -136,7 +135,6 @@ export function EmergencyRecoveryModal({ isOpen, onClose, initialTab = 'deleted-
   // Auto-load version history when UUID is provided
   useEffect(() => {
     if (isOpen && autoLoadEmbedUuid && initialTab === 'version-history') {
-      console.log('[EmergencyRecovery] Auto-loading versions for UUID:', autoLoadEmbedUuid);
       // Small delay to ensure state is set
       setTimeout(() => {
         handleLoadVersions();
@@ -160,7 +158,7 @@ export function EmergencyRecoveryModal({ isOpen, onClose, initialTab = 'deleted-
       }
     } catch (err) {
       setError(err.message);
-      console.error('[EmergencyRecovery] Error loading deleted items:', err);
+      logger.errors('Error loading deleted items:', err);
     } finally {
       setLoading(false);
     }
@@ -191,7 +189,7 @@ export function EmergencyRecoveryModal({ isOpen, onClose, initialTab = 'deleted-
       }
     } catch (err) {
       setError(`Error restoring ${localId}: ${err.message}`);
-      console.error('[EmergencyRecovery] Error restoring item:', err);
+      logger.errors('Error restoring item:', err, { localId });
     } finally {
       setRestoring(prev => ({ ...prev, [localId]: false }));
     }
@@ -221,7 +219,7 @@ export function EmergencyRecoveryModal({ isOpen, onClose, initialTab = 'deleted-
       }
     } catch (err) {
       setDeleteResult({ success: false, error: err.message });
-      console.error('[EmergencyRecovery] Error deleting orphaned Embeds:', err);
+      logger.errors('Error deleting orphaned Embeds:', err);
     } finally {
       setDeleting(false);
     }
@@ -231,15 +229,11 @@ export function EmergencyRecoveryModal({ isOpen, onClose, initialTab = 'deleted-
    * Load version history for a specific Embed localId
    */
   const handleLoadVersions = async () => {
-    console.log('[EmergencyRecovery] handleLoadVersions called with localId:', versionLocalId);
-
     if (!versionLocalId.trim()) {
-      console.log('[EmergencyRecovery] Empty localId, showing error');
       setVersionError('Please enter a valid Embed UUID (localId)');
       return;
     }
 
-    console.log('[EmergencyRecovery] Starting version load...');
     setLoadingVersions(true);
     setVersionError(null);
     setVersions([]);
@@ -247,27 +241,23 @@ export function EmergencyRecoveryModal({ isOpen, onClose, initialTab = 'deleted-
 
     try {
       const entityId = versionLocalId.trim(); // Just the UUID, not the storage key
-      console.log('[EmergencyRecovery] Invoking getVersionHistory with entityId:', entityId);
 
       const response = await invoke('getVersionHistory', { entityId });
-      console.log('[EmergencyRecovery] getVersionHistory response:', response);
 
       if (response.success) {
-        console.log('[EmergencyRecovery] Success! Found versions:', response.versions?.length || 0);
         setVersions(response.versions || []);
         if (response.versions.length === 0) {
           setVersionError('No version history found for this Embed UUID');
         }
       } else {
-        console.error('[EmergencyRecovery] Response not successful:', response.error);
+        logger.errors('Response not successful:', response.error);
         setVersionError(response.error || 'Failed to load version history');
       }
     } catch (err) {
-      console.error('[EmergencyRecovery] Error loading versions:', err);
+      logger.errors('Error loading versions:', err, { localId: versionLocalId });
       setVersionError(err.message);
     } finally {
       setLoadingVersions(false);
-      console.log('[EmergencyRecovery] Loading complete');
     }
   };
 
@@ -287,7 +277,7 @@ export function EmergencyRecoveryModal({ isOpen, onClose, initialTab = 'deleted-
       }
     } catch (err) {
       setVersionError(`Error loading version: ${err.message}`);
-      console.error('[EmergencyRecovery] Error loading version details:', err);
+      logger.errors('Error loading version details:', err, { versionId });
     }
   };
 
@@ -322,8 +312,8 @@ export function EmergencyRecoveryModal({ isOpen, onClose, initialTab = 'deleted-
         setVersionError(`Failed to restore version: ${response.error}`);
       }
     } catch (err) {
-      setVersionError(`Error restoring version: ${err.message}`);
-      console.error('[EmergencyRecovery] Error restoring version:', err);
+        setVersionError(`Error restoring version: ${err.message}`);
+        logger.errors('Error restoring version:', err, { versionId });
     } finally {
       setRestoringVersion(false);
     }

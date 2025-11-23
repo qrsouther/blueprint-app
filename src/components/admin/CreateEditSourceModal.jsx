@@ -46,6 +46,7 @@ import { useCategoriesQuery } from '../../hooks/admin-hooks';
 import { extractTextFromAdf } from '../../utils/adf-utils';
 import { StableTextfield } from '../common/StableTextfield';
 import { middleSectionStyles } from '../../styles/admin-styles';
+import { logger } from '../../utils/logger.js';
 
 // Custom hook for fetching excerpt data with React Query
 const useExcerptQuery = (excerptId, enabled) => {
@@ -104,26 +105,31 @@ const useSaveExcerptMutation = () => {
           sourceLocalId: virtualLocalId
         });
 
-        // Backend returns excerpt data directly (no success wrapper)
+        // Handle backend validation errors (new format)
+        if (result && result.success === false && result.error) {
+          throw new Error(result.error);
+        }
+
+        // Backend returns excerpt data directly on success (no success wrapper)
+        // NOTE: Return format will be standardized in Phase 4 (API Consistency)
         if (!result || !result.excerptId) {
           throw new Error('Failed to save excerpt - invalid response');
         }
 
         return result;
       } catch (error) {
-        console.error('[REACT-QUERY-CREATE-EDIT] Save error:', error);
+        logger.errors('[REACT-QUERY-CREATE-EDIT] Save error:', error);
         throw error;
       }
     },
+    // Note: Cache invalidation is handled in the component's onSuccess callback
+    // to allow awaiting refetch completion before closing the modal
     onSuccess: (data) => {
-      // Invalidate the excerpt cache so it refetches with updated data
-      queryClient.invalidateQueries({ queryKey: ['excerpt', data.excerptId] });
-      // Also invalidate the excerpts list (for Admin UI and Include macro dropdowns)
-      queryClient.invalidateQueries({ queryKey: ['excerpts', 'list'] });
-      queryClient.invalidateQueries({ queryKey: ['excerpts'] });
+      // Mutation hook onSuccess - no invalidation here, handled in component
+      // This allows the component to await refetch completion
     },
     onError: (error) => {
-      console.error('[REACT-QUERY-CREATE-EDIT] Save failed:', error);
+      logger.errors('[REACT-QUERY-CREATE-EDIT] Save failed:', error);
     }
   });
 };
@@ -168,6 +174,9 @@ export function CreateEditSourceModal({
   const [detectedToggles, setDetectedToggles] = useState([]);
   const [toggleMetadata, setToggleMetadata] = useState({});
   const [documentationLinks, setDocumentationLinks] = useState([]);
+  
+  // Validation state for Forge UI Kit components
+  const [validationErrors, setValidationErrors] = useState({});
 
   // Form state for adding new documentation links
   const [newLinkAnchor, setNewLinkAnchor] = useState('');
@@ -300,7 +309,7 @@ export function CreateEditSourceModal({
             setDetectedVariables(result.variables);
           }
         } catch (err) {
-          console.error('Error detecting variables:', err);
+          logger.errors('Error detecting variables:', err);
         }
       };
 
@@ -327,7 +336,7 @@ export function CreateEditSourceModal({
             setDetectedToggles(result.toggles);
           }
         } catch (err) {
-          console.error('Error detecting toggles:', err);
+          logger.errors('Error detecting toggles:', err);
         }
       };
 
@@ -345,8 +354,31 @@ export function CreateEditSourceModal({
   const contentText = editorContent ? extractTextFromAdf(editorContent) : '';
 
   const handleSave = async () => {
-    if (!excerptName.trim()) {
-      alert('Please enter a Source name');
+    // Frontend validation (works with Forge UI Kit components)
+    const errors = {};
+    
+    // Validate excerptName - handle null, undefined, empty string, and whitespace
+    const nameValue = excerptName;
+    if (!nameValue || typeof nameValue !== 'string' || nameValue.trim() === '') {
+      errors.excerptName = 'Source name is required and must be a non-empty string';
+    }
+
+    // Validate category if provided
+    if (category !== undefined && category !== null && typeof category !== 'string') {
+      errors.category = 'Category must be a string';
+    }
+
+    // Validate documentationLinks if provided
+    if (documentationLinks !== undefined && documentationLinks !== null && !Array.isArray(documentationLinks)) {
+      errors.documentationLinks = 'Documentation links must be an array';
+    }
+
+    // Set validation errors to display in UI
+    setValidationErrors(errors);
+
+    // If there are validation errors, don't proceed - show errors in UI
+    if (Object.keys(errors).length > 0) {
+      // Scroll to first error field if needed
       return;
     }
 
@@ -375,7 +407,28 @@ export function CreateEditSourceModal({
       description: toggleMetadata[t.name]?.description || ''
     }));
 
+    // Clear validation errors before save attempt
+    setValidationErrors({});
+
     // Use React Query mutation to save
+    // Prepare optimistic update data
+    const optimisticExcerpt = {
+      id: editingExcerptId || `temp-${Date.now()}`,
+      excerptId: editingExcerptId || `temp-${Date.now()}`,
+      name: excerptName.trim(),
+      excerptName: excerptName.trim(),
+      category: category || 'General',
+      content: contentToSave,
+      variables: variablesWithMetadata,
+      toggles: togglesWithMetadata,
+      documentationLinks: documentationLinks || [],
+      sourcePageId: excerptData?.sourcePageId || `virtual-${editingExcerptId || 'new'}`,
+      sourceSpaceKey: excerptData?.sourceSpaceKey || 'virtual-blueprint-source',
+      sourceLocalId: excerptData?.sourceLocalId || `virtual-${editingExcerptId || 'new'}`,
+      updatedAt: new Date().toISOString(),
+      createdAt: excerptData?.createdAt || new Date().toISOString()
+    };
+
     saveExcerptMutation({
       excerptName: excerptName.trim(),
       category,
@@ -388,13 +441,120 @@ export function CreateEditSourceModal({
       existingSourceSpaceKey: excerptData?.sourceSpaceKey,
       existingSourceLocalId: excerptData?.sourceLocalId
     }, {
-      onSuccess: async () => {
-        // Close modal after successful save
-        onClose();
+      onMutate: async () => {
+        // Optimistically update the cache immediately for instant UI feedback
+        // Cancel any outgoing refetches to avoid overwriting our optimistic update
+        await queryClient.cancelQueries({ queryKey: ['excerpts', 'list'] });
+        await queryClient.cancelQueries({ queryKey: ['excerpt', editingExcerptId] });
+
+        // Snapshot the previous value for rollback if mutation fails
+        const previousExcerptsList = queryClient.getQueryData(['excerpts', 'list']);
+        const previousExcerpt = editingExcerptId 
+          ? queryClient.getQueryData(['excerpt', editingExcerptId])
+          : null;
+
+        // Optimistically update the excerpts list
+        queryClient.setQueryData(['excerpts', 'list'], (old) => {
+          if (!old || !old.excerpts) return old;
+          
+          const excerpts = [...old.excerpts];
+          // Find by both id and excerptId to handle different data structures
+          const existingIndex = excerpts.findIndex(e => 
+            (e.id === editingExcerptId) || (e.excerptId === editingExcerptId)
+          );
+          
+          if (existingIndex >= 0) {
+            // Update existing excerpt - preserve all existing fields, only update changed ones
+            const existing = excerpts[existingIndex];
+            excerpts[existingIndex] = {
+              ...existing,
+              name: excerptName.trim(),
+              excerptName: excerptName.trim(),
+              category: category || existing.category || 'General',
+              updatedAt: new Date().toISOString(),
+              // Preserve other fields like variables, toggles, etc.
+            };
+          }
+          
+          // Return new object to ensure React Query detects the change
+          return { ...old, excerpts };
+        });
+
+        // Optimistically update individual excerpt cache if editing
+        if (editingExcerptId) {
+          queryClient.setQueryData(['excerpt', editingExcerptId], optimisticExcerpt);
+        }
+
+        // Return context for rollback
+        return { previousExcerptsList, previousExcerpt };
       },
-      onError: (error) => {
-        console.error('[REACT-QUERY-CREATE-EDIT] Failed to save:', error);
-        alert('Failed to save: ' + error.message);
+      onError: (error, variables, context) => {
+        // Rollback optimistic update on error
+        if (context?.previousExcerptsList) {
+          queryClient.setQueryData(['excerpts', 'list'], context.previousExcerptsList);
+        }
+        if (context?.previousExcerpt) {
+          queryClient.setQueryData(['excerpt', editingExcerptId], context.previousExcerpt);
+        }
+        
+        logger.errors('[REACT-QUERY-CREATE-EDIT] Failed to save:', error);
+        // Display backend validation errors
+        setValidationErrors({ 
+          general: error.message || 'Failed to save. Please check your input and try again.'
+        });
+      },
+      onSuccess: async (data) => {
+        // Clear validation errors on success
+        setValidationErrors({});
+        
+        // Update cache with actual server response data (more accurate than optimistic update)
+        // This ensures the UI reflects the exact data returned from the server
+        if (data && data.excerptId) {
+          // Update excerpts list with server response
+          queryClient.setQueryData(['excerpts', 'list'], (old) => {
+            if (!old || !old.excerpts) return old;
+            
+            const excerpts = [...old.excerpts];
+            const existingIndex = excerpts.findIndex(e => e.id === data.excerptId || e.excerptId === data.excerptId);
+            
+            // Use the actual server response data, ensuring field names match
+            const updatedExcerpt = {
+              ...excerpts[existingIndex >= 0 ? existingIndex : 0],
+              ...data,
+              id: data.excerptId,
+              name: data.excerptName || data.name,
+              excerptName: data.excerptName || data.name,
+              category: data.category || 'General',
+              updatedAt: data.updatedAt || new Date().toISOString()
+            };
+            
+            if (existingIndex >= 0) {
+              excerpts[existingIndex] = updatedExcerpt;
+            } else {
+              excerpts.push(updatedExcerpt);
+            }
+            
+            return { ...old, excerpts };
+          });
+          
+          // Update individual excerpt cache
+          queryClient.setQueryData(['excerpt', data.excerptId], {
+            ...data,
+            id: data.excerptId,
+            name: data.excerptName || data.name
+          });
+        }
+        
+        // Close modal IMMEDIATELY after updating cache
+        // The modal appears to block re-renders of the underlying page in Forge,
+        // so closing it first allows the page to update once the modal is gone
+        onClose();
+        
+        // Refetch in the background after modal closes (non-blocking)
+        // This ensures data consistency with the server
+        queryClient.refetchQueries({ queryKey: ['excerpt', data.excerptId] });
+        queryClient.refetchQueries({ queryKey: ['excerpts', 'list'] });
+        queryClient.refetchQueries({ queryKey: ['excerpts'] });
       }
     });
   };
@@ -420,6 +580,13 @@ export function CreateEditSourceModal({
               <Text>Error loading excerpt: {excerptError.message}</Text>
             </SectionMessage>
           ) : (
+            <>
+              {/* Display validation errors from backend */}
+              {validationErrors.general && (
+                <SectionMessage appearance="error" title="Validation Error">
+                  <Text>{validationErrors.general}</Text>
+                </SectionMessage>
+              )}
             <Tabs onChange={(index) => setSelectedTabIndex(index)}>
               <TabList space="space.200">
                 <Tab>Name/Category</Tab>
@@ -442,8 +609,24 @@ export function CreateEditSourceModal({
                           value={excerptName}
                           placeholder={isLoadingExcerpt ? 'Loading...' : 'Enter Source name'}
                           isDisabled={isLoadingExcerpt}
-                          onChange={(e) => setExcerptName(e.target.value)}
+                          isInvalid={!!validationErrors.excerptName}
+                          onChange={(e) => {
+                            setExcerptName(e.target.value);
+                            // Clear error when user starts typing
+                            if (validationErrors.excerptName) {
+                              setValidationErrors(prev => {
+                                const next = { ...prev };
+                                delete next.excerptName;
+                                return next;
+                              });
+                            }
+                          }}
                         />
+                        {validationErrors.excerptName && (
+                          <Text color="color.text.danger" size="small">
+                            {validationErrors.excerptName}
+                          </Text>
+                        )}
                       </Box>
                       <Box xcss={xcss({ width: '25%' })}>
                         <Label labelFor="category">
@@ -710,6 +893,7 @@ export function CreateEditSourceModal({
                 </FormSection>
               </TabPanel>
             </Tabs>
+            </>
           )}
         </ModalBody>
 

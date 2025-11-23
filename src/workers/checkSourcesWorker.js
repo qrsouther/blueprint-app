@@ -19,13 +19,12 @@
  * - 90-100%: Finalizing results
  */
 
-import { AsyncEvent } from '@forge/events';
 import { storage } from '@forge/api';
 import api, { route } from '@forge/api';
 import { updateProgress, calculatePhaseProgress } from './helpers/progress-tracker.js';
 import { extractVariablesFromAdf } from '../utils/adf-utils.js';
-import { saveVersion, restoreVersion } from '../utils/version-manager.js';
 import { validateExcerptData } from '../utils/storage-validator.js';
+import { logFunction, logPhase, logSuccess, logFailure, logWarning } from '../utils/forge-logger.js';
 
 /**
  * Process Check All Sources operation asynchronously
@@ -33,12 +32,13 @@ import { validateExcerptData } from '../utils/storage-validator.js';
  * @param {AsyncEvent} event - The async event from the queue (v2: payload is in event.body)
  * @param {Object} context - The context object with jobId, etc.
  */
-export async function handler(event, context) {
+export async function handler(event) {
   // In @forge/events v2, payload is in event.body, not event.payload
   const payload = event.payload || event.body || event;
   const { progressId } = payload;
 
-  console.log(`[WORKER] Starting Check All Sources (progressId: ${progressId})`);
+  const functionStartTime = Date.now();
+  logFunction('checkSourcesWorker', 'Starting Check All Sources', { progressId });
 
   try {
     // Phase 1: Initialize (0-10%)
@@ -52,7 +52,7 @@ export async function handler(event, context) {
 
     // Get all excerpts from the index
     const excerptIndex = await storage.get('excerpt-index') || { excerpts: [] };
-    console.log(`[WORKER] Total excerpts to check: ${excerptIndex.excerpts.length}`);
+    logPhase('checkSourcesWorker', 'Total excerpts to check', { count: excerptIndex.excerpts.length });
 
     await updateProgress(progressId, {
       phase: 'loading',
@@ -72,7 +72,6 @@ export async function handler(event, context) {
 
       // Skip if this excerpt doesn't have page info
       if (!excerpt.sourcePageId || !excerpt.sourceLocalId) {
-        console.log(`[WORKER] ⚠️ Excerpt "${excerpt.name}" missing sourcePageId or sourceLocalId, skipping`);
         skippedExcerpts.push(excerpt.name);
         continue;
       }
@@ -83,10 +82,10 @@ export async function handler(event, context) {
       excerptsByPage.get(excerpt.sourcePageId).push(excerpt);
     }
 
-    console.log(`[WORKER] Grouped excerpts into ${excerptsByPage.size} pages to check`);
-    if (skippedExcerpts.length > 0) {
-      console.log(`[WORKER] Skipped ${skippedExcerpts.length} excerpts with missing page info`);
-    }
+    logPhase('checkSourcesWorker', 'Grouped excerpts by page', {
+      totalPages: excerptsByPage.size,
+      skippedCount: skippedExcerpts.length
+    });
 
     await updateProgress(progressId, {
       phase: 'checking',
@@ -106,7 +105,6 @@ export async function handler(event, context) {
     let pageNumber = 0;
     for (const [pageId, pageExcerpts] of excerptsByPage.entries()) {
       pageNumber++;
-      console.log(`[WORKER] Fetching page ${pageId} (${pageExcerpts.length} excerpts)...`);
 
       try {
         // STEP 1: Fetch in storage format for orphan detection (proven to work)
@@ -120,7 +118,7 @@ export async function handler(event, context) {
         );
 
         if (!storageResponse.ok) {
-          console.log(`[WORKER] ❌ Page ${pageId} not accessible, marking ${pageExcerpts.length} Sources as orphaned`);
+          logWarning('checkSourcesWorker', 'Page not accessible', { pageId, excerptCount: pageExcerpts.length });
           pageExcerpts.forEach(excerpt => {
             orphanedSources.push({
               ...excerpt,
@@ -146,7 +144,7 @@ export async function handler(event, context) {
         const storageBody = storageData?.body?.storage?.value || '';
 
         if (!storageBody) {
-          console.warn(`[WORKER] ⚠️ No storage body found for page ${pageId}`);
+          logWarning('checkSourcesWorker', 'No storage body found for page', { pageId });
           pageExcerpts.forEach(excerpt => {
             orphanedSources.push({
               ...excerpt,
@@ -175,7 +173,6 @@ export async function handler(event, context) {
           const macroExists = storageBody.includes(excerpt.sourceLocalId);
 
           if (!macroExists) {
-            console.log(`[WORKER] ❌ Source "${excerpt.name}" NOT found on page - ORPHANED`);
             orphanedSources.push({
               ...excerpt,
               orphanedReason: 'Macro deleted from source page'
@@ -184,13 +181,11 @@ export async function handler(event, context) {
           }
 
           // Source exists on page
-          console.log(`[WORKER] ✅ Source "${excerpt.name}" found on page`);
           checkedSources.push(excerpt.name);
 
           // Check if content needs conversion (Storage Format XML -> ADF JSON)
           const needsConversion = excerpt.content && typeof excerpt.content === 'string';
           if (needsConversion) {
-            console.log(`[WORKER] 🔄 Source "${excerpt.name}" needs Storage Format → ADF conversion (ENABLED with versioning protection)`);
             sourcesToConvert.push(excerpt);
           }
         }
@@ -198,7 +193,7 @@ export async function handler(event, context) {
         // STEP 3: If any Sources need conversion, fetch page in ADF format
         // PHASE 3 (v7.19.0): RE-ENABLED WITH VERSIONING PROTECTION
         if (sourcesToConvert.length > 0) {
-          console.log(`[WORKER] 🔄 ${sourcesToConvert.length} Sources need conversion, fetching ADF...`);
+          logPhase('checkSourcesWorker', 'Sources need conversion', { count: sourcesToConvert.length, pageId });
 
           const adfResponse = await api.asApp().requestConfluence(
             route`/wiki/api/v2/pages/${pageId}?body-format=atlas_doc_format`,
@@ -210,13 +205,13 @@ export async function handler(event, context) {
           );
 
           if (!adfResponse.ok) {
-            console.warn(`[WORKER] ⚠️ Could not fetch ADF for page ${pageId}, skipping conversion`);
+            logWarning('checkSourcesWorker', 'Could not fetch ADF for page', { pageId });
           } else {
             const adfData = await adfResponse.json();
             const adfBody = adfData?.body?.atlas_doc_format?.value;
 
             if (!adfBody) {
-              console.warn(`[WORKER] ⚠️ No ADF body found for page ${pageId}, skipping conversion`);
+              logWarning('checkSourcesWorker', 'No ADF body found for page', { pageId });
             } else {
               const adfDoc = typeof adfBody === 'string' ? JSON.parse(adfBody) : adfBody;
 
@@ -234,7 +229,7 @@ export async function handler(event, context) {
               };
 
               const extensionNodes = findExtensions(adfDoc);
-              console.log(`[WORKER] Found ${extensionNodes.length} Source macro extension nodes in ADF`);
+              logPhase('checkSourcesWorker', 'Found extension nodes in ADF', { count: extensionNodes.length });
 
               // Convert each Source that needs it (with versioning protection)
               for (const excerpt of sourcesToConvert) {
@@ -243,38 +238,19 @@ export async function handler(event, context) {
                 );
 
                 if (!extensionNode || !extensionNode.content) {
-                  console.warn(`[WORKER] ⚠️ Could not find ADF node for "${excerpt.name}", skipping conversion`);
+                  logWarning('checkSourcesWorker', 'Could not find ADF node for excerpt', { excerptName: excerpt.name });
                   continue;
                 }
 
                 // ═══════════════════════════════════════════════════════════════════════
-                // PHASE 3 VERSIONING PROTECTION
+                // PHASE 3 FORMAT CONVERSION
                 // ═══════════════════════════════════════════════════════════════════════
-                console.log(`[WORKER] 🛡️ [PHASE 3] Creating version snapshot BEFORE converting "${excerpt.name}"...`);
+                // Note: Source versioning removed - only current contentHash needed for staleness detection
+                // Embed versioning is still active for data recovery purposes
+                logPhase('checkSourcesWorker', '[PHASE 3] Converting from Storage Format to ADF JSON', { excerptName: excerpt.name });
 
-                // STEP 1: Create pre-conversion version snapshot
-                const versionResult = await saveVersion(
-                  storage,
-                  `excerpt:${excerpt.id}`,
-                  excerpt,
-                  {
-                    changeType: 'STORAGE_FORMAT_CONVERSION',
-                    changedBy: 'checkAllSources',
-                    trigger: 'automatic_conversion'
-                  }
-                );
-
-                if (!versionResult.success) {
-                  console.error(`[WORKER] ❌ Failed to create version snapshot for "${excerpt.name}": ${versionResult.error}`);
-                  console.error(`[WORKER] ⚠️ Skipping conversion for safety (cannot rollback without version snapshot)`);
-                  continue; // Skip conversion if we can't create backup
-                }
-
-                const backupVersionId = versionResult.versionId;
-                console.log(`[WORKER] ✅ Version snapshot created: ${backupVersionId}`);
-
-                // STEP 2: Perform conversion
-                console.log(`[WORKER] 🔄 Converting "${excerpt.name}" from Storage Format to ADF JSON...`);
+                // Perform conversion
+                logPhase('checkSourcesWorker', '[PHASE 3] Converting from Storage Format to ADF JSON', { excerptName: excerpt.name });
 
                 try {
                   // Extract ADF content from the bodiedExtension node
@@ -300,49 +276,27 @@ export async function handler(event, context) {
                     updatedAt: new Date().toISOString()
                   };
 
-                  // STEP 3: Post-conversion validation
-                  console.log(`[WORKER] 🔍 [PHASE 3] Validating converted data for "${excerpt.name}"...`);
+                  // STEP 2: Post-conversion validation
+                  logPhase('checkSourcesWorker', '[PHASE 3] Validating converted data', { excerptName: excerpt.name });
                   const validation = validateExcerptData(convertedExcerpt);
 
                   if (!validation.valid) {
-                    // VALIDATION FAILED - AUTO-ROLLBACK
-                    console.error(`[WORKER] ❌ [PHASE 3] Validation FAILED for "${excerpt.name}": ${validation.errors.join(', ')}`);
-                    console.error(`[WORKER] 🔄 [PHASE 3] AUTO-ROLLBACK: Restoring from version ${backupVersionId}...`);
-
-                    const rollbackResult = await restoreVersion(storage, backupVersionId);
-
-                    if (rollbackResult.success) {
-                      console.error(`[WORKER] ✅ [PHASE 3] AUTO-ROLLBACK SUCCESSFUL for "${excerpt.name}"`);
-                      console.error(`[WORKER] ⚠️ Conversion cancelled - Source remains in Storage Format`);
-                    } else {
-                      console.error(`[WORKER] ❌ [PHASE 3] AUTO-ROLLBACK FAILED: ${rollbackResult.error}`);
-                      console.error(`[WORKER] ⚠️ MANUAL INTERVENTION REQUIRED for "${excerpt.name}" (excerptId: ${excerpt.id})`);
-                    }
-
+                    // VALIDATION FAILED - Skip conversion (no rollback needed, original data unchanged)
+                    logFailure('checkSourcesWorker', '[PHASE 3] Validation FAILED', new Error(validation.errors.join(', ')), { excerptName: excerpt.name });
+                    logWarning('checkSourcesWorker', '[PHASE 3] Conversion skipped - Source remains in Storage Format', { excerptName: excerpt.name });
                     continue; // Skip to next Source
                   }
 
-                  // STEP 4: Validation passed - save converted data
-                  console.log(`[WORKER] ✅ [PHASE 3] Validation passed for "${excerpt.name}"`);
+                  // STEP 3: Validation passed - save converted data
+                  logPhase('checkSourcesWorker', '[PHASE 3] Validation passed', { excerptName: excerpt.name });
                   await storage.set(`excerpt:${excerpt.id}`, convertedExcerpt);
-                  console.log(`[WORKER] ✅ Converted "${excerpt.name}" to ADF JSON (${variables.length} variables)`);
+                  logSuccess('checkSourcesWorker', '[PHASE 3] Converted to ADF JSON', { excerptName: excerpt.name, variablesCount: variables.length });
                   contentConversionsCount++;
 
                 } catch (conversionError) {
-                  // CONVERSION ERROR - AUTO-ROLLBACK
-                  console.error(`[WORKER] ❌ [PHASE 3] Conversion ERROR for "${excerpt.name}": ${conversionError.message}`);
-                  console.error(`[WORKER] 🔄 [PHASE 3] AUTO-ROLLBACK: Restoring from version ${backupVersionId}...`);
-
-                  const rollbackResult = await restoreVersion(storage, backupVersionId);
-
-                  if (rollbackResult.success) {
-                    console.error(`[WORKER] ✅ [PHASE 3] AUTO-ROLLBACK SUCCESSFUL for "${excerpt.name}"`);
-                    console.error(`[WORKER] ⚠️ Conversion cancelled - Source remains in Storage Format`);
-                  } else {
-                    console.error(`[WORKER] ❌ [PHASE 3] AUTO-ROLLBACK FAILED: ${rollbackResult.error}`);
-                    console.error(`[WORKER] ⚠️ MANUAL INTERVENTION REQUIRED for "${excerpt.name}" (excerptId: ${excerpt.id})`);
-                  }
-
+                  // CONVERSION ERROR - Skip conversion (no rollback needed, original data unchanged)
+                  logFailure('checkSourcesWorker', '[PHASE 3] Conversion ERROR', conversionError, { excerptName: excerpt.name });
+                  logWarning('checkSourcesWorker', '[PHASE 3] Conversion skipped - Source remains in Storage Format', { excerptName: excerpt.name });
                   continue; // Skip to next Source
                 }
               }
@@ -350,7 +304,7 @@ export async function handler(event, context) {
           }
         }
       } catch (apiError) {
-        console.error(`[WORKER] Error checking page ${pageId}:`, apiError);
+        logFailure('checkSourcesWorker', 'Error checking page', apiError, { pageId });
         pageExcerpts.forEach(excerpt => {
           orphanedSources.push({
             ...excerpt,
@@ -371,7 +325,6 @@ export async function handler(event, context) {
         currentPage: pageNumber
       });
 
-      console.log(`[WORKER] Processed page ${pageNumber}/${excerptsByPage.size} (${percentComplete}%)`);
     }
 
     // Phase 3: Finalize results (90-100%)
@@ -382,11 +335,6 @@ export async function handler(event, context) {
       total: excerptIndex.excerpts.length,
       processed: checkedSources.length + orphanedSources.length
     });
-
-    console.log(`[WORKER] ✅ Source check complete: ${checkedSources.length} active, ${orphanedSources.length} orphaned`);
-    if (contentConversionsCount > 0) {
-      console.log(`[WORKER] 🔄 Converted ${contentConversionsCount} Sources from Storage Format to ADF JSON`);
-    }
 
     // Build completion status message
     let statusMessage = `Complete! ${checkedSources.length} active, ${orphanedSources.length} orphaned`;
@@ -416,7 +364,13 @@ export async function handler(event, context) {
       results: finalResults
     });
 
-    console.log(`[WORKER] Check All Sources complete (progressId: ${progressId})`);
+    logSuccess('checkSourcesWorker', 'Check All Sources complete', {
+      progressId,
+      duration: `${Date.now() - functionStartTime}ms`,
+      activeCount: checkedSources.length,
+      orphanedCount: orphanedSources.length,
+      conversionsCount: contentConversionsCount
+    });
 
     return {
       success: true,
@@ -430,7 +384,7 @@ export async function handler(event, context) {
     };
 
   } catch (error) {
-    console.error(`[WORKER] Fatal error in Check All Sources:`, error);
+    logFailure('checkSourcesWorker', 'Fatal error in Check All Sources', error, { progressId });
 
     await updateProgress(progressId, {
       phase: 'error',

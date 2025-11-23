@@ -31,7 +31,7 @@ import {
  * @param {Object} req - Forge resolver request
  * @returns {Object} { success: boolean, items: Array, error?: string }
  */
-export async function getDeletedItems(req) {
+export async function getDeletedItems() {
   const FUNCTION_NAME = 'getDeletedItems';
   logFunction(FUNCTION_NAME, 'START');
 

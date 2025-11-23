@@ -47,6 +47,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useCategoriesQuery } from '../../hooks/admin-hooks';
 import { extractTextFromAdf } from '../../utils/adf-utils';
 import { StableTextfield } from '../common/StableTextfield';
+import { logger } from '../../utils/logger.js';
 
 // Custom hook for fetching excerpt data with React Query
 const useExcerptQuery = (excerptId, enabled) => {
@@ -88,14 +89,20 @@ const useSaveExcerptMutation = () => {
           sourceLocalId
         });
 
-        // Backend returns excerpt data directly (no success wrapper)
+        // Handle backend validation errors (new format)
+        if (result && result.success === false && result.error) {
+          throw new Error(result.error);
+        }
+
+        // Backend returns excerpt data directly on success (no success wrapper)
+        // NOTE: Return format will be standardized in Phase 4 (API Consistency)
         if (!result || !result.excerptId) {
           throw new Error('Failed to save excerpt - invalid response');
         }
 
         return result;
       } catch (error) {
-        console.error('[REACT-QUERY-ADMIN-PREVIEW] Save error:', error);
+        logger.errors('[REACT-QUERY-ADMIN-PREVIEW] Save error:', error);
         throw error;
       }
     },
@@ -106,7 +113,7 @@ const useSaveExcerptMutation = () => {
       queryClient.invalidateQueries({ queryKey: ['excerpts', 'list'] });
     },
     onError: (error) => {
-      console.error('[REACT-QUERY-ADMIN-PREVIEW] Save failed:', error);
+      logger.errors('[REACT-QUERY-ADMIN-PREVIEW] Save failed:', error);
     }
   });
 };
@@ -252,7 +259,7 @@ export function ExcerptPreviewModal({
           setDetectedVariables(result.variables);
         }
       } catch (err) {
-        console.error('Error detecting variables:', err);
+        logger.errors('Error detecting variables:', err);
       }
     };
 
@@ -274,7 +281,7 @@ export function ExcerptPreviewModal({
           setDetectedToggles(result.toggles);
         }
       } catch (err) {
-        console.error('Error detecting toggles:', err);
+        logger.errors('Error detecting toggles:', err);
       }
     };
 
@@ -338,12 +345,12 @@ export function ExcerptPreviewModal({
             });
 
             if (!updateResult.success) {
-              console.error('[REACT-QUERY-ADMIN-PREVIEW] Failed to update macro body:', updateResult.error);
+              logger.errors('[REACT-QUERY-ADMIN-PREVIEW] Failed to update macro body:', updateResult.error);
               alert('Saved to storage, but failed to update macro on page: ' + updateResult.error);
               return;
             }
           } catch (error) {
-            console.error('[REACT-QUERY-ADMIN-PREVIEW] Error updating macro body:', error);
+            logger.errors('[REACT-QUERY-ADMIN-PREVIEW] Error updating macro body:', error);
             alert('Saved to storage, but failed to update macro on page: ' + error.message);
             return;
           }
@@ -353,7 +360,7 @@ export function ExcerptPreviewModal({
         setShowPreviewModal(null);
       },
       onError: (error) => {
-        console.error('[REACT-QUERY-ADMIN-PREVIEW] Failed to save:', error);
+        logger.errors('[REACT-QUERY-ADMIN-PREVIEW] Failed to save:', error);
         alert('Failed to save: ' + error.message);
       }
     });
@@ -387,7 +394,7 @@ export function ExcerptPreviewModal({
                     // Use open() to open in new tab
                     await router.open(url);
                   } catch (err) {
-                    console.error('Navigation error:', err);
+                    logger.errors('Navigation error:', err);
                     alert('Error navigating to source page: ' + err.message);
                   }
                 }}

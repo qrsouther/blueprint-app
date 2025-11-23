@@ -32,11 +32,13 @@ import ForgeReconciler, {
   Heading,
   Toggle,
   Label,
+  Spinner,
   xcss
 } from '@forge/react';
 import { invoke, router } from '@forge/bridge';
 import { QueryClient, QueryClientProvider, useQueryClient } from '@tanstack/react-query';
 import { ReactQueryDevtools } from '@tanstack/react-query-devtools';
+import { logger } from './utils/logger.js';
 
 // Import React Query hooks
 import {
@@ -63,7 +65,7 @@ import {
   sortExcerpts,
   calculateStalenessStatus
 } from './utils/admin-utils';
-import { APP_VERSION } from './utils/version';
+import { BUILD_TIMESTAMP } from './utils/version';
 
 // Import components
 import { MigrationModal } from './components/MigrationModal';
@@ -129,7 +131,7 @@ const queryClient = new QueryClient({
 // 4. Delete migration handler functions (search for "handleScanMultiExcerpt", "handleBulkImport", etc.)
 const SHOW_MIGRATION_TOOLS = false; // TEMPORARILY DISABLED FOR ONE-TIME BULK IMPORT
 
-// App version (imported from utils/version.js - keep in sync with package.json)
+// Build timestamp (automatically generated at build time by scripts/generate-build-timestamp.js)
 
 const App = () => {
   // ============================================================================
@@ -139,10 +141,26 @@ const App = () => {
   // Get query client for manual cache invalidation
   const queryClient = useQueryClient();
 
+  // Format build timestamp in browser's local timezone
+  const formatBuildTimestamp = () => {
+    const buildDate = new Date(BUILD_TIMESTAMP);
+    return buildDate.toLocaleString('en-US', {
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      timeZoneName: 'short',
+      hour12: false
+    });
+  };
+
   // Fetch excerpts and orphaned data
   const {
     data: excerptsQueryData,
     isLoading,
+    isFetching: isRefetchingExcerpts,
     error: excerptsError
   } = useExcerptsQuery();
 
@@ -183,11 +201,9 @@ const App = () => {
         // If we got a URL, store it
         if (adminUrl) {
           await invoke('setAdminUrl', { adminUrl });
-          console.log('[Admin] Stored admin URL:', adminUrl);
         }
       } catch (error) {
         // Silently fail - this is not critical functionality
-        console.warn('[Admin] Could not store admin URL:', error);
       }
     };
     
@@ -219,6 +235,9 @@ const App = () => {
   const [includesCheckResult, setIncludesCheckResult] = useState(null);
   const [includesProgress, setIncludesProgress] = useState(null);
   const [progressId, setProgressId] = useState(null);
+
+  // Check All Sources progress state
+  const [sourcesProgress, setSourcesProgress] = useState(null);
 
   // Force delete orphaned references state
   const [isDeletingOrphanedRefs, setIsDeletingOrphanedRefs] = useState(false);
@@ -274,6 +293,31 @@ const App = () => {
     setShowContentPreview(true);
   }, [selectedExcerptForDetails?.id]);
 
+  // Update selectedExcerptForDetails when excerpts list updates (e.g., after saving changes)
+  // This ensures the Usage Details heading reflects the latest data after edits
+  // Uses a ref to track the previous excerpts length to avoid unnecessary updates
+  const prevExcerptsLengthRef = useRef(excerpts.length);
+  useEffect(() => {
+    if (selectedExcerptForDetails?.id && excerpts.length > 0) {
+      const updatedExcerpt = excerpts.find(e => e.id === selectedExcerptForDetails.id);
+      if (updatedExcerpt) {
+        // Only update if the excerpt data actually changed (name, category, etc.)
+        // This prevents unnecessary re-renders and ensures we catch updates
+        const hasChanged = 
+          updatedExcerpt.name !== selectedExcerptForDetails.name ||
+          updatedExcerpt.category !== selectedExcerptForDetails.category ||
+          prevExcerptsLengthRef.current !== excerpts.length;
+        
+        if (hasChanged) {
+          // Update to the latest excerpt data from the refetched list
+          // This ensures the heading and other displayed data stays in sync
+          setSelectedExcerptForDetails(updatedExcerpt);
+        }
+      }
+    }
+    prevExcerptsLengthRef.current = excerpts.length;
+  }, [excerpts, selectedExcerptForDetails?.id]);
+
   // Auto-discover categories from excerpts (when new ones added via import)
   useEffect(() => {
     if (!excerpts.length) return;
@@ -282,7 +326,6 @@ const App = () => {
     const newCategories = categoriesFromExcerpts.filter(cat => !categories.includes(cat));
 
     if (newCategories.length > 0) {
-      console.log('[REACT-QUERY-ADMIN] Auto-discovered new categories:', newCategories);
       const updated = [...categories, ...newCategories];
       saveCategoriesMutation.mutate(updated);
     }
@@ -303,26 +346,20 @@ const App = () => {
           const now = new Date();
           const hoursSinceVerification = (now - lastVerified) / (1000 * 60 * 60);
 
-          console.log(`[AUTO-VERIFY] Last verification: ${hoursSinceVerification.toFixed(1)} hours ago`);
-
           // Auto-verify if older than 24 hours
           if (hoursSinceVerification > 24) {
-            console.log('[AUTO-VERIFY] Data is stale, running Check All Includes automatically...');
             setIsAutoVerifying(true);
             await handleCheckAllIncludes(true);
             setIsAutoVerifying(false);
-          } else {
-            console.log('[AUTO-VERIFY] Data is fresh, skipping auto-verification');
           }
         } else {
           // No previous verification, run it now
-          console.log('[AUTO-VERIFY] No previous verification found, running Check All Includes...');
           setIsAutoVerifying(true);
           await handleCheckAllIncludes(true);
           setIsAutoVerifying(false);
         }
       } catch (error) {
-        console.error('[AUTO-VERIFY] Error during auto-verification:', error);
+        // Error during auto-verification - silently fail
         setIsAutoVerifying(false);
       }
     };
@@ -344,7 +381,7 @@ const App = () => {
           setStorageUsageError(result.error || 'Failed to calculate storage usage');
         }
       } catch (error) {
-        console.error('[ADMIN] Error fetching storage usage:', error);
+        logger.errors('Error fetching storage usage:', error);
         setStorageUsageError(error.message);
       } finally {
         setStorageUsageLoading(false);
@@ -369,11 +406,9 @@ const App = () => {
     const fetchEnvironment = async () => {
       try {
         const result = await invoke('getForgeEnvironment');
-        console.log('[ADMIN] getForgeEnvironment result:', result);
         
         if (result.success) {
           setForgeEnvironment(result.environment);
-          console.log('[ADMIN] Forge environment set to:', result.environment);
           
           // Also check URL for tunnel indicators as a fallback
           if (typeof window !== 'undefined' && window.location) {
@@ -385,17 +420,15 @@ const App = () => {
                                url.includes('loca.lt');
             
             if (isTunnelUrl && result.environment === 'production') {
-              console.log('[ADMIN] Detected tunnel URL, treating as development');
               setForgeEnvironment('development');
             }
           }
         } else {
           // Default to production if we can't determine
-          console.warn('[ADMIN] Failed to get environment, defaulting to production');
           setForgeEnvironment('production');
         }
       } catch (error) {
-        console.warn('[ADMIN] Could not fetch Forge environment:', error);
+        logger.errors('Could not fetch Forge environment:', error);
         // Default to production for safety
         setForgeEnvironment('production');
       }
@@ -447,7 +480,7 @@ const App = () => {
         document.head.appendChild(styleElement);
       } catch (error) {
         // CSP violation - silently fail as this is a non-critical enhancement
-        console.warn('[Admin] Could not add scrollbar styles due to CSP:', error);
+        // No logging needed for non-critical CSP violations
       }
     }
 
@@ -522,87 +555,116 @@ const App = () => {
   };
 
   const handleMoveCategoryToPosition = (categoryName, targetPosition) => {
-    console.log(`[ADMIN-PAGE] ======================================`);
-    console.log(`[ADMIN-PAGE] handleMoveCategoryToPosition called`);
-    console.log(`[ADMIN-PAGE] Category to move: "${categoryName}"`);
-    console.log(`[ADMIN-PAGE] Target position (1-based): ${targetPosition}`);
-    console.log(`[ADMIN-PAGE] Categories array BEFORE move:`, JSON.stringify(categories));
-
     const currentIndex = categories.indexOf(categoryName);
-    console.log(`[ADMIN-PAGE] Current index (0-based): ${currentIndex}`);
-    console.log(`[ADMIN-PAGE] Current position (1-based): ${currentIndex + 1}`);
 
     if (currentIndex === -1) {
-      console.log(`[ADMIN-PAGE] ❌ ERROR: Category not found in array`);
       return; // Category not found
     }
 
     // Convert 1-based position to 0-based index
     const targetIndex = targetPosition - 1;
-    console.log(`[ADMIN-PAGE] Target index (0-based): ${targetIndex}`);
 
     // Validate target index
     if (targetIndex < 0 || targetIndex >= categories.length || targetIndex === currentIndex) {
-      console.log(`[ADMIN-PAGE] ❌ Invalid move - validation failed:`);
-      console.log(`[ADMIN-PAGE]   - targetIndex < 0: ${targetIndex < 0}`);
-      console.log(`[ADMIN-PAGE]   - targetIndex >= length: ${targetIndex >= categories.length}`);
-      console.log(`[ADMIN-PAGE]   - targetIndex === currentIndex: ${targetIndex === currentIndex}`);
       return;
     }
 
     const newCategories = [...categories];
-    console.log(`[ADMIN-PAGE] Created copy of categories array`);
 
     // Remove category from current position
     const [removed] = newCategories.splice(currentIndex, 1);
-    console.log(`[ADMIN-PAGE] Removed "${removed}" from index ${currentIndex}`);
-    console.log(`[ADMIN-PAGE] Array after removal:`, JSON.stringify(newCategories));
 
     // Insert at target position
     newCategories.splice(targetIndex, 0, removed);
-    console.log(`[ADMIN-PAGE] Inserted "${removed}" at index ${targetIndex}`);
-    console.log(`[ADMIN-PAGE] Categories array AFTER move:`, JSON.stringify(newCategories));
-
-    console.log(`[ADMIN-PAGE] Saving new category order via mutation...`);
     saveCategoriesMutation.mutate(newCategories);
-    console.log(`[ADMIN-PAGE] ======================================`);
   };
 
   const handleCheckAllSources = async () => {
+    // Show initial progress
+    setSourcesProgress({
+      phase: 'queuing',
+      total: 0,
+      processed: 0,
+      percent: 0,
+      status: 'Queuing Check All Sources job...'
+    });
+
     try {
-      console.log('[REACT-QUERY-ADMIN] 🔍 Starting Check All Sources...');
-      const result = await checkAllSourcesMutation.mutateAsync();
-
-      setOrphanedSources(Array.isArray(result.orphanedSources) ? result.orphanedSources : []);
-
-      // Build summary message
-      let message = `✅ Check complete:\n`;
-      message += `• ${result.activeCount} active Standard(s)\n`;
-      message += `• ${result.orphanedSources.length} orphaned Standard(s)`;
-
-      if (result.contentConversionsCount > 0) {
-        message += `\n\n🔄 Format conversion:\n`;
-        message += `• ${result.contentConversionsCount} Standard(s) converted from Storage Format to ADF JSON`;
+      // Start async job
+      const startResult = await invoke('startCheckAllSources');
+      if (!startResult.success) {
+        throw new Error(startResult.error || 'Failed to start check');
       }
 
-      if (result.staleEntriesRemoved > 0) {
-        message += `\n\n🧹 Cleanup complete:\n`;
-        message += `• ${result.staleEntriesRemoved} stale Embed entry/entries removed`;
-      } else if (result.contentConversionsCount === 0) {
-        message += `\n\n✨ No stale Embed entries found`;
-      }
+      const { progressId } = startResult;
+      setSourcesProgress({
+        phase: 'queued',
+        total: 0,
+        processed: 0,
+        percent: 0,
+        status: 'Job queued, starting...'
+      });
 
-      console.log(message);
-      alert(message);
+      // Poll for progress
+      const pollInterval = setInterval(async () => {
+        try {
+          const progressResult = await invoke('getCheckProgress', { progressId });
+          if (progressResult.success && progressResult.progress) {
+            const progress = progressResult.progress;
+            setSourcesProgress(progress);
+
+            // Check if complete
+            if (progress.phase === 'complete') {
+              clearInterval(pollInterval);
+
+              // Get final results
+              const finalProgressResult = await invoke('getCheckProgress', { progressId });
+              if (!finalProgressResult.success || !finalProgressResult.progress.results) {
+                throw new Error('Failed to retrieve final results');
+              }
+
+              const results = finalProgressResult.progress.results;
+              setOrphanedSources(Array.isArray(results.orphanedSources) ? results.orphanedSources : []);
+
+              // Build summary message
+              let message = `✅ Check complete:\n`;
+              message += `• ${results.activeCount || 0} active Standard(s)\n`;
+              message += `• ${results.orphanedSources?.length || 0} orphaned Standard(s)`;
+
+              if (results.contentConversionsCount > 0) {
+                message += `\n\n🔄 Format conversion:\n`;
+                message += `• ${results.contentConversionsCount} Standard(s) converted from Storage Format to ADF JSON`;
+              }
+
+              alert(message);
+              setSourcesProgress(null);
+            }
+          }
+        } catch (pollError) {
+          logger.errors('Error polling progress:', pollError);
+          clearInterval(pollInterval);
+          setSourcesProgress(null);
+        }
+      }, 1000); // Poll every second
+
+      // Timeout after 15 minutes (worker timeout)
+      setTimeout(() => {
+        clearInterval(pollInterval);
+        if (sourcesProgress && sourcesProgress.phase !== 'complete') {
+          setSourcesProgress(null);
+          alert('Check All Sources timed out. Please try again.');
+        }
+      }, 15 * 60 * 1000);
+
     } catch (err) {
-      console.error('[REACT-QUERY-ADMIN] Check Sources error:', err);
+      logger.errors('Check Sources error:', err);
+      setSourcesProgress(null);
       alert('Error checking sources: ' + err.message);
     }
   };
 
   const handleCreateTestPage = async () => {
     try {
-      console.log('[REACT-QUERY-ADMIN] 🧪 Creating test page with 148 Embeds...');
       const result = await createTestPageMutation.mutateAsync({ pageId: '84803640' });
 
       const message = `✅ Test page created successfully!\n\n` +
@@ -610,10 +672,9 @@ const App = () => {
         `• Embed count: ${result.embedCount}\n` +
         `• Ready for performance testing`;
 
-      console.log(message);
       alert(message);
     } catch (err) {
-      console.error('[REACT-QUERY-ADMIN] Create Test Page error:', err);
+      logger.errors('Create Test Page error:', err);
       alert('Error creating test page: ' + err.message);
     }
   };
@@ -623,7 +684,7 @@ const App = () => {
       const result = await invoke('getOneExcerptData', { excerptName });
       alert(result.message || 'Check forge logs for output');
     } catch (err) {
-      console.error('[REACT-QUERY-ADMIN] Check Format error:', err);
+      logger.errors('Check Format error:', err);
       alert('Error: ' + err.message);
     }
   };
@@ -645,7 +706,7 @@ const App = () => {
           }
         }
       } catch (err) {
-        console.error('Error polling progress:', err);
+        logger.errors('Error polling progress:', err);
       }
     }, 1000); // Poll every second
 
@@ -715,7 +776,6 @@ const App = () => {
     try {
       // Call async trigger - returns immediately with jobId + progressId
       // Always start in dry-run mode (preview) first
-      console.log('[ADMIN] Starting async Check All Includes (dry-run mode)...');
       const triggerResult = await invoke('checkAllIncludes', { dryRun: true });
 
       if (!triggerResult.success) {
@@ -724,8 +784,6 @@ const App = () => {
 
       progressId = triggerResult.progressId;
       const jobId = triggerResult.jobId;
-
-      console.log(`[ADMIN] Job queued: jobId=${jobId}, progressId=${progressId}`);
 
       // Start polling for progress
       const pollForProgress = async () => {
@@ -739,7 +797,6 @@ const App = () => {
               const progress = progressResult.progress;
               // Preserve isAutoVerification flag from initial state
               setIncludesProgress({ ...progress, isAutoVerification: isAutoVerification });
-              console.log(`[ADMIN] Progress: ${progress.percent}% - ${progress.status}`);
 
               // Check if complete
               if (progress.phase === 'complete') {
@@ -753,7 +810,7 @@ const App = () => {
               }
             }
           } catch (err) {
-            console.error('[ADMIN] Polling error:', err);
+            logger.errors('Polling error:', err);
             // Continue polling unless complete
           }
 
@@ -773,8 +830,6 @@ const App = () => {
 
       const results = finalProgressResult.progress.results;
       const summary = results.summary;
-
-      console.log('[ADMIN] Check complete:', summary);
 
       // Store results for potential CSV download
       setIncludesCheckResult(results);
@@ -802,7 +857,6 @@ const App = () => {
       const now = new Date().toISOString();
       await invoke('setLastVerificationTime', { timestamp: now });
       setLastVerificationTime(now);
-      console.log('[ADMIN] Verification timestamp updated:', now);
 
       // Keep progress visible in dry-run mode so user can see results and clean up button
       // Only clear in live mode after a delay
@@ -812,7 +866,7 @@ const App = () => {
       }
 
     } catch (err) {
-      console.error('[ADMIN] Error checking includes:', err);
+      logger.errors('Error checking includes:', err);
       alert('Error checking includes: ' + err.message);
       isComplete = true; // Stop polling on error
       setIncludesProgress(null);
@@ -843,7 +897,6 @@ const App = () => {
 
     try {
       // Call async trigger with dryRun: false (LIVE MODE)
-      console.log('[ADMIN] Starting async Check All Includes (LIVE mode - cleanup enabled)...');
       const triggerResult = await invoke('checkAllIncludes', { dryRun: false });
 
       if (!triggerResult.success) {
@@ -852,8 +905,6 @@ const App = () => {
 
       progressId = triggerResult.progressId;
       const jobId = triggerResult.jobId;
-
-      console.log(`[ADMIN] Cleanup job queued: jobId=${jobId}, progressId=${progressId}`);
 
       // Start polling for progress
       const pollForProgress = async () => {
@@ -866,7 +917,6 @@ const App = () => {
             if (progressResult.success && progressResult.progress) {
               const progress = progressResult.progress;
               setIncludesProgress(progress);
-              console.log(`[ADMIN] Cleanup Progress: ${progress.percent}% - ${progress.status}`);
 
               // Check if complete
               if (progress.phase === 'complete') {
@@ -880,7 +930,7 @@ const App = () => {
               }
             }
           } catch (err) {
-            console.error('[ADMIN] Polling error:', err);
+            logger.errors('Polling error:', err);
             // Continue polling unless complete
           }
 
@@ -901,8 +951,6 @@ const App = () => {
       const results = finalProgressResult.progress.results;
       const summary = results.summary;
 
-      console.log('[ADMIN] Cleanup complete:', summary);
-
       // Store results for potential CSV download
       setIncludesCheckResult(results);
 
@@ -910,10 +958,8 @@ const App = () => {
       const now = new Date().toISOString();
       await invoke('setLastVerificationTime', { timestamp: now });
       setLastVerificationTime(now);
-      console.log('[ADMIN] Verification timestamp updated:', now);
 
       // Invalidate React Query cache to refresh orphaned usage data
-      console.log('[ADMIN] Invalidating excerpts cache to refresh orphaned data...');
       queryClient.invalidateQueries({ queryKey: ['excerpts', 'list'] });
 
       // Show results for 2 seconds before clearing
@@ -921,7 +967,7 @@ const App = () => {
       setIncludesProgress(null);
 
     } catch (err) {
-      console.error('[ADMIN] Error during cleanup:', err);
+      logger.errors('Error during cleanup:', err);
       alert('Error during cleanup: ' + err.message);
       isComplete = true; // Stop polling on error
       setIncludesProgress(null);
@@ -933,7 +979,6 @@ const App = () => {
 
   // Handle Force Delete Orphaned References button (from orphaned Embed modal)
   const handleForceDeleteOrphanedRefs = async (orphanedItem) => {
-    console.log('[ADMIN] Force delete requested for orphaned item:', orphanedItem);
 
     // Confirm before deletion
     if (!confirm(`⚠️ This will PERMANENTLY delete the orphaned usage key for "${orphanedItem.excerptName}" (${orphanedItem.referenceCount} reference(s)).\n\nThis action cannot be undone (unless you have CSV log backups).\n\nContinue?`)) {
@@ -948,33 +993,23 @@ const App = () => {
         .map(ref => ref.localId)
         .filter(id => id !== undefined && id !== null && id !== '');
 
-      console.log('[ADMIN] Extracted localIds:', localIds);
-      console.log('[ADMIN] References array:', orphanedItem.references);
-
       // If no valid localIds, just delete the usage key directly
       if (localIds.length === 0) {
-        console.log('[ADMIN] No valid localIds found - deleting usage key directly');
         const result = await invoke('deleteOrphanedUsageKey', { excerptId: orphanedItem.excerptId });
 
         if (!result.success) {
           throw new Error(result.error || 'Failed to delete orphaned usage key');
         }
-
-        console.log('[ADMIN] Successfully deleted orphaned usage key:', result.message);
       } else {
         // Call resolver to delete by localIds
-        console.log('[ADMIN] Deleting orphaned references by localId:', localIds);
         const result = await invoke('deleteOrphanedUsageReferences', { localIds });
 
         if (!result.success) {
           throw new Error(result.error || 'Failed to delete orphaned references');
         }
-
-        console.log('[ADMIN] Successfully deleted orphaned references:', result.summary);
       }
 
       // Invalidate React Query cache to refresh orphaned usage data
-      console.log('[ADMIN] Invalidating excerpts cache to refresh orphaned data...');
       queryClient.invalidateQueries({ queryKey: ['excerpts', 'list'] });
 
       // Close modal
@@ -985,7 +1020,7 @@ const App = () => {
       alert(`✅ Successfully deleted orphaned usage key for "${orphanedItem.excerptName}"`);
 
     } catch (err) {
-      console.error('[ADMIN] Error force deleting orphaned references:', err);
+      logger.errors('Error force deleting orphaned references:', err);
       alert('❌ Error deleting orphaned references: ' + err.message);
     } finally {
       setIsDeletingOrphanedRefs(false);
@@ -1006,14 +1041,10 @@ const App = () => {
     });
 
     try {
-      console.log('🔍 Starting MultiExcerpt Includes scan in cs space...');
-
       // Start the backend scan
       const result = await invoke('scanMultiExcerptIncludes');
-      console.log('Scan result:', result);
 
       if (result.success) {
-        console.log('Got progressId:', result.progressId);
 
         // Fetch final progress state
         if (result.progressId) {
@@ -1032,7 +1063,6 @@ const App = () => {
         message += `• Found ${result.summary.totalIncludes} MultiExcerpt Include(s)\n`;
         message += `• Across ${result.summary.totalPages} page(s) in 'cs' space`;
 
-        console.log(message);
         alert(message);
 
         // Offer to download CSV
@@ -1051,11 +1081,11 @@ const App = () => {
           }
         }
       } else {
-        console.error('Scan failed:', result.error);
+        logger.errors('Scan failed:', result.error);
         alert('Scan failed: ' + result.error);
       }
     } catch (err) {
-      console.error('Error scanning MultiExcerpt includes:', err);
+      logger.errors('Error scanning MultiExcerpt includes:', err);
       alert('Error scanning MultiExcerpt includes: ' + err.message);
     } finally {
       setIsScanningMultiExcerpt(false);
@@ -1080,7 +1110,7 @@ const App = () => {
           }
         }
       } catch (err) {
-        console.error('Error polling MultiExcerpt scan progress:', err);
+        logger.errors('Error polling MultiExcerpt scan progress:', err);
       }
     }, 1000); // Poll every second
 
@@ -1100,7 +1130,6 @@ const App = () => {
       const json = JSON.parse(jsonTextInput);
       setImportJsonData(json);
       setImportResult(null);
-      console.log('JSON loaded:', json.sourceCount, 'sources');
     } catch (error) {
       alert('Error parsing JSON: ' + error.message);
     }
@@ -1120,13 +1149,9 @@ const App = () => {
     setIsImporting(true);
 
     try {
-      console.log('Starting bulk import...');
-
       const result = await invoke('bulkImportSources', {
         sources: importJsonData.sources
       });
-
-      console.log('Import result:', result);
 
       if (result.success) {
         setImportResult(result);
@@ -1165,7 +1190,7 @@ const App = () => {
       }
 
     } catch (error) {
-      console.error('Error importing sources:', error);
+      logger.errors('Error importing sources:', error);
       alert('Import error: ' + error.message);
     } finally {
       setIsImporting(false);
@@ -1200,14 +1225,10 @@ const App = () => {
     setMacroCreationResult(null);
 
     try {
-      console.log(`Creating ${migrated.length} Source macros on page ${pageId}...`);
-
       const result = await invoke('createSourceMacrosOnPage', {
         pageId,
         category
       });
-
-      console.log('Macro creation result:', result);
 
       if (result.success) {
         setMacroCreationResult(result);
@@ -1235,7 +1256,7 @@ const App = () => {
       }
 
     } catch (error) {
-      console.error('Error creating Source macros:', error);
+      logger.errors('Error creating Source macros:', error);
       alert('Error: ' + error.message);
     } finally {
       setIsCreatingMacros(false);
@@ -1264,7 +1285,7 @@ const App = () => {
   if (isLoading) {
     return (
       <Fragment>
-        <Text>v{APP_VERSION}</Text>
+        <Text>{formatBuildTimestamp()}</Text>
         <Text>Loading...</Text>
       </Fragment>
     );
@@ -1273,7 +1294,7 @@ const App = () => {
   if (error) {
     return (
       <Fragment>
-        <Text>Blueprint Standards Admin v{APP_VERSION}</Text>
+        <Text>Blueprint Standards Admin {formatBuildTimestamp()}</Text>
         <Text>Error: {error}</Text>
       </Fragment>
     );
@@ -1299,6 +1320,72 @@ const App = () => {
       })}
     >
       <Fragment>
+      {/* Storage Usage Warning - Display at top if threshold exceeded */}
+      {storageUsage?.exceedsWarningThreshold && !storageUsageLoading && !storageUsageError && (
+        <Box paddingBlock="space.200" paddingInline="space.200">
+          <SectionMessage appearance="warning" title="Storage Usage Warning">
+            <Text>
+              Storage usage ({storageUsage.totalMB} MB) has exceeded the warning threshold ({storageUsage.warningThresholdMB} MB / {storageUsage.limitMB} MB limit).
+            </Text>
+            <Text>
+              Consider implementing "Current + Previous" versioning for Embeds or compressing syncedContent to reduce storage consumption.
+            </Text>
+          </SectionMessage>
+        </Box>
+      )}
+
+      {/* Progress Bar for Check All Sources */}
+      {sourcesProgress && (
+        <Box xcss={sectionMarginStyles}>
+          <SectionMessage appearance="information">
+            <Stack space="space.200">
+              {sourcesProgress.phase === 'complete' ? (
+                <Fragment>
+                  <Text><Strong>✅ Check All Sources Complete</Strong></Text>
+                  {sourcesProgress.activeCount !== undefined && (
+                    <Text>• {sourcesProgress.activeCount} active Standard(s)</Text>
+                  )}
+                  {sourcesProgress.orphanedCount !== undefined && (
+                    <Text>• {sourcesProgress.orphanedCount} orphaned Standard(s)</Text>
+                  )}
+                  {sourcesProgress.contentConversionsCount > 0 && (
+                    <Text>• {sourcesProgress.contentConversionsCount} converted to ADF</Text>
+                  )}
+                </Fragment>
+              ) : (
+                <Fragment>
+                  <Text><Strong>Checking All Sources...</Strong></Text>
+                  <Text><Em>Please stay on this page until the check completes.</Em></Text>
+                  {sourcesProgress.status && (
+                    <Text>{sourcesProgress.status}</Text>
+                  )}
+                  {sourcesProgress.percent !== undefined && (
+                    <ProgressBar value={sourcesProgress.percent / 100} />
+                  )}
+                  <Inline space="space.200" alignBlock="center">
+                    {sourcesProgress.percent !== undefined && (
+                      <Text><Strong>{sourcesProgress.percent}%</Strong></Text>
+                    )}
+                    {sourcesProgress.processed !== undefined && sourcesProgress.total !== undefined && sourcesProgress.total > 0 && (
+                      <Fragment>
+                        <Text>|</Text>
+                        <Text>{sourcesProgress.processed} / {sourcesProgress.total} Sources processed</Text>
+                      </Fragment>
+                    )}
+                    {sourcesProgress.currentPage && sourcesProgress.totalPages && (
+                      <Fragment>
+                        <Text>|</Text>
+                        <Text>Page {sourcesProgress.currentPage} of {sourcesProgress.totalPages}</Text>
+                      </Fragment>
+                    )}
+                  </Inline>
+                </Fragment>
+              )}
+            </Stack>
+          </SectionMessage>
+        </Box>
+      )}
+
       {/* Progress Bar for Check All Includes */}
       <CheckAllProgressBar
         includesProgress={includesProgress}
@@ -1396,7 +1483,7 @@ const App = () => {
                     showMigrationTools={SHOW_MIGRATION_TOOLS}
                     onOpenCategoryModal={() => setIsCategoryModalOpen(true)}
                     onCheckAllSources={handleCheckAllSources}
-                    isCheckingAllSources={checkAllSourcesMutation.isPending}
+                    isCheckingAllSources={sourcesProgress !== null && sourcesProgress.phase !== 'complete'}
                     onCheckAllIncludes={handleCheckAllIncludes}
                     isCheckingIncludes={includesProgress !== null}
                     onOpenEmergencyRecovery={() => setIsEmergencyRecoveryOpen(true)}
@@ -1624,7 +1711,16 @@ const App = () => {
                   <Box>
                     <Inline space="space.100" alignBlock="center" spread="space-between">
                       <Inline space="space.100" alignBlock="center">
-                        <Heading size="medium">{selectedExcerptForDetails.name}</Heading>
+                        <Heading size="medium">
+                          <Inline space="space.100" alignBlock="center">
+                            <Heading size="medium">{selectedExcerptForDetails.name}</Heading>
+                            {isRefetchingExcerpts && (
+                              <Tooltip content="Updating...">
+                                <Spinner size="small" label="Updating source data" />
+                              </Tooltip>
+                            )}
+                          </Inline>
+                        </Heading>
                         <Lozenge>{selectedExcerptForDetails.category || 'General'}</Lozenge>
                       </Inline>
                       <Inline space="space.100" alignBlock="center">
@@ -1656,7 +1752,7 @@ const App = () => {
                                 // Use open() to open in new tab
                                 await router.open(url);
                               } catch (err) {
-                                console.error('Navigation error:', err);
+                                logger.errors('Navigation error:', err);
                                 alert('Error navigating to source page: ' + err.message);
                               }
                             }}
@@ -1698,7 +1794,7 @@ const App = () => {
                               document.body.removeChild(link);
                               URL.revokeObjectURL(url);
                             } catch (err) {
-                              console.error('Error exporting CSV:', err);
+                              logger.errors('Error exporting CSV:', err);
                               alert('Error exporting CSV: ' + err.message);
                             }
                           }}
@@ -1731,7 +1827,7 @@ const App = () => {
                                   alert('Failed to delete Blueprint Standard: ' + result.error);
                                 }
                               } catch (err) {
-                                console.error('Delete error:', err);
+                                logger.errors('Delete error:', err);
                                 alert('Error deleting Blueprint Standard: ' + err.message);
                               }
                             }
@@ -1760,7 +1856,7 @@ const App = () => {
                                 alert(`Failed to force updates: ${result.error}`);
                               }
                             } catch (err) {
-                              console.error('Error force updating to all:', err);
+                              logger.errors('Error force updating to all:', err);
                               alert('Error force updating to all pages');
                             }
                           }}
@@ -1841,7 +1937,7 @@ const App = () => {
                                     }
                                     await router.open(url);
                                   } catch (err) {
-                                    console.error('Navigation error:', err);
+                                    logger.errors('Navigation error:', err);
                                   }
                                 }}
                                 iconAfter={() => <Icon glyph="shortcut" label="Opens in new tab" />}
@@ -1951,7 +2047,7 @@ const App = () => {
                                       alert(`Failed to force update: ${result.error}`);
                                     }
                                   } catch (err) {
-                                    console.error('Error force updating:', err);
+                                    logger.errors('Error force updating:', err);
                                     alert('Error force updating');
                                   }
                                 }}
@@ -1975,7 +2071,7 @@ const App = () => {
                 </Stack>
               );
             } catch (error) {
-              console.error('Error rendering middle section:', error);
+              logger.errors('Error rendering middle section:', error);
               return (
                 <Box>
                   <Text><Strong>Error loading Blueprint Standard details</Strong></Text>
@@ -2081,7 +2177,7 @@ const App = () => {
                             try {
                               await router.navigate(`/wiki/pages/viewpage.action?pageId=${selectedExcerpt.sourcePageId}`);
                             } catch (err) {
-                              console.error('Navigation error:', err);
+                              logger.errors('Navigation error:', err);
                             }
                           }}
                         >
@@ -2093,7 +2189,7 @@ const App = () => {
                             try {
                               await router.navigate(`/wiki/pages/viewpreviousversions.action?pageId=${selectedExcerpt.sourcePageId}`);
                             } catch (err) {
-                              console.error('Navigation error:', err);
+                              logger.errors('Navigation error:', err);
                             }
                           }}
                         >
@@ -2345,7 +2441,7 @@ const App = () => {
                                                 }
                                                 await router.open(url);
                                               } catch (err) {
-                                                console.error('Navigation error:', err);
+                                                logger.errors('Navigation error:', err);
                                               }
                                             }}
                                           >
@@ -2450,7 +2546,7 @@ const App = () => {
                                                   alert(`Failed to force update: ${result.error}`);
                                                 }
                                               } catch (err) {
-                                                console.error('Error force updating:', err);
+                                                logger.errors('Error force updating:', err);
                                                 alert('Error force updating');
                                               }
                                             }}
@@ -2485,7 +2581,7 @@ const App = () => {
                           try {
                             await router.navigate(`/wiki/pages/viewpage.action?pageId=${selectedExcerpt.sourcePageId}`);
                           } catch (err) {
-                            console.error('Navigation error:', err);
+                            logger.errors('Navigation error:', err);
                           }
                         }}
                       >
@@ -2576,9 +2672,11 @@ const App = () => {
       <StorageUsageFooter
         totalMB={storageUsage?.totalMB}
         limitMB={storageUsage?.limitMB}
+        warningThresholdMB={storageUsage?.warningThresholdMB}
         percentUsed={storageUsage?.percentUsed}
         sourcesCount={storageUsage?.sourcesCount}
         embedsCount={storageUsage?.embedsCount}
+        exceedsWarningThreshold={storageUsage?.exceedsWarningThreshold}
         isLoading={storageUsageLoading}
         error={storageUsageError}
       />

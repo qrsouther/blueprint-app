@@ -6,6 +6,7 @@
 import { storage } from '@forge/api';
 import api, { route } from '@forge/api';
 import { generateUUID } from '../utils.js';
+import { logFunction, logPhase, logSuccess, logFailure } from '../utils/forge-logger.js';
 
 /**
  * Extract Forge extension metadata template from a working Blueprint Standard Source page
@@ -34,48 +35,9 @@ async function extractForgeMetadataTemplate(workingPageId) {
       render: extension.attrs.parameters.render
     };
   } catch (error) {
-    console.error('Failed to extract Forge metadata template:', error);
+    logFailure('extractForgeMetadataTemplate', 'Failed to extract Forge metadata template', error);
     throw error;
   }
-}
-
-/**
- * Transform MultiExcerpt ADF to Blueprint Standard Source ADF
- */
-function transformToBlueprintStandardAdf(multiExcerptAdf, excerptId, excerptName, category, localId, forgeMetadata) {
-  const innerContent = multiExcerptAdf.content[0].content;
-
-  return {
-    type: 'doc',
-    content: [{
-      type: 'bodiedExtension',
-      attrs: {
-        layout: 'default',
-        extensionType: 'com.atlassian.ecosystem',
-        extensionKey: forgeMetadata.extensionKey,
-        text: forgeMetadata.text,
-        parameters: {
-          layout: 'bodiedExtension',
-          guestParams: {
-            variables: [],
-            excerptId: excerptId,
-            toggles: [],
-            category: category || 'General',
-            excerptName: excerptName
-          },
-          forgeEnvironment: forgeMetadata.forgeEnvironment,
-          extensionProperties: forgeMetadata.extensionProperties,
-          localId: localId,
-          extensionId: forgeMetadata.extensionId,
-          render: forgeMetadata.render,
-          extensionTitle: forgeMetadata.extensionTitle
-        },
-        localId: localId
-      },
-      content: innerContent
-    }],
-    version: 1
-  };
 }
 
 export async function handler(event) {
@@ -85,17 +47,17 @@ export async function handler(event) {
 
   // Handle ADF migration (new approach)
   if (jobType === 'adf-migration') {
-    console.log(`[ADF Migration Worker] Starting job ${jobId} for page ${sourcePageId}`);
+    logFunction('migrationWorker', 'START ADF migration', { jobId, sourcePageId });
     return await handleAdfMigration(jobId, sourcePageId, providedSpaceKey);
   }
 
   // Handle legacy migration (old approach)
-  console.log(`[Migration Worker] Starting job ${jobId} with ${sources.length} sources`);
+  logFunction('migrationWorker', 'START legacy migration', { jobId, sourceCount: sources.length });
 
   try {
     // Step 1: Delete old migrations
     if (deleteOldMigrations) {
-      console.log('[Migration Worker] Deleting old migrations...');
+      logPhase('migrationWorker', 'Deleting old migrations', {});
       const excerptIndex = await storage.get('excerpt-index') || { excerpts: [] };
       const toDelete = [];
 
@@ -114,11 +76,11 @@ export async function handler(event) {
         excerpts: excerptIndex.excerpts.filter(e => !toDelete.includes(e.id))
       };
       await storage.set('excerpt-index', updatedIndex);
-      console.log(`[Migration Worker] Deleted ${toDelete.length} old excerpts`);
+      logPhase('migrationWorker', 'Deleted old excerpts', { count: toDelete.length });
     }
 
     // Step 2: Create storage entries
-    console.log('[Migration Worker] Creating storage entries...');
+    logPhase('migrationWorker', 'Creating storage entries', {});
     const excerptIndex = await storage.get('excerpt-index') || { excerpts: [] };
     const imported = [];
     const skipped = [];
@@ -171,20 +133,20 @@ export async function handler(event) {
         });
 
       } catch (err) {
-        console.error(`[Migration Worker] Error importing "${source.name}":`, err);
+        logFailure('migrationWorker', 'Error importing source', err, { sourceName: source.name });
         skipped.push({ name: source.name, reason: err.message });
       }
     }
 
     await storage.set('excerpt-index', excerptIndex);
-    console.log(`[Migration Worker] Storage complete: ${imported.length} imported, ${skipped.length} skipped`);
+    logPhase('migrationWorker', 'Storage complete', { imported: imported.length, skipped: skipped.length });
 
     // Step 3: Create page with all Source macros
     let newPageId = null;
     let pageUrl = null;
 
     if (imported.length > 0 && providedSpaceKey) {
-      console.log(`[Migration Worker] Creating page with ${imported.length} Source macros...`);
+      logPhase('migrationWorker', 'Creating page with Source macros', { count: imported.length });
 
       // Lookup or use space ID
       let spaceId;
@@ -239,9 +201,10 @@ export async function handler(event) {
         const newPage = await createPageResponse.json();
         newPageId = newPage.id;
         pageUrl = `/wiki/spaces/${providedSpaceKey}/pages/${newPageId}`;
-        console.log(`[Migration Worker] Page created: ${newPageId}`);
+        logSuccess('migrationWorker', 'Page created', { pageId: newPageId });
       } else {
-        console.error('[Migration Worker] Failed to create page:', await createPageResponse.text());
+        const errorText = await createPageResponse.text();
+        logFailure('migrationWorker', 'Failed to create page', new Error(errorText));
       }
     }
 
@@ -261,10 +224,10 @@ export async function handler(event) {
       completedAt: new Date().toISOString()
     });
 
-    console.log(`[Migration Worker] Job ${jobId} completed successfully`);
+    logSuccess('migrationWorker', 'Job completed successfully', { jobId });
 
   } catch (error) {
-    console.error(`[Migration Worker] Job ${jobId} failed:`, error);
+    logFailure('migrationWorker', 'Job failed', error, { jobId });
 
     await storage.set(`migration-job:${jobId}`, {
       status: 'failed',
@@ -280,13 +243,12 @@ export async function handler(event) {
  */
 async function handleAdfMigration(jobId, sourcePageId, providedSpaceKey) {
   try {
-    console.log(`[ADF Migration] Fetching page ${sourcePageId}...`);
+    logPhase('handleAdfMigration', 'Fetching source page', { sourcePageId });
 
     // Step 1: Extract Forge metadata template from a working Blueprint Standard Source page
     const TEMPLATE_PAGE_ID = '65437697';
-    console.log(`[ADF Migration] Extracting Forge metadata from template page ${TEMPLATE_PAGE_ID}...`);
+    logPhase('handleAdfMigration', 'Extracting Forge metadata from template', { templatePageId: TEMPLATE_PAGE_ID });
     const forgeMetadata = await extractForgeMetadataTemplate(TEMPLATE_PAGE_ID);
-    console.log(`[ADF Migration] Forge metadata extracted:`, JSON.stringify(forgeMetadata, null, 2));
 
     // Step 2: Fetch source page (using REST API v2 for better permissions)
     const pageResponse = await api.asApp().requestConfluence(
@@ -301,9 +263,7 @@ async function handleAdfMigration(jobId, sourcePageId, providedSpaceKey) {
     const pageData = await pageResponse.json();
     const storageContent = pageData.body.storage.value;
 
-    console.log(`[ADF Migration] Page fetched. Storage content length: ${storageContent.length}`);
-
-    console.log(`[ADF Migration] Page fetched, extracting MultiExcerpt macros...`);
+    logPhase('handleAdfMigration', 'Page fetched, extracting MultiExcerpt macros', { contentLength: storageContent.length });
 
     // Step 2: Extract MultiExcerpt macros with proper nesting support
     const macros = [];
@@ -359,7 +319,7 @@ async function handleAdfMigration(jobId, sourcePageId, providedSpaceKey) {
       }
     }
 
-    console.log(`[ADF Migration] Extracted ${macros.length} MultiExcerpt macros`);
+    logPhase('handleAdfMigration', 'Extracted MultiExcerpt macros', { count: macros.length });
 
     if (macros.length === 0) {
       throw new Error('No MultiExcerpt macros found on page');
@@ -388,10 +348,8 @@ async function handleAdfMigration(jobId, sourcePageId, providedSpaceKey) {
       throw new Error('Could not determine space ID');
     }
 
-    console.log(`[ADF Migration] Using space ID: ${spaceId}`);
-
     // Step 4: Build ONE page with all Blueprint Standard Source macros in ADF format
-    console.log(`[ADF Migration] Converting ${macros.length} MultiExcerpt macros to ADF format...`);
+    logPhase('handleAdfMigration', 'Converting MultiExcerpt macros to ADF', { count: macros.length, spaceId });
 
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
     const pageTitle = `Blueprint Standards (Migrated ${timestamp})`;
@@ -420,8 +378,6 @@ async function handleAdfMigration(jobId, sourcePageId, providedSpaceKey) {
       try {
         const excerptId = generateUUID();
         const localId = generateUUID();
-
-        console.log(`[ADF Migration] Converting ${macro.name} to ADF...`);
 
         // Convert storage content to ADF using Confluence API
         const conversionResponse = await api.asApp().requestConfluence(
@@ -494,10 +450,8 @@ async function handleAdfMigration(jobId, sourcePageId, providedSpaceKey) {
           localId: localId
         });
 
-        console.log(`[ADF Migration] ✓ Converted ${macro.name}`);
-
       } catch (error) {
-        console.error(`[ADF Migration] ✗ Failed to convert ${macro.name}:`, error);
+        logFailure('handleAdfMigration', 'Failed to convert macro', error, { macroName: macro.name });
         results.errors.push({
           name: macro.name,
           error: error.message
@@ -513,7 +467,7 @@ async function handleAdfMigration(jobId, sourcePageId, providedSpaceKey) {
     };
 
     // Create the page with ADF format
-    console.log(`[ADF Migration] Creating page with ${results.created.length} Source macros (${results.errors.length} errors)...`);
+    logPhase('handleAdfMigration', 'Creating page with Source macros', { created: results.created.length, errors: results.errors.length });
 
     const createPageResponse = await api.asApp().requestConfluence(
       route`/wiki/api/v2/pages`,
@@ -541,7 +495,7 @@ async function handleAdfMigration(jobId, sourcePageId, providedSpaceKey) {
     }
 
     const newPage = await createPageResponse.json();
-    console.log(`[ADF Migration] Page created: ${newPage.id}`);
+    logSuccess('handleAdfMigration', 'Page created', { pageId: newPage.id });
 
     // Save result
     await storage.set(`migration-job:${jobId}`, {
@@ -558,10 +512,10 @@ async function handleAdfMigration(jobId, sourcePageId, providedSpaceKey) {
       completedAt: new Date().toISOString()
     });
 
-    console.log(`[ADF Migration] Job ${jobId} completed: ${results.created.length} Source macros on page ${newPage.id}, ${results.errors.length} errors`);
+    logSuccess('handleAdfMigration', 'Job completed', { jobId, created: results.created.length, errors: results.errors.length, pageId: newPage.id });
 
   } catch (error) {
-    console.error(`[ADF Migration] Job ${jobId} failed:`, error);
+    logFailure('handleAdfMigration', 'Job failed', error, { jobId });
 
     await storage.set(`migration-job:${jobId}`, {
       status: 'failed',

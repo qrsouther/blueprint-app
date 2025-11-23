@@ -33,7 +33,7 @@ export async function detectVariablesFromContent(req) {
       variables
     };
   } catch (error) {
-    console.error('Error detecting variables:', error);
+    logFailure('detectVariablesFromContent', 'Error detecting variables', error);
     return {
       success: false,
       error: error.message,
@@ -54,7 +54,7 @@ export async function detectTogglesFromContent(req) {
       toggles
     };
   } catch (error) {
-    console.error('Error detecting toggles:', error);
+    logFailure('detectTogglesFromContent', 'Error detecting toggles', error);
     return {
       success: false,
       error: error.message,
@@ -74,7 +74,7 @@ export async function getExcerpts() {
       excerpts: index.excerpts
     };
   } catch (error) {
-    console.error('Error getting excerpts:', error);
+    logFailure('getExcerpts', 'Error getting excerpts', error);
     return {
       success: false,
       error: error.message,
@@ -91,21 +91,12 @@ export async function getExcerpt(req) {
     const excerptId = req.payload.excerptId;
     const excerpt = await storage.get(`excerpt:${excerptId}`);
 
-    // DEBUG: Log what we're returning
-    console.log('[getExcerpt] Returning excerpt:', {
-      id: excerpt?.id,
-      name: excerpt?.name,
-      hasDocumentationLinks: !!excerpt?.documentationLinks,
-      documentationLinksCount: excerpt?.documentationLinks?.length || 0,
-      documentationLinks: excerpt?.documentationLinks
-    });
-
     return {
       success: true,
       excerpt: excerpt
     };
   } catch (error) {
-    console.error('Error getting excerpt:', error);
+    logFailure('getExcerpt', 'Error getting excerpt', error, { excerptId: req.payload?.excerptId });
     return {
       success: false,
       error: error.message
@@ -127,7 +118,7 @@ export async function debugExcerpt(req) {
       json: JSON.stringify(excerpt, null, 2)
     };
   } catch (error) {
-    console.error('Error in debugExcerpt:', error);
+    logFailure('debugExcerpt', 'Error in debugExcerpt', error);
     return {
       success: false,
       error: error.message
@@ -150,7 +141,7 @@ export async function getPageTitle(req) {
       title: data.title
     };
   } catch (error) {
-    console.error('Error getting page title:', error);
+    logFailure('getPageTitle', 'Error getting page title', error);
     return {
       success: false,
       error: error.message
@@ -184,7 +175,7 @@ export async function getVariableValues(req) {
       lastChangedAt: data.lastChangedAt
     };
   } catch (error) {
-    console.error('Error getting variable values:', error);
+    logFailure('getVariableValues', 'Error getting variable values', error);
     return {
       success: false,
       error: error.message
@@ -646,7 +637,7 @@ export async function getCachedContent(req) {
       cachedAt: cached.cachedAt
     };
   } catch (error) {
-    console.error('Error loading cached content:', error);
+    logFailure('getCachedContent', 'Error loading cached content', error);
     return { success: false, error: error.message };
   }
 }
@@ -667,7 +658,7 @@ export async function getCategories() {
       categories
     };
   } catch (error) {
-    console.error('Error getting categories:', error);
+    logFailure('getCategories', 'Error getting categories', error);
     return {
       success: false,
       error: error.message,
@@ -696,7 +687,7 @@ export async function saveCategories(req) {
       success: true
     };
   } catch (error) {
-    console.error('Error saving categories:', error);
+    logFailure('saveCategories', 'Error saving categories', error);
     return {
       success: false,
       error: error.message
@@ -733,7 +724,7 @@ export async function checkVersionStaleness(req) {
       includeLastSynced: macroVars?.lastSynced || null
     };
   } catch (error) {
-    console.error('Error checking version staleness:', error);
+    logFailure('checkVersionStaleness', 'Error checking version staleness', error);
     return { success: false, error: error.message };
   }
 }
@@ -758,7 +749,7 @@ export async function getCheckProgress(req) {
       progress
     };
   } catch (error) {
-    console.error('Error getting progress:', error);
+    logFailure('getCheckProgress', 'Error getting progress', error);
     return {
       success: false,
       error: error.message
@@ -781,7 +772,7 @@ export async function getMigrationStatus() {
       migrations: tracker.multiExcerpts
     };
   } catch (error) {
-    console.error('Error getting migration status:', error);
+    logFailure('getMigrationStatus', 'Error getting migration status', error);
     return {
       success: false,
       error: error.message,
@@ -814,7 +805,7 @@ export async function getMultiExcerptScanProgress(req) {
       progress
     };
   } catch (error) {
-    console.error('Error getting scan progress:', error);
+    logFailure('getScanProgress', 'Error getting scan progress', error);
     return {
       success: false,
       error: error.message
@@ -855,11 +846,11 @@ export async function saveCachedContent(req) {
         }
       );
       if (versionResult.success) {
-        console.log('[saveCachedContent] ✅ Version snapshot created:', versionResult.versionId);
+        logPhase('saveCachedContent', 'Version snapshot created', { versionId: versionResult.versionId });
       } else if (versionResult.skipped) {
-        console.log('[saveCachedContent] ⏭️  Version snapshot skipped (content unchanged)');
+        // Version snapshot skipped (content unchanged) - no logging needed
       } else {
-        console.warn('[saveCachedContent] ⚠️  Version snapshot failed:', versionResult.error);
+        logFailure('saveCachedContent', 'Version snapshot failed', new Error(versionResult.error));
       }
     }
 
@@ -879,7 +870,7 @@ export async function saveCachedContent(req) {
 
     return { success: true, cachedAt: now };
   } catch (error) {
-    console.error('Error saving cached content:', error);
+    logFailure('saveCachedContent', 'Error saving cached content', error);
     return { success: false, error: error.message };
   }
 }
@@ -887,7 +878,7 @@ export async function saveCachedContent(req) {
 /**
  * Get all orphaned usage entries (usage data for excerpts that no longer exist)
  */
-export async function getOrphanedUsage(req) {
+export async function getOrphanedUsage() {
   try {
     // Get all storage keys
     const allKeys = await storage.query().where('key', startsWith('usage:')).getMany();
@@ -918,7 +909,7 @@ export async function getOrphanedUsage(req) {
       orphanedUsage
     };
   } catch (error) {
-    console.error('Error getting orphaned usage:', error);
+    logFailure('getOrphanedUsage', 'Error getting orphaned usage', error);
     return {
       success: false,
       error: error.message,
@@ -931,7 +922,7 @@ export async function getOrphanedUsage(req) {
  * Get last verification timestamp
  * Used by auto-verification on Admin page mount to check if data is stale
  */
-export async function getLastVerificationTime(req) {
+export async function getLastVerificationTime() {
   try {
     const timestamp = await storage.get('last-verification-time');
     return {
@@ -939,7 +930,7 @@ export async function getLastVerificationTime(req) {
       lastVerificationTime: timestamp || null
     };
   } catch (error) {
-    console.error('Error getting last verification time:', error);
+    logFailure('getLastVerificationTime', 'Error getting last verification time', error);
     return {
       success: false,
       error: error.message,
@@ -961,7 +952,7 @@ export async function setLastVerificationTime(req) {
       timestamp
     };
   } catch (error) {
-    console.error('Error setting last verification time:', error);
+    logFailure('setLastVerificationTime', 'Error setting last verification time', error);
     return {
       success: false,
       error: error.message
@@ -979,7 +970,7 @@ export async function getCurrentUser(req) {
     const accountId = req.context?.accountId;
 
     if (!accountId) {
-      console.warn('[getCurrentUser] No accountId found in context');
+      logFailure('getCurrentUser', 'No accountId found in context', new Error('No user context available'));
       return {
         success: false,
         error: 'No user context available'
@@ -991,7 +982,7 @@ export async function getCurrentUser(req) {
       accountId
     };
   } catch (error) {
-    console.error('[getCurrentUser] Error:', error);
+    logFailure('getCurrentUser', 'Error in getCurrentUser', error);
     return {
       success: false,
       error: error.message
@@ -1018,16 +1009,10 @@ export async function getForgeEnvironment(req) {
     // Also check installContext which contains environment info
     const installContext = req.context?.installContext;
     
-    // Log what we're detecting for debugging
-    console.log('[getForgeEnvironment] process.env.FORGE_ENV:', envFromProcess);
-    console.log('[getForgeEnvironment] installContext:', installContext);
-    
     // In Forge, when using tunnel, the environment might not be set
     // We can detect tunnel by checking if we're in a local development context
     // For now, return 'development' if FORGE_ENV is 'development', otherwise 'production'
     const environment = envFromProcess === 'development' ? 'development' : 'production';
-    
-    console.log('[getForgeEnvironment] Determined environment:', environment);
     
     return {
       success: true,
@@ -1040,7 +1025,7 @@ export async function getForgeEnvironment(req) {
       }
     };
   } catch (error) {
-    console.error('Error getting Forge environment:', error);
+    logFailure('getForgeEnvironment', 'Error getting Forge environment', error);
     // Default to production for safety
     return {
       success: true,
@@ -1055,7 +1040,7 @@ export async function getForgeEnvironment(req) {
  * Get the stored Admin page URL
  * Returns the URL stored when the admin page first loads
  */
-export async function getAdminUrl(req) {
+export async function getAdminUrl() {
   try {
     const adminUrl = await storage.get('app-config:adminUrl');
     return {
@@ -1063,7 +1048,7 @@ export async function getAdminUrl(req) {
       adminUrl: adminUrl || null
     };
   } catch (error) {
-    console.error('Error getting admin URL:', error);
+    logFailure('getAdminUrl', 'Error getting admin URL', error);
     return {
       success: false,
       error: error.message,
@@ -1090,7 +1075,7 @@ export async function setAdminUrl(req) {
       success: true
     };
   } catch (error) {
-    console.error('Error setting admin URL:', error);
+    logFailure('setAdminUrl', 'Error setting admin URL', error);
     return {
       success: false,
       error: error.message
@@ -1099,8 +1084,10 @@ export async function setAdminUrl(req) {
 }
 
 export async function queryStorage(req) {
+  const { key } = req.payload || {};
+  const extractedKey = key; // Extract for use in catch block
+  
   try {
-    const { key } = req.payload;
 
     if (!key) {
       return {
@@ -1108,8 +1095,6 @@ export async function queryStorage(req) {
         error: 'No key provided'
       };
     }
-
-    console.log(`[queryStorage] Querying key: ${key}`);
 
     const data = await storage.get(key);
 
@@ -1132,7 +1117,7 @@ export async function queryStorage(req) {
       dataSize: JSON.stringify(data).length
     };
   } catch (error) {
-    console.error('[queryStorage] Error:', error);
+    logFailure('queryStorage', 'Error', error, { key: extractedKey });
     return {
       success: false,
       error: error.message
@@ -1150,8 +1135,12 @@ export async function queryStorage(req) {
  * @returns {Object} { success: boolean, results: Array, count: number, error?: string }
  */
 export async function queryStorageMultiple(req) {
+  const { prefix, filterField, filterValue } = req.payload || {};
+  const extractedPrefix = prefix; // Extract for use in catch block
+  const extractedFilterField = filterField; // Extract for use in catch block
+  const extractedFilterValue = filterValue; // Extract for use in catch block
+  
   try {
-    const { prefix, filterField, filterValue } = req.payload;
 
     if (!prefix) {
       return {
@@ -1160,8 +1149,6 @@ export async function queryStorageMultiple(req) {
       };
     }
 
-    console.log(`[queryStorageMultiple] Querying prefix: ${prefix}, filter: ${filterField} contains "${filterValue}"`);
-
     // Query all keys matching the prefix with pagination
     // Forge storage query has a default limit, so we need to paginate through all results
     const allEntries = [];
@@ -1169,7 +1156,7 @@ export async function queryStorageMultiple(req) {
 
     do {
       const batch = await storage.query()
-        .where('key', startsWith(prefix))
+        .where('key', startsWith(extractedPrefix))
         .limit(100)
         .cursor(cursor)
         .getMany();
@@ -1177,8 +1164,6 @@ export async function queryStorageMultiple(req) {
       allEntries.push(...(batch.results || []));
       cursor = batch.nextCursor;
     } while (cursor);
-
-    console.log(`[queryStorageMultiple] Fetched ${allEntries.length} total entries from storage`);
 
     let results = allEntries.map(entry => ({
       key: entry.key,
@@ -1188,7 +1173,7 @@ export async function queryStorageMultiple(req) {
     }));
 
     // Apply field filter if provided
-    if (filterField && filterValue) {
+    if (extractedFilterField && extractedFilterValue) {
       results = results.filter(entry => {
         const value = entry.value;
         if (!value || typeof value !== 'object') {
@@ -1196,7 +1181,7 @@ export async function queryStorageMultiple(req) {
         }
 
         // Support nested field paths (e.g., 'metadata.name')
-        const fieldParts = filterField.split('.');
+        const fieldParts = extractedFilterField.split('.');
         let fieldValue = value;
         for (const part of fieldParts) {
           if (fieldValue && typeof fieldValue === 'object' && part in fieldValue) {
@@ -1208,13 +1193,11 @@ export async function queryStorageMultiple(req) {
 
         // Case-insensitive contains match
         if (typeof fieldValue === 'string') {
-          return fieldValue.toLowerCase().includes(filterValue.toLowerCase());
+          return fieldValue.toLowerCase().includes(extractedFilterValue.toLowerCase());
         }
         return false;
       });
     }
-
-    console.log(`[queryStorageMultiple] Found ${results.length} matching entries after filtering`);
 
     return {
       success: true,
@@ -1222,7 +1205,7 @@ export async function queryStorageMultiple(req) {
       count: results.length
     };
   } catch (error) {
-    console.error('[queryStorageMultiple] Error:', error);
+    logFailure('queryStorageMultiple', 'Error', error, { prefix: extractedPrefix, filterField: extractedFilterField, filterValue: extractedFilterValue });
     return {
       success: false,
       error: error.message,
@@ -1253,7 +1236,7 @@ export async function bulkUpdateStorage(req) {
       };
     }
 
-    console.log(`[bulkUpdateStorage] Starting bulk update of ${updates.length} entries`);
+    logFunction('bulkUpdateStorage', 'START', { updateCount: updates.length });
 
     const results = {
       updated: 0,
@@ -1304,7 +1287,6 @@ export async function bulkUpdateStorage(req) {
                 updatedAt: new Date().toISOString()
               };
             }
-            console.log(`[bulkUpdateStorage] Recalculated contentHash for ${key}: ${value.contentHash.substring(0, 16)}...`);
           }
 
           // Validate excerpt data
@@ -1327,7 +1309,7 @@ export async function bulkUpdateStorage(req) {
 
         results.updated++;
       } catch (error) {
-        console.error(`[bulkUpdateStorage] Error updating ${key}:`, error);
+        logFailure('bulkUpdateStorage', 'Error updating entry', error, { key });
         results.failed++;
         results.errors.push({
           key,
@@ -1340,14 +1322,13 @@ export async function bulkUpdateStorage(req) {
     for (const [key, { updated }] of excerptNameChanges) {
       try {
         await updateExcerptIndex(updated);
-        console.log(`[bulkUpdateStorage] Updated excerpt-index for ${key}`);
       } catch (error) {
-        console.error(`[bulkUpdateStorage] Error updating index for ${key}:`, error);
+        logFailure('bulkUpdateStorage', 'Error updating index', error, { key });
         // Don't fail the whole operation if index update fails
       }
     }
 
-    console.log(`[bulkUpdateStorage] Completed: ${results.updated} updated, ${results.failed} failed`);
+    logSuccess('bulkUpdateStorage', 'Completed', { updated: results.updated, failed: results.failed });
 
     return {
       success: results.failed === 0,
@@ -1356,7 +1337,7 @@ export async function bulkUpdateStorage(req) {
       errors: results.errors
     };
   } catch (error) {
-    console.error('[bulkUpdateStorage] Error:', error);
+    logFailure('bulkUpdateStorage', 'Error', error);
     return {
       success: false,
       error: error.message,

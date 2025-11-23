@@ -5,8 +5,12 @@
   "main": "src/index.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
-    "deploy": "forge deploy --environment production --no-verify",
-    "deploy:prod": "forge deploy --environment production --no-verify"
+    "prebuild": "node scripts/generate-build-timestamp.js",
+    "predeploy": "node scripts/generate-build-timestamp.js",
+    "deploy": "node scripts/generate-build-timestamp.js && forge deploy --environment production --no-verify",
+    "deploy:prod": "node scripts/generate-build-timestamp.js && forge deploy --environment production --no-verify",
+    "lint": "eslint src",
+    "lint:fix": "eslint src --fix"
   },
   "keywords": [
     "confluence",
@@ -31,6 +35,7 @@
   },
   "devDependencies": {
     "@forge/cli": "^12.7.1",
+    "eslint": "^9.0.0",
     "puppeteer": "^24.29.1"
   }
 }

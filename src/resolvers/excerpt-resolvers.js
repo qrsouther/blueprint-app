@@ -13,21 +13,74 @@ import { generateUUID } from '../utils.js';
 import { detectVariables, detectToggles } from '../utils/detection-utils.js';
 import { updateExcerptIndex } from '../utils/storage-utils.js';
 import { calculateContentHash } from '../utils/hash-utils.js';
-import { saveVersion } from '../utils/version-manager.js';
+import { logFunction, logPhase, logSuccess, logFailure, logWarning } from '../utils/forge-logger.js';
+import { validateExcerptData } from '../utils/storage-validator.js';
 
 /**
  * Save excerpt (create or update)
  */
 export async function saveExcerpt(req) {
-  // DEBUG: Log the entire payload to see what we receive
-  console.log('[saveExcerpt] RAW PAYLOAD:', JSON.stringify(req.payload, null, 2));
-  console.log('[saveExcerpt] documentationLinks from payload:', req.payload.documentationLinks);
-  console.log('[saveExcerpt] documentationLinks type:', typeof req.payload.documentationLinks);
-  console.log('[saveExcerpt] documentationLinks is array?:', Array.isArray(req.payload.documentationLinks));
+  const functionStartTime = Date.now();
+  logFunction('saveExcerpt', 'Starting save operation', { excerptId: req.payload.excerptId, excerptName: req.payload.excerptName });
 
-  const { excerptName, category, content, excerptId, variableMetadata, toggleMetadata, documentationLinks, sourcePageId, sourcePageTitle, sourceSpaceKey, sourceLocalId } = req.payload;
+  // Input validation
+  const { excerptName, category, content, excerptId, variableMetadata, toggleMetadata, documentationLinks, sourcePageId, sourceSpaceKey, sourceLocalId } = req.payload;
 
-  console.log('[saveExcerpt] After destructuring, documentationLinks:', documentationLinks);
+  // Validate required fields
+  if (!excerptName || typeof excerptName !== 'string' || excerptName.trim() === '') {
+    logFailure('saveExcerpt', 'Validation failed: excerptName is required and must be a non-empty string', new Error('Invalid excerptName'));
+    return {
+      success: false,
+      error: 'excerptName is required and must be a non-empty string'
+    };
+  }
+
+  // Validate content (must be ADF object if provided)
+  if (content !== undefined && content !== null) {
+    if (typeof content !== 'object' || Array.isArray(content)) {
+      logFailure('saveExcerpt', 'Validation failed: content must be an ADF object', new Error('Invalid content type'));
+      return {
+        success: false,
+        error: 'content must be an ADF object'
+      };
+    }
+  }
+
+  // Validate excerptId format if provided (should be UUID)
+  if (excerptId && typeof excerptId !== 'string') {
+    logFailure('saveExcerpt', 'Validation failed: excerptId must be a string', new Error('Invalid excerptId type'));
+    return {
+      success: false,
+      error: 'excerptId must be a string'
+    };
+  }
+
+  // Validate variableMetadata if provided
+  if (variableMetadata !== undefined && !Array.isArray(variableMetadata)) {
+    logFailure('saveExcerpt', 'Validation failed: variableMetadata must be an array', new Error('Invalid variableMetadata type'));
+    return {
+      success: false,
+      error: 'variableMetadata must be an array'
+    };
+  }
+
+  // Validate toggleMetadata if provided
+  if (toggleMetadata !== undefined && !Array.isArray(toggleMetadata)) {
+    logFailure('saveExcerpt', 'Validation failed: toggleMetadata must be an array', new Error('Invalid toggleMetadata type'));
+    return {
+      success: false,
+      error: 'toggleMetadata must be an array'
+    };
+  }
+
+  // Validate documentationLinks if provided
+  if (documentationLinks !== undefined && !Array.isArray(documentationLinks)) {
+    logFailure('saveExcerpt', 'Validation failed: documentationLinks must be an array', new Error('Invalid documentationLinks type'));
+    return {
+      success: false,
+      error: 'documentationLinks must be an array'
+    };
+  }
 
   // Extract page information from backend context (more reliable than frontend)
   const pageId = sourcePageId || req.context?.extension?.content?.id;
@@ -84,48 +137,47 @@ export async function saveExcerpt(req) {
   // Calculate and add content hash
   excerpt.contentHash = calculateContentHash(excerpt);
 
-  // DEBUG: Log what we're saving
-  console.log('[saveExcerpt] About to save excerpt with documentationLinks:', excerpt.documentationLinks);
-  console.log('[saveExcerpt] Full excerpt object before storage.set:', JSON.stringify(excerpt, null, 2));
-  console.log('[saveExcerpt] Excerpt object keys:', Object.keys(excerpt));
+  // Validate the complete excerpt object before saving
+  const validation = validateExcerptData(excerpt);
+  if (!validation.valid) {
+    logFailure('saveExcerpt', 'Validation failed after object construction', new Error(validation.errors.join(', ')), {
+      excerptId: id,
+      errors: validation.errors
+    });
+    return {
+      success: false,
+      error: `Validation failed: ${validation.errors.join(', ')}`
+    };
+  }
 
-  // Phase 3: Create version snapshot before modification (v7.17.0)
+  logPhase('saveExcerpt', 'Excerpt object prepared and validated', {
+    excerptId: id,
+    variablesCount: variables.length,
+    togglesCount: toggles.length,
+    documentationLinksCount: (documentationLinks || []).length
+  });
+
+  // Simple versioning: Keep only current + previous version (2 total)
+  // When updating, save current as previous before overwriting
   if (existingExcerpt) {
-    const versionResult = await saveVersion(
-      storage,
-      `excerpt:${id}`,
-      existingExcerpt,
-      {
-        changeType: 'UPDATE',
-        changedBy: 'saveExcerpt',
-        userAccountId: req.context?.accountId,
-        excerptName: existingExcerpt.name
-      }
-    );
-    if (versionResult.success) {
-      console.log('[saveExcerpt] ✅ Version snapshot created:', versionResult.versionId);
-    } else if (versionResult.skipped) {
-      console.log('[saveExcerpt] ⏭️  Version snapshot skipped (content unchanged)');
-    } else {
-      console.warn('[saveExcerpt] ⚠️  Version snapshot failed:', versionResult.error);
-    }
+    // Save current version as previous before overwriting
+    await storage.set(`excerpt-previous:${id}`, existingExcerpt);
+    logPhase('saveExcerpt', 'Previous version saved', { excerptId: id });
   }
 
   await storage.set(`excerpt:${id}`, excerpt);
-
-  // DEBUG: Immediately read it back to verify it was saved
-  const verifyExcerpt = await storage.get(`excerpt:${id}`);
-  console.log('[saveExcerpt] Verification - read back from storage:', {
-    hasDocumentationLinks: !!verifyExcerpt.documentationLinks,
-    documentationLinksCount: verifyExcerpt.documentationLinks?.length || 0,
-    documentationLinks: verifyExcerpt.documentationLinks,
-    allKeys: Object.keys(verifyExcerpt)
-  });
+  logPhase('saveExcerpt', 'Excerpt saved to storage', { excerptId: id });
 
   // Update index
   await updateExcerptIndex(excerpt);
 
+  logSuccess('saveExcerpt', 'Excerpt saved successfully', {
+    excerptId: id,
+    duration: `${Date.now() - functionStartTime}ms`
+  });
+
   // Return saved excerpt data
+  // NOTE: Return format will be standardized in Phase 4 (API Consistency)
   return {
     excerptId: id,
     excerptName: excerptName,
@@ -141,13 +193,39 @@ export async function saveExcerpt(req) {
  * Update excerpt content only (called automatically when Source macro body changes)
  */
 export async function updateExcerptContent(req) {
+  const { excerptId, content } = req.payload || {};
+  const extractedExcerptId = excerptId; // Extract for use in catch block
+  
   try {
-    const { excerptId, content } = req.payload;
+    // Input validation
+    if (!excerptId || typeof excerptId !== 'string' || excerptId.trim() === '') {
+      logFailure('updateExcerptContent', 'Validation failed: excerptId is required and must be a non-empty string', new Error('Invalid excerptId'));
+      return {
+        success: false,
+        error: 'excerptId is required and must be a non-empty string'
+      };
+    }
+
+    if (content === undefined || content === null) {
+      logFailure('updateExcerptContent', 'Validation failed: content is required', new Error('Missing content'));
+      return {
+        success: false,
+        error: 'content is required'
+      };
+    }
+
+    if (typeof content !== 'object' || Array.isArray(content)) {
+      logFailure('updateExcerptContent', 'Validation failed: content must be an ADF object', new Error('Invalid content type'));
+      return {
+        success: false,
+        error: 'content must be an ADF object'
+      };
+    }
 
     // Load existing excerpt
     const excerpt = await storage.get(`excerpt:${excerptId}`);
     if (!excerpt) {
-      console.error('Excerpt not found:', excerptId);
+      logFailure('updateExcerptContent', 'Excerpt not found', new Error('Excerpt not found'), { excerptId });
       return { success: false, error: 'Excerpt not found' };
     }
 
@@ -195,23 +273,23 @@ export async function updateExcerptContent(req) {
     updatedExcerpt.contentHash = newContentHash;
     updatedExcerpt.updatedAt = new Date().toISOString();
 
-    // Phase 3: Create version snapshot before modification (v7.17.0)
-    const versionResult = await saveVersion(
-      storage,
-      `excerpt:${excerptId}`,
-      excerpt, // Save the OLD version before overwriting
-      {
-        changeType: 'UPDATE',
-        changedBy: 'updateExcerptContent',
-        userAccountId: req.context?.accountId,
-        excerptName: excerpt.name
-      }
-    );
-    if (versionResult.success) {
-      console.log('[updateExcerptContent] ✅ Version snapshot created:', versionResult.versionId);
-    } else {
-      console.warn('[updateExcerptContent] ⚠️  Version snapshot failed:', versionResult.error);
+    // Validate the updated excerpt before saving
+    const validation = validateExcerptData(updatedExcerpt);
+    if (!validation.valid) {
+      logFailure('updateExcerptContent', 'Validation failed after content update', new Error(validation.errors.join(', ')), {
+        excerptId,
+        errors: validation.errors
+      });
+      return {
+        success: false,
+        error: `Validation failed: ${validation.errors.join(', ')}`
+      };
     }
+
+    // Simple versioning: Keep only current + previous version (2 total)
+    // Save current version as previous before overwriting
+    await storage.set(`excerpt-previous:${excerptId}`, excerpt);
+    logPhase('updateExcerptContent', 'Previous version saved', { excerptId });
 
     await storage.set(`excerpt:${excerptId}`, updatedExcerpt);
 
@@ -220,7 +298,7 @@ export async function updateExcerptContent(req) {
 
     return { success: true, unchanged: false };
   } catch (error) {
-    console.error('Error updating excerpt content:', error);
+    logFailure('updateExcerptContent', 'Error updating excerpt content', error, { excerptId: extractedExcerptId });
     return {
       success: false,
       error: error.message
@@ -248,7 +326,7 @@ export async function getAllExcerpts() {
       excerpts: excerpts.filter(e => e !== null)
     };
   } catch (error) {
-    console.error('Error getting all excerpts:', error);
+    logFailure('getAllExcerpts', 'Error getting all excerpts', error);
     return {
       success: false,
       error: error.message,
@@ -261,11 +339,22 @@ export async function getAllExcerpts() {
  * Delete an excerpt
  */
 export async function deleteExcerpt(req) {
+  const { excerptId } = req.payload || {};
+  const extractedExcerptId = excerptId; // Extract for use in catch block
+  
   try {
-    const { excerptId } = req.payload;
+    // Input validation
+    if (!excerptId || typeof excerptId !== 'string' || excerptId.trim() === '') {
+      logFailure('deleteExcerpt', 'Validation failed: excerptId is required and must be a non-empty string', new Error('Invalid excerptId'));
+      return {
+        success: false,
+        error: 'excerptId is required and must be a non-empty string'
+      };
+    }
 
-    // Delete the excerpt
+    // Delete the excerpt and its previous version
     await storage.delete(`excerpt:${excerptId}`);
+    await storage.delete(`excerpt-previous:${excerptId}`);
 
     // Update the index
     const index = await storage.get('excerpt-index') || { excerpts: [] };
@@ -276,7 +365,7 @@ export async function deleteExcerpt(req) {
       success: true
     };
   } catch (error) {
-    console.error('Error deleting excerpt:', error);
+    logFailure('deleteExcerpt', 'Error deleting excerpt', error, { excerptId: extractedExcerptId });
     return {
       success: false,
       error: error.message
@@ -288,8 +377,34 @@ export async function deleteExcerpt(req) {
  * Update excerpt metadata (name, category)
  */
 export async function updateExcerptMetadata(req) {
+  const { excerptId, name, category } = req.payload || {};
+  const extractedExcerptId = excerptId; // Extract for use in catch block
+  
   try {
-    const { excerptId, name, category } = req.payload;
+    // Input validation
+    if (!excerptId || typeof excerptId !== 'string' || excerptId.trim() === '') {
+      logFailure('updateExcerptMetadata', 'Validation failed: excerptId is required and must be a non-empty string', new Error('Invalid excerptId'));
+      return {
+        success: false,
+        error: 'excerptId is required and must be a non-empty string'
+      };
+    }
+
+    if (name !== undefined && (typeof name !== 'string' || name.trim() === '')) {
+      logFailure('updateExcerptMetadata', 'Validation failed: name must be a non-empty string', new Error('Invalid name'));
+      return {
+        success: false,
+        error: 'name must be a non-empty string'
+      };
+    }
+
+    if (category !== undefined && typeof category !== 'string') {
+      logFailure('updateExcerptMetadata', 'Validation failed: category must be a string', new Error('Invalid category'));
+      return {
+        success: false,
+        error: 'category must be a string'
+      };
+    }
 
     // Load the existing excerpt
     const excerpt = await storage.get(`excerpt:${excerptId}`);
@@ -300,10 +415,32 @@ export async function updateExcerptMetadata(req) {
       };
     }
 
-    // Update the metadata
-    excerpt.name = name;
-    excerpt.category = category;
+    // Update the metadata (only if provided)
+    if (name !== undefined) {
+      excerpt.name = name;
+    }
+    if (category !== undefined) {
+      excerpt.category = category;
+    }
     excerpt.updatedAt = new Date().toISOString();
+
+    // Validate the updated excerpt before saving
+    const validation = validateExcerptData(excerpt);
+    if (!validation.valid) {
+      logFailure('updateExcerptMetadata', 'Validation failed after metadata update', new Error(validation.errors.join(', ')), {
+        excerptId,
+        errors: validation.errors
+      });
+      return {
+        success: false,
+        error: `Validation failed: ${validation.errors.join(', ')}`
+      };
+    }
+
+    // Simple versioning: Keep only current + previous version (2 total)
+    // Save current version as previous before overwriting
+    await storage.set(`excerpt-previous:${excerptId}`, excerpt);
+    logPhase('updateExcerptMetadata', 'Previous version saved', { excerptId });
 
     // Save the updated excerpt
     await storage.set(`excerpt:${excerptId}`, excerpt);
@@ -315,7 +452,7 @@ export async function updateExcerptMetadata(req) {
       success: true
     };
   } catch (error) {
-    console.error('Error updating excerpt metadata:', error);
+    logFailure('updateExcerptMetadata', 'Error updating excerpt metadata', error, { excerptId: extractedExcerptId });
     return {
       success: false,
       error: error.message
@@ -327,17 +464,60 @@ export async function updateExcerptMetadata(req) {
  * Mass update excerpts (e.g., change category for multiple excerpts)
  */
 export async function massUpdateExcerpts(req) {
+  const { excerptIds, category } = req.payload || {};
+  const extractedExcerptIds = excerptIds; // Extract for use in catch block
+  
   try {
-    const { excerptIds, category } = req.payload;
+    // Input validation
+    if (!excerptIds || !Array.isArray(excerptIds) || excerptIds.length === 0) {
+      logFailure('massUpdateExcerpts', 'Validation failed: excerptIds is required and must be a non-empty array', new Error('Invalid excerptIds'));
+      return {
+        success: false,
+        error: 'excerptIds is required and must be a non-empty array'
+      };
+    }
+
+    if (category !== undefined && typeof category !== 'string') {
+      logFailure('massUpdateExcerpts', 'Validation failed: category must be a string', new Error('Invalid category'));
+      return {
+        success: false,
+        error: 'category must be a string'
+      };
+    }
+
+    // Validate each excerptId in the array
+    for (const excerptId of excerptIds) {
+      if (!excerptId || typeof excerptId !== 'string' || excerptId.trim() === '') {
+        logFailure('massUpdateExcerpts', 'Validation failed: all excerptIds must be non-empty strings', new Error('Invalid excerptId in array'));
+        return {
+          success: false,
+          error: 'All excerptIds must be non-empty strings'
+        };
+      }
+    }
 
     const updatePromises = excerptIds.map(async (excerptId) => {
       const excerpt = await storage.get(`excerpt:${excerptId}`);
       if (excerpt) {
         excerpt.category = category;
         excerpt.updatedAt = new Date().toISOString();
+        
+        // Validate before saving
+        const validation = validateExcerptData(excerpt);
+        if (!validation.valid) {
+          logWarning('massUpdateExcerpts', 'Validation failed for excerpt', { excerptId, errors: validation.errors });
+          return { excerptId, success: false, error: validation.errors.join(', ') };
+        }
+        
+        // Simple versioning: Keep only current + previous version (2 total)
+        // Save current version as previous before overwriting
+        await storage.set(`excerpt-previous:${excerptId}`, excerpt);
+        
         await storage.set(`excerpt:${excerptId}`, excerpt);
         await updateExcerptIndex(excerpt);
+        return { excerptId, success: true };
       }
+      return { excerptId, success: false, error: 'Excerpt not found' };
     });
 
     await Promise.all(updatePromises);
@@ -346,7 +526,7 @@ export async function massUpdateExcerpts(req) {
       success: true
     };
   } catch (error) {
-    console.error('Error in mass update:', error);
+    logFailure('massUpdateExcerpts', 'Error in mass update', error, { excerptIds: extractedExcerptIds });
     return {
       success: false,
       error: error.message
@@ -358,21 +538,58 @@ export async function massUpdateExcerpts(req) {
  * Update Source macro body content on the page
  */
 export async function updateSourceMacroBody(req) {
+  const { pageId, excerptId, localId, content } = req.payload || {};
+  const extractedPageId = pageId; // Extract for use in catch block
+  const extractedExcerptId = excerptId; // Extract for use in catch block
+  const extractedLocalId = localId; // Extract for use in catch block
+  
   try {
-    const { pageId, excerptId, localId, content } = req.payload;
-
-    if (!pageId || !excerptId || !content) {
+    // Input validation
+    if (!pageId || typeof pageId !== 'string' || pageId.trim() === '') {
+      logFailure('updateSourceMacroBody', 'Validation failed: pageId is required and must be a non-empty string', new Error('Invalid pageId'));
       return {
         success: false,
-        error: 'Missing required parameters: pageId, excerptId, and content are required'
+        error: 'pageId is required and must be a non-empty string'
       };
     }
 
-    console.log(`[UPDATE-MACRO-BODY] Updating macro body for excerptId ${excerptId} on page ${pageId}`);
+    if (!excerptId || typeof excerptId !== 'string' || excerptId.trim() === '') {
+      logFailure('updateSourceMacroBody', 'Validation failed: excerptId is required and must be a non-empty string', new Error('Invalid excerptId'));
+      return {
+        success: false,
+        error: 'excerptId is required and must be a non-empty string'
+      };
+    }
+
+    if (content === undefined || content === null) {
+      logFailure('updateSourceMacroBody', 'Validation failed: content is required', new Error('Missing content'));
+      return {
+        success: false,
+        error: 'content is required'
+      };
+    }
+
+    if (typeof content !== 'object' || Array.isArray(content)) {
+      logFailure('updateSourceMacroBody', 'Validation failed: content must be an ADF object', new Error('Invalid content type'));
+      return {
+        success: false,
+        error: 'content must be an ADF object'
+      };
+    }
+
+    if (localId !== undefined && (typeof localId !== 'string' || localId.trim() === '')) {
+      logFailure('updateSourceMacroBody', 'Validation failed: localId must be a non-empty string if provided', new Error('Invalid localId'));
+      return {
+        success: false,
+        error: 'localId must be a non-empty string if provided'
+      };
+    }
+
+    logFunction('updateSourceMacroBody', 'START', { pageId: extractedPageId, excerptId: extractedExcerptId, localId: extractedLocalId });
 
     // Step 1: Get the current page content
     const pageResponse = await api.asApp().requestConfluence(
-      route`/wiki/api/v2/pages/${pageId}?body-format=storage`,
+      route`/wiki/api/v2/pages/${extractedPageId}?body-format=storage`,
       {
         headers: {
           'Accept': 'application/json'
@@ -382,7 +599,7 @@ export async function updateSourceMacroBody(req) {
 
     if (!pageResponse.ok) {
       const errorText = await pageResponse.text();
-      console.error(`[UPDATE-MACRO-BODY] Failed to get page: ${pageResponse.status} - ${errorText}`);
+      logFailure('updateSourceMacroBody', 'Failed to get page', new Error(errorText), { pageId: extractedPageId, status: pageResponse.status });
       return {
         success: false,
         error: `Failed to get page: ${pageResponse.status}`
@@ -393,22 +610,20 @@ export async function updateSourceMacroBody(req) {
     const currentBody = pageData.body.storage.value;
     const currentVersion = pageData.version.number;
 
-    console.log(`[UPDATE-MACRO-BODY] Got page version ${currentVersion}, body length: ${currentBody.length}`);
-
     // Step 2: Find the Source macro by excerptId
     // The macro structure: <ac:adf-extension><ac:adf-node type="bodied-extension">...<ac:adf-parameter key="excerpt-id">EXCERPT_ID</ac:adf-parameter>...<ac:adf-content>CURRENT_CONTENT</ac:adf-content>...</ac:adf-node></ac:adf-extension>
     // If localId is provided, use it for more precise matching
     let macroPattern;
-    if (localId) {
+    if (extractedLocalId) {
       // Match by both excerpt-id and local-id for precision
       macroPattern = new RegExp(
-        `(<ac:adf-extension><ac:adf-node type="bodied-extension"[^>]*>.*?<ac:adf-parameter key="excerpt-id">${excerptId}</ac:adf-parameter>.*?<ac:adf-parameter key="local-id">${localId}</ac:adf-parameter>.*?<ac:adf-content>)([\\s\\S]*?)(</ac:adf-content>.*?</ac:adf-node></ac:adf-extension>)`,
+        `(<ac:adf-extension><ac:adf-node type="bodied-extension"[^>]*>.*?<ac:adf-parameter key="excerpt-id">${extractedExcerptId}</ac:adf-parameter>.*?<ac:adf-parameter key="local-id">${extractedLocalId}</ac:adf-parameter>.*?<ac:adf-content>)([\\s\\S]*?)(</ac:adf-content>.*?</ac:adf-node></ac:adf-extension>)`,
         'gs'
       );
     } else {
       // Match by excerpt-id only
       macroPattern = new RegExp(
-        `(<ac:adf-extension><ac:adf-node type="bodied-extension"[^>]*>.*?<ac:adf-parameter key="excerpt-id">${excerptId}</ac:adf-parameter>.*?<ac:adf-content>)([\\s\\S]*?)(</ac:adf-content>.*?</ac:adf-node></ac:adf-extension>)`,
+        `(<ac:adf-extension><ac:adf-node type="bodied-extension"[^>]*>.*?<ac:adf-parameter key="excerpt-id">${extractedExcerptId}</ac:adf-parameter>.*?<ac:adf-content>)([\\s\\S]*?)(</ac:adf-content>.*?</ac:adf-node></ac:adf-extension>)`,
         'gs'
       );
     }
@@ -416,7 +631,7 @@ export async function updateSourceMacroBody(req) {
     const match = macroPattern.exec(currentBody);
 
     if (!match) {
-      console.error(`[UPDATE-MACRO-BODY] Macro not found for excerptId ${excerptId}${localId ? ` and localId ${localId}` : ''}`);
+      logFailure('updateSourceMacroBody', 'Macro not found', new Error('Macro not found on page'), { pageId: extractedPageId, excerptId: extractedExcerptId, localId: extractedLocalId });
       return {
         success: false,
         error: `Source macro not found on page`
@@ -439,10 +654,10 @@ export async function updateSourceMacroBody(req) {
     );
 
     // Step 4: Update the page
-    console.log(`[UPDATE-MACRO-BODY] Updating page with new macro body content`);
+    logPhase('updateSourceMacroBody', 'Updating page with new macro body content', { pageId: extractedPageId, excerptId: extractedExcerptId });
 
     const updateResponse = await api.asApp().requestConfluence(
-      route`/wiki/api/v2/pages/${pageId}`,
+      route`/wiki/api/v2/pages/${extractedPageId}`,
       {
         method: 'PUT',
         headers: {
@@ -450,7 +665,7 @@ export async function updateSourceMacroBody(req) {
           'Content-Type': 'application/json'
         },
         body: JSON.stringify({
-          id: pageId,
+          id: extractedPageId,
           status: 'current',
           title: pageData.title,
           body: {
@@ -467,7 +682,7 @@ export async function updateSourceMacroBody(req) {
 
     if (!updateResponse.ok) {
       const errorText = await updateResponse.text();
-      console.error(`[UPDATE-MACRO-BODY] Failed to update page: ${updateResponse.status} - ${errorText}`);
+      logFailure('updateSourceMacroBody', 'Failed to update page', new Error(errorText), { pageId: extractedPageId, status: updateResponse.status });
       return {
         success: false,
         error: `Failed to update page: ${updateResponse.status}`
@@ -475,7 +690,7 @@ export async function updateSourceMacroBody(req) {
     }
 
     const updatedPage = await updateResponse.json();
-    console.log(`[UPDATE-MACRO-BODY] Successfully updated macro body! New version: ${updatedPage.version.number}`);
+    logSuccess('updateSourceMacroBody', 'Successfully updated macro body', { pageId: extractedPageId, excerptId: extractedExcerptId, newVersion: updatedPage.version.number });
 
     return {
       success: true,
@@ -484,7 +699,7 @@ export async function updateSourceMacroBody(req) {
     };
 
   } catch (error) {
-    console.error('[UPDATE-MACRO-BODY] Error:', error);
+    logFailure('updateSourceMacroBody', 'Error', error, { pageId: extractedPageId, excerptId: extractedExcerptId, localId: extractedLocalId });
     return {
       success: false,
       error: error.message

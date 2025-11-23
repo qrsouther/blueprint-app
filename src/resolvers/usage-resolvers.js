@@ -18,24 +18,28 @@
  * - pushUpdatesToPage: Push updates to specific page's Include instances
  */
 
-import { storage } from '@forge/api';
+import { storage, startsWith } from '@forge/api';
 import api, { route } from '@forge/api';
 import { findHeadingBeforeMacro } from '../utils/adf-utils.js';
+import { logFailure, logWarning } from '../utils/forge-logger.js';
 
 /**
  * Track excerpt usage - record when/where an excerpt is used
  * Called when Embed macro is saved
  */
 export async function trackExcerptUsage(req) {
+  const { excerptId, localId } = req.payload || {};
+  const extractedExcerptId = excerptId; // Extract for use in catch block
+  const extractedLocalId = localId; // Extract for use in catch block
+  
   try {
-    const { excerptId, localId } = req.payload;
 
     // Extract page information from backend context
     const pageId = req.context?.extension?.content?.id;
     const spaceKey = req.context?.extension?.space?.key || 'Unknown Space';
 
     if (!pageId) {
-      console.error('CRITICAL: pageId not available in req.context');
+      logFailure('trackExcerptUsage', 'CRITICAL: pageId not available in req.context', new Error('Page context not available'));
       return {
         success: false,
         error: 'Page context not available'
@@ -61,7 +65,7 @@ export async function trackExcerptUsage(req) {
         }
       }
     } catch (apiError) {
-      console.error('Error fetching page data via API:', apiError);
+      logFailure('trackExcerptUsage', 'Error fetching page data via API', apiError, { pageId, localId });
       // Fall back to context title if API fails
       pageTitle = req.context?.extension?.content?.title || 'Unknown Page';
     }
@@ -78,7 +82,7 @@ export async function trackExcerptUsage(req) {
         variableValues = macroVars.variableValues;
       }
     } catch (storageError) {
-      console.error('Error fetching toggle states and variable values:', storageError);
+      logFailure('trackExcerptUsage', 'Error fetching toggle states and variable values', storageError, { localId });
     }
 
     // Store usage data in a reverse index
@@ -118,7 +122,7 @@ export async function trackExcerptUsage(req) {
       toggleStates
     };
   } catch (error) {
-    console.error('Error tracking excerpt usage:', error);
+    logFailure('trackExcerptUsage', 'Error tracking excerpt usage', error, { excerptId: extractedExcerptId, localId: extractedLocalId });
     return {
       success: false,
       error: error.message
@@ -131,8 +135,11 @@ export async function trackExcerptUsage(req) {
  * Called when Embed macro is deleted or excerptId changes
  */
 export async function removeExcerptUsage(req) {
+  const { excerptId, localId } = req.payload || {};
+  const extractedExcerptId = excerptId; // Extract for use in catch block
+  const extractedLocalId = localId; // Extract for use in catch block
+  
   try {
-    const { excerptId, localId } = req.payload;
 
     const usageKey = `usage:${excerptId}`;
     const usageData = await storage.get(usageKey);
@@ -152,7 +159,7 @@ export async function removeExcerptUsage(req) {
       success: true
     };
   } catch (error) {
-    console.error('Error removing excerpt usage:', error);
+    logFailure('removeExcerptUsage', 'Error removing excerpt usage', error, { excerptId: extractedExcerptId, localId: extractedLocalId });
     return {
       success: false,
       error: error.message
@@ -164,8 +171,10 @@ export async function removeExcerptUsage(req) {
  * Get excerpt usage - which Embed macros reference this excerpt
  */
 export async function getExcerptUsage(req) {
+  const { excerptId } = req.payload || {};
+  const extractedExcerptId = excerptId; // Extract for use in catch block
+  
   try {
-    const { excerptId } = req.payload;
 
     const usageKey = `usage:${excerptId}`;
     const usageData = await storage.get(usageKey) || { references: [] };
@@ -186,7 +195,7 @@ export async function getExcerptUsage(req) {
       usage: enrichedReferences
     };
   } catch (error) {
-    console.error('Error getting excerpt usage:', error);
+    logFailure('getExcerptUsage', 'Error getting excerpt usage', error, { excerptId: extractedExcerptId });
     return {
       success: false,
       error: error.message,
@@ -200,11 +209,13 @@ export async function getExcerptUsage(req) {
  * Fetches usage data along with customInsertions and renderedContent for CSV export
  */
 export async function getExcerptUsageForCSV(req) {
+  const { excerptId } = req.payload || {};
+  const extractedExcerptId = excerptId; // Extract for use in catch block
+  
   try {
-    const { excerptId } = req.payload;
 
     // Get the excerpt for metadata
-    const excerpt = await storage.get(`excerpt:${excerptId}`);
+    const excerpt = await storage.get(`excerpt:${extractedExcerptId}`);
     if (!excerpt) {
       return {
         success: false,
@@ -213,7 +224,7 @@ export async function getExcerptUsageForCSV(req) {
       };
     }
 
-    const usageKey = `usage:${excerptId}`;
+    const usageKey = `usage:${extractedExcerptId}`;
     const usageData = await storage.get(usageKey) || { references: [] };
 
     // Enrich usage data with all fields needed for CSV export
@@ -241,7 +252,7 @@ export async function getExcerptUsageForCSV(req) {
         pageTitle: ref.pageTitle || 'Unknown Page',
         pageUrl: pageUrl,
         headingAnchor: ref.headingAnchor || '',
-        excerptId: excerptId,
+        excerptId: extractedExcerptId,
         excerptName: excerpt.name,
         excerptCategory: excerpt.category,
         status: status,
@@ -261,7 +272,7 @@ export async function getExcerptUsageForCSV(req) {
       usage: enrichedReferences
     };
   } catch (error) {
-    console.error('Error getting excerpt usage for CSV:', error);
+    logFailure('getExcerptUsageForCSV', 'Error getting excerpt usage for CSV', error, { excerptId: extractedExcerptId });
     return {
       success: false,
       error: error.message,
@@ -273,33 +284,68 @@ export async function getExcerptUsageForCSV(req) {
 /**
  * Get usage counts for all excerpts (lightweight for sorting)
  * Returns object mapping excerptId -> count of references
+ * 
+ * Uses storage.query() to fetch all usage data in a single efficient query
+ * instead of many individual storage.get() calls, preventing timeouts.
  */
 export async function getAllUsageCounts() {
   try {
-    // Get all excerpt IDs from the index
+    // Get all excerpt IDs from the index for fallback (in case some usage keys don't exist)
     const index = await storage.get('excerpt-index') || { excerpts: [] };
     const usageCounts = {};
 
-    // For each excerpt, get just the count of references
-    await Promise.all(index.excerpts.map(async (indexEntry) => {
-      const usageKey = `usage:${indexEntry.id}`;
-      const usageData = await storage.get(usageKey);
-
-      // Count unique pages (not total references)
-      if (usageData && Array.isArray(usageData.references)) {
-        const uniquePageIds = new Set(usageData.references.map(ref => ref.pageId));
-        usageCounts[indexEntry.id] = uniquePageIds.size;
-      } else {
+    // Initialize all excerpt IDs to 0 (in case they have no usage data)
+    if (index.excerpts && Array.isArray(index.excerpts)) {
+      for (const indexEntry of index.excerpts) {
         usageCounts[indexEntry.id] = 0;
       }
-    }));
+    }
+
+    // Query all usage: keys at once using storage.query() - much faster than individual gets
+    const allUsageData = [];
+    let cursor = await storage.query()
+      .where('key', startsWith('usage:'))
+      .getMany();
+
+    // Add first page
+    allUsageData.push(...(cursor.results || []));
+
+    // Paginate through remaining pages (should be minimal, typically 1-2 pages for 147 Sources)
+    while (cursor.nextCursor) {
+      cursor = await storage.query()
+        .where('key', startsWith('usage:'))
+        .cursor(cursor.nextCursor)
+        .getMany();
+      allUsageData.push(...(cursor.results || []));
+    }
+
+    // Process all usage data
+    for (const entry of allUsageData) {
+      try {
+        // Extract excerptId from key (format: "usage:{excerptId}")
+        const key = entry.key;
+        const excerptId = key.replace('usage:', '');
+        const usageData = entry.value;
+
+        // Count unique pages (not total references)
+        if (usageData && Array.isArray(usageData.references)) {
+          const uniquePageIds = new Set(usageData.references.map(ref => ref.pageId));
+          usageCounts[excerptId] = uniquePageIds.size;
+        } else {
+          usageCounts[excerptId] = 0;
+        }
+      } catch (entryError) {
+        // If a single entry fails, log but continue with others
+        logWarning('getAllUsageCounts', `Failed to process usage entry ${entry.key}`, { error: entryError.message });
+      }
+    }
 
     return {
       success: true,
       usageCounts
     };
   } catch (error) {
-    console.error('Error getting all usage counts:', error);
+    logFailure('getAllUsageCounts', 'Error getting all usage counts', error);
     return {
       success: false,
       error: error.message,
@@ -313,8 +359,10 @@ export async function getAllUsageCounts() {
  * Admin function to force-refresh all instances
  */
 export async function pushUpdatesToAll(req) {
+  const { excerptId } = req.payload || {};
+  const extractedExcerptId = excerptId; // Extract for use in catch block
+  
   try {
-    const { excerptId } = req.payload;
 
     // Get the excerpt
     const excerpt = await storage.get(`excerpt:${excerptId}`);
@@ -337,9 +385,6 @@ export async function pushUpdatesToAll(req) {
         // Get variable values for this instance
         const varsKey = `macro-vars:${localId}`;
         const macroVars = await storage.get(varsKey) || {};
-        const variableValues = macroVars.variableValues || {};
-        const toggleStates = macroVars.toggleStates || {};
-        const customInsertions = macroVars.customInsertions || [];
 
         // Generate fresh content
         let freshContent = excerpt.content;
@@ -365,7 +410,7 @@ export async function pushUpdatesToAll(req) {
 
         updated++;
       } catch (err) {
-        console.error(`Error updating localId ${usage.localId}:`, err);
+        logFailure('pushUpdatesToAll', 'Error updating localId', err, { localId: usage.localId, excerptId: extractedExcerptId });
         errors.push({ localId: usage.localId, error: err.message });
       }
     }
@@ -377,7 +422,7 @@ export async function pushUpdatesToAll(req) {
       errors: errors.length > 0 ? errors : undefined
     };
   } catch (error) {
-    console.error('Error pushing updates to all:', error);
+    logFailure('pushUpdatesToAll', 'Error pushing updates to all', error, { excerptId: extractedExcerptId });
     return { success: false, error: error.message };
   }
 }
@@ -387,21 +432,24 @@ export async function pushUpdatesToAll(req) {
  * Admin function to force-refresh instances on one page
  */
 export async function pushUpdatesToPage(req) {
+  const { excerptId, pageId } = req.payload || {};
+  const extractedExcerptId = excerptId; // Extract for use in catch block
+  const extractedPageId = pageId; // Extract for use in catch block
+  
   try {
-    const { excerptId, pageId } = req.payload;
 
     // Get the excerpt
-    const excerpt = await storage.get(`excerpt:${excerptId}`);
+    const excerpt = await storage.get(`excerpt:${extractedExcerptId}`);
     if (!excerpt) {
       return { success: false, error: 'Excerpt not found' };
     }
 
     // Get all usages of this excerpt
-    const usageKey = `excerpt-usage:${excerptId}`;
+    const usageKey = `excerpt-usage:${extractedExcerptId}`;
     const usageData = await storage.get(usageKey) || { usages: [] };
 
     // Filter to only usages on the specified page
-    const pageUsages = usageData.usages.filter(u => u.pageId === pageId);
+    const pageUsages = usageData.usages.filter(u => u.pageId === extractedPageId);
 
     if (pageUsages.length === 0) {
       return { success: false, error: 'No instances found on this page' };
@@ -436,7 +484,7 @@ export async function pushUpdatesToPage(req) {
 
         updated++;
       } catch (err) {
-        console.error(`Error updating localId ${usage.localId}:`, err);
+        logFailure('pushUpdatesToPage', 'Error updating localId', err, { localId: usage.localId, excerptId: extractedExcerptId, pageId: extractedPageId });
         errors.push({ localId: usage.localId, error: err.message });
       }
     }
@@ -448,7 +496,7 @@ export async function pushUpdatesToPage(req) {
       errors: errors.length > 0 ? errors : undefined
     };
   } catch (error) {
-    console.error('Error pushing updates to page:', error);
+    logFailure('pushUpdatesToPage', 'Error pushing updates to page', error, { excerptId, pageId });
     return { success: false, error: error.message };
   }
 }

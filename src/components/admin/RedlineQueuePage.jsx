@@ -25,6 +25,7 @@ import { RedlineStatsBar } from './RedlineStatsBar';
 import { RedlineQueueCard } from './RedlineQueueCard';
 import { useRedlineQueueQuery } from '../../hooks/redline-hooks';
 import { useCurrentUserQuery } from '../../hooks/admin-hooks';
+import { logger } from '../../utils/logger.js';
 
 // Full-width container style
 const fullWidthContainerStyle = xcss({
@@ -82,7 +83,6 @@ export function RedlineQueuePage() {
 
   // Manual refresh handler - immediately invalidates queue to see updated sort order
   const handleManualRefresh = () => {
-    console.log('[RedlineQueuePage] Manual refresh triggered');
     queryClient.invalidateQueries({ queryKey: ['redlineQueue'] });
     queryClient.invalidateQueries({ queryKey: ['redlineStats'] });
   };

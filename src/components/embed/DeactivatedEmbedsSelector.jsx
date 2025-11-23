@@ -154,7 +154,7 @@ export function DeactivatedEmbedsSelector({ localId, pageId, deactivatedEmbeds, 
                       isLoading={isRestoring && restoringLocalId === mostRecentEmbed.localId}
                       isDisabled={isRestoring}
                     >
-                      {isRestoring && restoringLocalId === mostRecentEmbed.localId ? 'Restoring...' : 'Use this Embed'}
+                      {isRestoring && restoringLocalId === mostRecentEmbed.localId ? 'Restoring...' : "Restore data from this Embed"}
                     </Button>
                   </Stack>
                 </Box>

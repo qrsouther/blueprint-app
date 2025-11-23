@@ -12,6 +12,7 @@
 
 import { storage } from '@forge/api';
 import { saveVersion } from '../../utils/version-manager.js';
+import { logSuccess, logWarning } from '../../utils/forge-logger.js';
 
 // SAFETY: Dry-run mode configuration
 // Default is true (preview mode) - must be explicitly set to false for cleanup
@@ -43,9 +44,9 @@ export async function softDeleteMacroVars(localId, reason, metadata = {}, dryRun
       }
     );
     if (versionResult.success) {
-      console.log(`[SOFT-DELETE] ✅ Version snapshot created: ${versionResult.versionId}`);
+      logSuccess('softDeleteMacroVars', 'Version snapshot created', { versionId: versionResult.versionId, localId });
     } else {
-      console.warn(`[SOFT-DELETE] ⚠️  Version snapshot failed: ${versionResult.error}`);
+      logWarning('softDeleteMacroVars', 'Version snapshot failed', { error: versionResult.error, localId });
     }
 
     // Move to deleted namespace with recovery metadata
@@ -58,17 +59,12 @@ export async function softDeleteMacroVars(localId, reason, metadata = {}, dryRun
       ...metadata
     });
 
-    console.log(`[SOFT-DELETE] Moved macro-vars:${localId} to deleted namespace`);
-    console.log(`[SOFT-DELETE] Reason: ${reason}`);
-    console.log(`[SOFT-DELETE] Data can be recovered for 90 days`);
+    logSuccess('softDeleteMacroVars', 'Moved to deleted namespace', { localId, reason });
   }
 
   // Remove from active namespace
   if (!dryRun) {
     await storage.delete(`macro-vars:${localId}`);
-    console.log(`[DELETE] Removed macro-vars:${localId} from active storage`);
-  } else {
-    console.log(`[DRY-RUN] Would delete macro-vars:${localId} (SKIPPED)`);
   }
 }
 
@@ -83,9 +79,6 @@ export async function softDeleteMacroVars(localId, reason, metadata = {}, dryRun
 export async function softDeleteMacroCache(localId, reason, dryRun = DEFAULT_DRY_RUN_MODE) {
   if (!dryRun) {
     await storage.delete(`macro-cache:${localId}`);
-    console.log(`[DELETE] Removed macro-cache:${localId}`);
-  } else {
-    console.log(`[DRY-RUN] Would delete macro-cache:${localId} (SKIPPED)`);
   }
 }
 
@@ -99,7 +92,6 @@ export async function softDeleteMacroCache(localId, reason, dryRun = DEFAULT_DRY
  */
 export async function removeFromUsageTracking(localId, excerptId) {
   if (!excerptId) {
-    console.log(`[USAGE-TRACKING] No excerptId for localId ${localId}, skipping usage cleanup`);
     return false;
   }
 
@@ -114,11 +106,9 @@ export async function removeFromUsageTracking(localId, excerptId) {
     if (usageData.references.length === 0) {
       // No more references, delete the usage key entirely
       await storage.delete(usageKey);
-      console.log(`[USAGE-TRACKING] Deleted empty usage key: ${usageKey}`);
     } else {
       // Still has references, update
       await storage.set(usageKey, usageData);
-      console.log(`[USAGE-TRACKING] Removed localId ${localId} from ${usageKey}`);
     }
     return true;
   }
@@ -140,7 +130,7 @@ export async function removeFromUsageTracking(localId, excerptId) {
  * @param {boolean} dryRun - Unused (kept for API compatibility, but deletion is always disabled)
  * @returns {Promise<Array>} Array of orphaned include objects
  */
-export async function handlePageNotFound(pageIncludes, reason, dryRun) {
+export async function handlePageNotFound(pageIncludes, reason) {
   const orphanedIncludes = [];
 
   for (const include of pageIncludes) {
@@ -175,9 +165,8 @@ export async function handlePageNotFound(pageIncludes, reason, dryRun) {
  * @param {boolean} dryRun - Unused (kept for API compatibility, but deletion is always disabled)
  * @returns {Promise<Object>} Orphaned include object
  */
-export async function handleOrphanedMacro(include, pageData, dryRun) {
-  console.log(`[WORKER] ⚠️ ORPHAN DETECTED: localId ${include.localId} not found in page ${include.pageId}`);
-  console.log(`[WORKER] 📋 Orphaned Embed detected but NOT deleted. Storage entries preserved for manual recovery.`);
+export async function handleOrphanedMacro(include) {
+  logWarning('handleOrphanedMacro', 'Orphan detected', { localId: include.localId, pageId: include.pageId });
 
   const orphanedInclude = {
     ...include,

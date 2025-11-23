@@ -69,7 +69,6 @@ const StableTextfieldComponent = React.forwardRef(({
       const currentValue = textFieldRef.current.value || '';
       // Update if values differ (handles empty string, null, undefined cases)
       if (currentValue !== newValue) {
-        console.log('[StableTextfield] Updating value from', currentValue, 'to', newValue);
         textFieldRef.current.value = newValue;
         
         // Force a visual update by dispatching input and change events
@@ -87,7 +86,6 @@ const StableTextfieldComponent = React.forwardRef(({
         // Double-check with a small delay
         setTimeout(() => {
           if (textFieldRef.current && textFieldRef.current.value !== newValue) {
-            console.log('[StableTextfield] Retrying value update to', newValue);
             textFieldRef.current.value = newValue;
           }
         }, 10);

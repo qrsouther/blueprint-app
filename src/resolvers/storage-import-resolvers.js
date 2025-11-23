@@ -13,7 +13,7 @@ import { storage } from '@forge/api';
 import { Queue } from '@forge/events';
 import { generateUUID } from '../utils.js';
 import { validateExcerptData, validateMacroVarsData } from '../utils/storage-validator.js';
-import { updateExcerptIndex } from '../utils/storage-utils.js';
+import { logFunction, logPhase, logSuccess, logFailure, logWarning } from '../utils/forge-logger.js';
 
 /**
  * Validate export JSON structure and version compatibility
@@ -147,14 +147,14 @@ export async function initImportStorage(req) {
     };
     await storage.set(`${importKey}-metadata`, metadata);
 
-    console.log(`[IMPORT] Initialized import storage: ${importKey} with ${totalChunks} chunks`);
+    logPhase('initializeImportStorage', 'Initialized import storage', { importKey, totalChunks });
 
     return {
       success: true,
       importKey: importKey
     };
   } catch (error) {
-    console.error('[IMPORT] Error initializing import storage:', error);
+    logFailure('initializeImportStorage', 'Error initializing import storage', error);
     return {
       success: false,
       error: error.message,
@@ -173,8 +173,10 @@ export async function initImportStorage(req) {
  * @returns {Object} { success: boolean, error?: string }
  */
 export async function storeImportChunk(req) {
+  const { importKey, chunkIndex, chunkData } = req.payload || {};
+  const extractedImportKey = importKey; // Extract for use in catch block
+  
   try {
-    const { importKey, chunkIndex, chunkData } = req.payload;
 
     if (!importKey || chunkIndex === undefined || !chunkData) {
       return {
@@ -196,13 +198,12 @@ export async function storeImportChunk(req) {
     }
 
     await storage.set(chunkKey, chunkWrapper);
-    console.log(`[IMPORT] Stored chunk ${chunkIndex} for ${importKey}`);
 
     return {
       success: true
     };
   } catch (error) {
-    console.error(`[IMPORT] Error storing chunk ${req.payload.chunkIndex}:`, error);
+    logFailure('storeImportChunk', 'Error storing chunk', error, { chunkIndex: req.payload.chunkIndex, importKey: extractedImportKey });
     return {
       success: false,
       error: error.message
@@ -218,8 +219,10 @@ export async function storeImportChunk(req) {
  * @returns {Object} { success: boolean, data: string, error?: string }
  */
 export async function getImportData(req) {
+  const { importKey } = req.payload || {};
+  const extractedImportKey = importKey; // Extract for use in catch block
+  
   try {
-    const { importKey } = req.payload;
 
     if (!importKey) {
       return {
@@ -228,14 +231,12 @@ export async function getImportData(req) {
       };
     }
 
-    console.log(`[IMPORT] Fetching import data from key: ${importKey}`);
-
     // Check if import is chunked
     const metadata = await storage.get(`${importKey}-metadata`);
 
     if (metadata && metadata.totalChunks) {
       // Reassemble from chunks
-      console.log(`[IMPORT] Reassembling ${metadata.totalChunks} chunks`);
+      logPhase('getImportData', 'Reassembling chunks', { totalChunks: metadata.totalChunks, importKey });
       const chunks = [];
 
       for (let i = 0; i < metadata.totalChunks; i++) {
@@ -262,7 +263,6 @@ export async function getImportData(req) {
       }
 
       const jsonString = chunks.join('');
-      console.log(`[IMPORT] Reassembled ${(jsonString.length / 1024).toFixed(2)} KB`);
 
       return {
         success: true,
@@ -294,7 +294,7 @@ export async function getImportData(req) {
       };
     }
   } catch (error) {
-    console.error('[IMPORT] Error fetching import data:', error);
+    logFailure('getImportData', 'Error fetching import data', error, { importKey: extractedImportKey });
     return {
       success: false,
       error: error.message,
@@ -324,8 +324,6 @@ export async function startStorageImport(req) {
       };
     }
 
-    console.log('[IMPORT] Starting storage import async job...');
-
     // Generate progress ID for tracking
     const progressId = generateUUID();
 
@@ -345,7 +343,7 @@ export async function startStorageImport(req) {
       body: { progressId, importKey }
     });
 
-    console.log(`[IMPORT] Job queued: jobId=${jobId}, progressId=${progressId}, importKey=${importKey}`);
+    logSuccess('startStorageImport', 'Job queued', { jobId, progressId, importKey });
 
     // Return immediately - worker will process in background
     return {
@@ -356,7 +354,7 @@ export async function startStorageImport(req) {
     };
 
   } catch (error) {
-    console.error('[IMPORT] Error starting import job:', error);
+    logFailure('startStorageImport', 'Error starting import job', error);
     return {
       success: false,
       error: error.message
@@ -398,7 +396,7 @@ export async function getImportProgress(req) {
       progress
     };
   } catch (error) {
-    console.error('[IMPORT] Error fetching import progress:', error);
+    logFailure('getImportProgress', 'Error fetching import progress', error);
     return {
       success: false,
       error: error.message
@@ -432,8 +430,8 @@ export async function importStorageData(req) {
       };
     }
 
-    console.log('[IMPORT] Starting storage import...');
-    const startTime = Date.now();
+    const functionStartTime = Date.now();
+    logFunction('importStorage', 'START', { importKey });
 
     // Get JSON data from storage
     const dataResponse = await getImportData({ payload: { importKey } });
@@ -475,8 +473,7 @@ export async function importStorageData(req) {
       };
     }
 
-    console.log(`[IMPORT] Export version: ${exportData.exportVersion}, exported at: ${exportData.exportedAt}`);
-    console.log(`[IMPORT] Total keys to import: ${exportData.totalKeys}`);
+    logPhase('importStorage', 'Export data loaded', { exportVersion: exportData.exportVersion, exportedAt: exportData.exportedAt, totalKeys: exportData.totalKeys });
 
     // Flatten organized data back into key-value pairs
     const allEntries = [];
@@ -495,19 +492,17 @@ export async function importStorageData(req) {
     if (data.metadata) allEntries.push(...data.metadata);
     if (data.other) allEntries.push(...data.other);
 
-    console.log(`[IMPORT] Flattened to ${allEntries.length} entries`);
-
     // Validate data integrity
-    console.log('[IMPORT] Validating data integrity...');
+    logPhase('importStorage', 'Validating data integrity', { entryCount: allEntries.length });
     const integrityValidation = validateDataIntegrity(allEntries);
     
     if (integrityValidation.errors.length > 0) {
-      console.warn(`[IMPORT] Found ${integrityValidation.errors.length} validation errors`);
+      logWarning('importStorage', 'Found validation errors', { errorCount: integrityValidation.errors.length });
       // Continue with import but log errors
     }
 
     // Import all entries
-    console.log('[IMPORT] Writing data to storage...');
+    logPhase('importStorage', 'Writing data to storage', { entryCount: allEntries.length });
     const results = {
       imported: 0,
       failed: 0,
@@ -530,10 +525,10 @@ export async function importStorageData(req) {
 
         // Log progress every 50 entries
         if (results.imported % 50 === 0) {
-          console.log(`[IMPORT] Progress: ${results.imported}/${allEntries.length} entries imported`);
+          logPhase('importStorage', 'Import progress', { imported: results.imported, total: allEntries.length });
         }
       } catch (error) {
-        console.error(`[IMPORT] Error importing ${key}:`, error);
+        logFailure('importStorage', 'Error importing entry', error, { key });
         results.failed++;
         results.errors.push({
           key,
@@ -544,7 +539,7 @@ export async function importStorageData(req) {
 
     // Rebuild excerpt-index from imported excerpts
     if (importedExcerpts.length > 0) {
-      console.log(`[IMPORT] Rebuilding excerpt-index for ${importedExcerpts.length} excerpts...`);
+      logPhase('importStorage', 'Rebuilding excerpt-index', { excerptCount: importedExcerpts.length });
       try {
         const index = { excerpts: [] };
         
@@ -560,9 +555,9 @@ export async function importStorageData(req) {
         }
 
         await storage.set('excerpt-index', index);
-        console.log('[IMPORT] Excerpt-index rebuilt successfully');
+        logSuccess('importStorage', 'Excerpt-index rebuilt successfully', { excerptCount: importedExcerpts.length });
       } catch (error) {
-        console.error('[IMPORT] Error rebuilding excerpt-index:', error);
+        logFailure('importStorage', 'Error rebuilding excerpt-index', error);
         results.errors.push({
           key: 'excerpt-index',
           error: `Failed to rebuild index: ${error.message}`
@@ -570,9 +565,8 @@ export async function importStorageData(req) {
       }
     }
 
-    const elapsed = Date.now() - startTime;
-    console.log(`[IMPORT] Import complete in ${elapsed}ms`);
-    console.log(`[IMPORT] Imported: ${results.imported}, Failed: ${results.failed}`);
+    const elapsed = Date.now() - functionStartTime;
+    logSuccess('importStorage', 'Import complete', { duration: `${elapsed}ms`, imported: results.imported, failed: results.failed });
 
     return {
       success: results.failed === 0,
@@ -583,7 +577,7 @@ export async function importStorageData(req) {
       elapsed: elapsed
     };
   } catch (error) {
-    console.error('[IMPORT] Error importing storage:', error);
+    logFailure('importStorage', 'Error importing storage', error);
     return {
       success: false,
       error: error.message,

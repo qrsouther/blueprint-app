@@ -9,21 +9,18 @@
  */
 
 import { storage, startsWith } from '@forge/api';
+import { logSuccess, logFailure } from '../utils/forge-logger.js';
 
 /**
  * List all available backup snapshots
  * Returns metadata for each backup including timestamp, embed count, operation type
  */
-export async function listBackups(req) {
+export async function listBackups() {
   try {
-    console.log('[RESTORE] Listing available backups...');
-
     // Query all backup metadata entries
     const backupKeys = await storage.query()
       .where('key', startsWith('backup-'))
       .getMany();
-
-    console.log(`[RESTORE] Found ${backupKeys.results.length} storage entries with backup- prefix`);
 
     // Filter for metadata entries only (exclude individual embed backups)
     const backupMetadata = [];
@@ -36,8 +33,6 @@ export async function listBackups(req) {
       }
     }
 
-    console.log(`[RESTORE] Found ${backupMetadata.length} backup metadata entries`);
-
     // Sort by creation date (most recent first)
     const sortedBackups = backupMetadata.sort((a, b) =>
       new Date(b.createdAt) - new Date(a.createdAt)
@@ -49,7 +44,7 @@ export async function listBackups(req) {
       count: sortedBackups.length
     };
   } catch (error) {
-    console.error('[RESTORE] Error listing backups:', error);
+    logFailure('listBackups', 'Error listing backups', error);
     return {
       success: false,
       error: error.message,
@@ -62,16 +57,12 @@ export async function listBackups(req) {
  * List all soft-deleted embeds that can be restored
  * Returns embeds moved to macro-vars-deleted: namespace within recovery window
  */
-export async function listDeletedEmbeds(req) {
+export async function listDeletedEmbeds() {
   try {
-    console.log('[RESTORE] Listing soft-deleted embeds...');
-
     // Query all soft-deleted embed configs
     const deletedKeys = await storage.query()
       .where('key', startsWith('macro-vars-deleted:'))
       .getMany();
-
-    console.log(`[RESTORE] Found ${deletedKeys.results.length} soft-deleted embeds`);
 
     // Build array of deleted embed info
     const deletedEmbeds = deletedKeys.results.map(entry => {
@@ -105,7 +96,7 @@ export async function listDeletedEmbeds(req) {
       count: sortedDeleted.length
     };
   } catch (error) {
-    console.error('[RESTORE] Error listing deleted embeds:', error);
+    logFailure('listDeletedEmbeds', 'Error listing deleted embeds', error);
     return {
       success: false,
       error: error.message,
@@ -120,10 +111,11 @@ export async function listDeletedEmbeds(req) {
  * Phase 1 of two-phase restore process
  */
 export async function previewFromBackup(req) {
+  const { backupId, localId } = req.payload || {};
+  const extractedBackupId = backupId; // Extract for use in catch block
+  const extractedLocalId = localId; // Extract for use in catch block
+  
   try {
-    const { backupId, localId } = req.payload;
-
-    console.log(`[RESTORE] Previewing embed ${localId} from backup ${backupId}`);
 
     // Get the backed-up embed data
     const backupData = await storage.get(`${backupId}:embed:${localId}`);
@@ -166,7 +158,7 @@ export async function previewFromBackup(req) {
       }
     };
   } catch (error) {
-    console.error('[RESTORE] Error previewing backup:', error);
+    logFailure('previewFromBackup', 'Error previewing backup', error, { backupId: extractedBackupId, localId: extractedLocalId });
     return {
       success: false,
       error: error.message
@@ -180,10 +172,10 @@ export async function previewFromBackup(req) {
  * Phase 1 of two-phase restore process
  */
 export async function previewDeletedEmbed(req) {
+  const { localId } = req.payload || {};
+  const extractedLocalId = localId; // Extract for use in catch block
+  
   try {
-    const { localId } = req.payload;
-
-    console.log(`[RESTORE] Previewing deleted embed ${localId}`);
 
     // Get the soft-deleted data
     const deletedData = await storage.get(`macro-vars-deleted:${localId}`);
@@ -224,7 +216,7 @@ export async function previewDeletedEmbed(req) {
       }
     };
   } catch (error) {
-    console.error('[RESTORE] Error previewing deleted embed:', error);
+    logFailure('previewDeletedEmbed', 'Error previewing deleted embed', error, { localId: extractedLocalId });
     return {
       success: false,
       error: error.message
@@ -237,10 +229,10 @@ export async function previewDeletedEmbed(req) {
  * Phase 2 of two-phase restore (after preview confirmation)
  */
 export async function restoreDeletedEmbed(req) {
+  const { localId, force = false } = req.payload || {};
+  const extractedLocalId = localId; // Extract for use in catch block
+  
   try {
-    const { localId, force = false } = req.payload;
-
-    console.log(`[RESTORE] Restoring deleted embed ${localId} (force=${force})`);
 
     // Get soft-deleted data
     const deletedData = await storage.get(`macro-vars-deleted:${localId}`);
@@ -271,7 +263,7 @@ export async function restoreDeletedEmbed(req) {
     }
 
     // Remove deletion metadata before restoring
-    const { deletedAt, deletedBy, deletionReason, canRecover, ...originalData } = deletedData;
+    const { ...originalData } = deletedData;
 
     // Restore to active namespace
     await storage.set(`macro-vars:${localId}`, {
@@ -283,7 +275,7 @@ export async function restoreDeletedEmbed(req) {
     // Remove from deleted namespace
     await storage.delete(`macro-vars-deleted:${localId}`);
 
-    console.log(`[RESTORE] ✅ Successfully restored embed ${localId} from soft-delete`);
+    logSuccess('restoreDeletedEmbed', 'Successfully restored embed from soft-delete', { localId });
 
     return {
       success: true,
@@ -292,7 +284,7 @@ export async function restoreDeletedEmbed(req) {
       restoredFrom: 'soft-delete'
     };
   } catch (error) {
-    console.error('[RESTORE] Error restoring deleted embed:', error);
+    logFailure('restoreDeletedEmbed', 'Error restoring deleted embed', error, { localId: extractedLocalId });
     return {
       success: false,
       error: error.message
@@ -307,12 +299,10 @@ export async function restoreDeletedEmbed(req) {
  * Can restore specific embeds or all embeds from a backup
  */
 export async function restoreFromBackup(req) {
+  const { backupId, localIds = null, force = false } = req.payload || {};
+  const extractedBackupId = backupId; // Extract for use in catch block
+  
   try {
-    const { backupId, localIds = null, force = false } = req.payload;
-
-    console.log(`[RESTORE] Restoring from backup ${backupId}`);
-    console.log(`[RESTORE] localIds:`, localIds ? localIds : 'ALL');
-    console.log(`[RESTORE] force:`, force);
 
     // Get backup metadata
     const metadata = await storage.get(`${backupId}:metadata`);
@@ -338,8 +328,6 @@ export async function restoreFromBackup(req) {
       embedsToRestore = backupKeys.results.map(entry =>
         entry.key.replace(`${backupId}:embed:`, '')
       );
-
-      console.log(`[RESTORE] Restoring all ${embedsToRestore.length} embeds from backup`);
     }
 
     // Restore each embed
@@ -369,7 +357,7 @@ export async function restoreFromBackup(req) {
       restored.push(localId);
     }
 
-    console.log(`[RESTORE] ✅ Restored ${restored.length} embeds, skipped ${skipped.length}`);
+    logSuccess('restoreFromBackup', 'Restored embeds from backup', { backupId, restored: restored.length, skipped: skipped.length });
 
     return {
       success: true,
@@ -379,7 +367,7 @@ export async function restoreFromBackup(req) {
       details: { restored, skipped }
     };
   } catch (error) {
-    console.error('[RESTORE] Error restoring from backup:', error);
+    logFailure('restoreFromBackup', 'Error restoring from backup', error, { backupId: extractedBackupId });
     return {
       success: false,
       error: error.message

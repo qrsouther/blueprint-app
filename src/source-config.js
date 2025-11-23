@@ -1,12 +1,6 @@
-import ForgeUI, {
+/* eslint-disable no-unused-vars */
+import {
   render,
-  Form,
-  TextField,
-  Select,
-  Option,
-  TextArea,
-  Text,
-  Fragment,
   useConfig,
   useState
 } from '@forge/ui';
@@ -22,16 +16,12 @@ const App = () => {
   });
 
   const onSubmit = async (formData) => {
-    console.log('Form submitted:', formData);
-
     const result = await invoke('saveExcerpt', {
       excerptName: formData.excerptName,
       category: formData.category,
       content: formData.content,
       excerptId: formState.excerptId
     });
-
-    console.log('Save result:', result);
 
     // Return the config to save to the macro
     return result;
@@ -72,7 +62,7 @@ const App = () => {
         </Fragment>
       )}
 
-      <Text>💡 Tip: Use `{{variableName}}` syntax to create variables that can be filled in when including this excerpt.</Text>
+      <Text>💡 Tip: Use {'{{'}variableName{'}}'} syntax to create variables that can be filled in when including this excerpt.</Text>
     </Form>
   );
 };

@@ -9,7 +9,7 @@
 import { storage } from '@forge/api';
 import { updateProgress } from './helpers/progress-tracker.js';
 import { validateExcerptData, validateMacroVarsData } from '../utils/storage-validator.js';
-import { updateExcerptIndex } from '../utils/storage-utils.js';
+import { logFunction, logSuccess, logFailure, logWarning } from '../utils/forge-logger.js';
 
 /**
  * Validate export JSON structure and version compatibility
@@ -112,14 +112,14 @@ export async function handler(event) {
   const { progressId, importKey } = payload;
 
   if (!progressId || !importKey) {
-    console.error('[IMPORT WORKER] Missing progressId or importKey');
+    logFailure('storageImportWorker', 'Missing progressId or importKey', new Error('Missing required parameters'));
     return;
   }
 
   const startTime = Date.now();
 
   try {
-    console.log(`[IMPORT WORKER] Starting import job (progressId: ${progressId}, importKey: ${importKey})`);
+    logFunction('storageImportWorker', 'START', { progressId, importKey });
 
     // Phase 1: Initializing (0-5%)
     await updateProgress(progressId, {
@@ -206,9 +206,6 @@ export async function handler(event) {
       throw new Error(`Export structure validation failed: ${structureValidation.errors.join(', ')}`);
     }
 
-    console.log(`[IMPORT WORKER] Export version: ${exportData.exportVersion}, exported at: ${exportData.exportedAt}`);
-    console.log(`[IMPORT WORKER] Total keys to import: ${exportData.totalKeys}`);
-
     // Phase 4: Flatten and validate data integrity (25-40%)
     await updateProgress(progressId, {
       phase: 'flattening',
@@ -233,8 +230,6 @@ export async function handler(event) {
     if (data.metadata) allEntries.push(...data.metadata);
     if (data.other) allEntries.push(...data.other);
 
-    console.log(`[IMPORT WORKER] Flattened to ${allEntries.length} entries`);
-
     await updateProgress(progressId, {
       phase: 'validating',
       percent: 30,
@@ -246,7 +241,7 @@ export async function handler(event) {
     const integrityValidation = validateDataIntegrity(allEntries);
     
     if (integrityValidation.errors.length > 0) {
-      console.warn(`[IMPORT WORKER] Found ${integrityValidation.errors.length} validation errors`);
+      logWarning('storageImportWorker', 'Found validation errors', { errorCount: integrityValidation.errors.length });
     }
 
     // Phase 5: Import all entries (40-95%)
@@ -291,7 +286,7 @@ export async function handler(event) {
           });
         }
       } catch (error) {
-        console.error(`[IMPORT WORKER] Error importing ${key}:`, error);
+        logFailure('storageImportWorker', 'Error importing entry', error, { key });
         results.failed++;
         results.errors.push({
           key,
@@ -310,7 +305,6 @@ export async function handler(event) {
     });
 
     if (importedExcerpts.length > 0) {
-      console.log(`[IMPORT WORKER] Rebuilding excerpt-index for ${importedExcerpts.length} excerpts...`);
       try {
         const index = { excerpts: [] };
         
@@ -326,9 +320,9 @@ export async function handler(event) {
         }
 
         await storage.set('excerpt-index', index);
-        console.log('[IMPORT WORKER] Excerpt-index rebuilt successfully');
+        logSuccess('storageImportWorker', 'Excerpt-index rebuilt successfully', { excerptCount: importedExcerpts.length });
       } catch (error) {
-        console.error('[IMPORT WORKER] Error rebuilding excerpt-index:', error);
+        logFailure('storageImportWorker', 'Error rebuilding excerpt-index', error);
         results.errors.push({
           key: 'excerpt-index',
           error: `Failed to rebuild index: ${error.message}`
@@ -355,11 +349,10 @@ export async function handler(event) {
       }
     });
 
-    console.log(`[IMPORT WORKER] Import complete in ${elapsed}ms`);
-    console.log(`[IMPORT WORKER] Imported: ${results.imported}, Failed: ${results.failed}`);
+    logSuccess('storageImportWorker', 'Import complete', { elapsed: `${elapsed}ms`, imported: results.imported, failed: results.failed });
 
   } catch (error) {
-    console.error('[IMPORT WORKER] Fatal error:', error);
+    logFailure('storageImportWorker', 'Fatal error', error, { progressId, importKey });
     const elapsed = Date.now() - startTime;
     
     await updateProgress(progressId, {

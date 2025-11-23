@@ -38,6 +38,7 @@ import {
 } from '@forge/react';
 import { invoke } from '@forge/bridge';
 import { StableTextfield } from '../common/StableTextfield';
+import { logger } from '../../utils/logger.js';
 
 // Item container styling (matching Emergency Recovery design)
 const deletedItemStyle = xcss({
@@ -83,7 +84,6 @@ export function VersionHistoryModal({ isOpen, onClose, embedUuid }) {
   // Update versionLocalId when embedUuid prop changes
   useEffect(() => {
     if (isOpen && embedUuid) {
-      console.log('[VersionHistory] Setting version localId to:', embedUuid);
       setVersionLocalId(embedUuid);
     }
   }, [isOpen, embedUuid]);
@@ -91,7 +91,6 @@ export function VersionHistoryModal({ isOpen, onClose, embedUuid }) {
   // Auto-load version history when UUID is provided
   useEffect(() => {
     if (isOpen && embedUuid) {
-      console.log('[VersionHistory] Auto-loading versions for UUID:', embedUuid);
       // Small delay to ensure state is set
       setTimeout(() => {
         handleLoadVersions();
@@ -103,15 +102,11 @@ export function VersionHistoryModal({ isOpen, onClose, embedUuid }) {
    * Load version history from backend
    */
   const handleLoadVersions = async () => {
-    console.log('[VersionHistory] handleLoadVersions called with localId:', versionLocalId);
-
     if (!versionLocalId.trim()) {
-      console.log('[VersionHistory] Empty localId, showing error');
       setVersionError('Please enter a valid Embed UUID (localId)');
       return;
     }
 
-    console.log('[VersionHistory] Starting version load...');
     setLoadingVersions(true);
     setVersionError(null);
     setVersions([]);
@@ -119,27 +114,23 @@ export function VersionHistoryModal({ isOpen, onClose, embedUuid }) {
 
     try {
       const entityId = versionLocalId.trim(); // Just the UUID, not the storage key
-      console.log('[VersionHistory] Invoking getVersionHistory with entityId:', entityId);
 
       const response = await invoke('getVersionHistory', { entityId });
-      console.log('[VersionHistory] getVersionHistory response:', response);
 
       if (response.success) {
-        console.log('[VersionHistory] Success! Found versions:', response.versions?.length || 0);
         setVersions(response.versions || []);
         if (response.versions.length === 0) {
           setVersionError('No version history found for this Embed UUID');
         }
       } else {
-        console.error('[VersionHistory] Response not successful:', response.error);
+        logger.errors('[VersionHistory] Response not successful:', response.error);
         setVersionError(response.error || 'Failed to load version history');
       }
     } catch (err) {
-      console.error('[VersionHistory] Error loading versions:', err);
+      logger.errors('[VersionHistory] Error loading versions:', err);
       setVersionError(err.message);
     } finally {
       setLoadingVersions(false);
-      console.log('[VersionHistory] Loading complete');
     }
   };
 
@@ -159,7 +150,7 @@ export function VersionHistoryModal({ isOpen, onClose, embedUuid }) {
       }
     } catch (err) {
       setVersionError(`Error loading version: ${err.message}`);
-      console.error('[VersionHistory] Error loading version details:', err);
+      logger.errors('[VersionHistory] Error loading version details:', err);
     }
   };
 
@@ -195,7 +186,7 @@ export function VersionHistoryModal({ isOpen, onClose, embedUuid }) {
       }
     } catch (err) {
       setVersionError(`Error restoring version: ${err.message}`);
-      console.error('[VersionHistory] Error restoring version:', err);
+      logger.errors('[VersionHistory] Error restoring version:', err);
     } finally {
       setRestoringVersion(false);
     }

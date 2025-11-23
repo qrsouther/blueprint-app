@@ -16,6 +16,7 @@
 
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { invoke } from '@forge/bridge';
+import { logger } from '../utils/logger.js';
 
 // Module-level timeout ID for delayed queue invalidation
 // This allows the user to see comment posting results before the card moves due to re-sorting
@@ -37,7 +38,7 @@ export const useRedlineQueueQuery = (filters = {}, sortBy = 'status', groupBy = 
   return useQuery({
     queryKey: ['redlineQueue', filters, sortBy, groupBy],
     queryFn: async () => {
-      console.log('[REACT-QUERY-REDLINE] 📋 Fetching redline queue:', { filters, sortBy, groupBy });
+      logger.queries('Fetching redline queue:', { filters, sortBy, groupBy });
 
       const result = await invoke('getRedlineQueue', { filters, sortBy, groupBy });
 
@@ -45,7 +46,7 @@ export const useRedlineQueueQuery = (filters = {}, sortBy = 'status', groupBy = 
         throw new Error('Failed to load redline queue');
       }
 
-      console.log('[REACT-QUERY-REDLINE] ✅ Loaded queue:', {
+      logger.queries('Loaded redline queue:', {
         embedCount: result.embeds.length,
         hasGroups: !!result.groups
       });
@@ -70,7 +71,7 @@ export const useSetRedlineStatusMutation = () => {
 
   return useMutation({
     mutationFn: async ({ localId, status, userId, reason = '' }) => {
-      console.log('[REACT-QUERY-REDLINE] 🔄 Setting redline status:', { localId, status, userId });
+      logger.queries('Setting redline status:', { localId, status, userId });
 
       const result = await invoke('setRedlineStatus', { localId, status, userId, reason });
 
@@ -78,14 +79,12 @@ export const useSetRedlineStatusMutation = () => {
         throw new Error('Failed to set redline status');
       }
 
-      console.log('[REACT-QUERY-REDLINE] ✅ Status updated:', result);
+      logger.queries('Status updated:', result);
 
       return result;
     },
     onSuccess: (data, variables) => {
       const { localId, status, userId } = variables;
-
-      console.log('[REACT-QUERY-REDLINE] 🔄 Updating card in cache immediately');
 
       // Immediately update the specific card in all cached queue queries
       // This updates the UI without refetching or re-sorting
@@ -138,12 +137,9 @@ export const useSetRedlineStatusMutation = () => {
         }
       );
 
-      console.log('[REACT-QUERY-REDLINE] ✅ Card updated in cache');
-
       // Clear any existing timeout to reset the delay
       if (queueInvalidationTimeoutId) {
         clearTimeout(queueInvalidationTimeoutId);
-        console.log('[REACT-QUERY-REDLINE] ⏱️ Cleared previous invalidation timeout');
       }
 
       // Immediately invalidate stats (lightweight, no re-sorting)
@@ -152,15 +148,12 @@ export const useSetRedlineStatusMutation = () => {
       // Schedule queue invalidation after 1 minute delay
       // This allows users to see comment posting results before cards re-sort
       queueInvalidationTimeoutId = setTimeout(() => {
-        console.log('[REACT-QUERY-REDLINE] 🔄 Delayed invalidation: refetching redline queue');
         queryClient.invalidateQueries({ queryKey: ['redlineQueue'] });
         queueInvalidationTimeoutId = null;
       }, QUEUE_INVALIDATION_DELAY_MS);
-
-      console.log('[REACT-QUERY-REDLINE] ⏱️ Queue invalidation scheduled for 1 minute from now');
     },
     onError: (error) => {
-      console.error('[REACT-QUERY-REDLINE] ❌ Failed to set status:', error);
+      logger.errors('Failed to set redline status:', error);
     }
   });
 };
@@ -178,7 +171,7 @@ export const useBulkSetRedlineStatusMutation = () => {
 
   return useMutation({
     mutationFn: async ({ localIds, status, userId, reason = 'Bulk status update' }) => {
-      console.log('[REACT-QUERY-REDLINE] 🔄 Bulk setting redline status:', {
+      logger.queries('Bulk setting redline status:', {
         count: localIds.length,
         status,
         userId
@@ -190,7 +183,7 @@ export const useBulkSetRedlineStatusMutation = () => {
         throw new Error('Bulk status update failed');
       }
 
-      console.log('[REACT-QUERY-REDLINE] ✅ Bulk update complete:', {
+      logger.queries('Bulk update complete:', {
         updated: result.updated,
         failed: result.failed
       });
@@ -198,12 +191,9 @@ export const useBulkSetRedlineStatusMutation = () => {
       return result;
     },
     onSuccess: (data) => {
-      console.log('[REACT-QUERY-REDLINE] 🔄 Scheduling delayed invalidation after bulk update');
-
       // Clear any existing timeout to reset the delay
       if (queueInvalidationTimeoutId) {
         clearTimeout(queueInvalidationTimeoutId);
-        console.log('[REACT-QUERY-REDLINE] ⏱️ Cleared previous invalidation timeout');
       }
 
       // Immediately invalidate stats (lightweight, no re-sorting)
@@ -211,20 +201,17 @@ export const useBulkSetRedlineStatusMutation = () => {
 
       // Schedule queue invalidation after 1 minute delay
       queueInvalidationTimeoutId = setTimeout(() => {
-        console.log('[REACT-QUERY-REDLINE] 🔄 Delayed invalidation: refetching redline queue');
         queryClient.invalidateQueries({ queryKey: ['redlineQueue'] });
         queueInvalidationTimeoutId = null;
       }, QUEUE_INVALIDATION_DELAY_MS);
 
-      console.log('[REACT-QUERY-REDLINE] ⏱️ Queue invalidation scheduled for 1 minute from now');
-
       // Show warning if there were failures
       if (data.failed > 0) {
-        console.warn('[REACT-QUERY-REDLINE] ⚠️ Some items failed to update:', data.errors);
+        logger.errors('Some items failed to update in bulk status update:', data.errors);
       }
     },
     onError: (error) => {
-      console.error('[REACT-QUERY-REDLINE] ❌ Bulk status update failed:', error);
+      logger.errors('Bulk status update failed:', error);
     }
   });
 };
@@ -243,7 +230,7 @@ export const useConfluenceUserQuery = (accountId) => {
   return useQuery({
     queryKey: ['confluenceUser', accountId],
     queryFn: async () => {
-      console.log('[REACT-QUERY-REDLINE] 👤 Fetching user data for:', accountId);
+      logger.queries('Fetching user data for:', accountId);
 
       const result = await invoke('getConfluenceUser', { accountId });
 
@@ -251,7 +238,7 @@ export const useConfluenceUserQuery = (accountId) => {
         throw new Error('Failed to load user data');
       }
 
-      console.log('[REACT-QUERY-REDLINE] ✅ User data loaded:', result.displayName);
+      logger.queries('User data loaded:', result.displayName);
 
       return result;
     },
@@ -273,7 +260,7 @@ export const useRedlineStatsQuery = () => {
   return useQuery({
     queryKey: ['redlineStats'],
     queryFn: async () => {
-      console.log('[REACT-QUERY-REDLINE] 📊 Fetching redline stats');
+      logger.queries('Fetching redline stats');
 
       const result = await invoke('getRedlineStats');
 
@@ -281,7 +268,7 @@ export const useRedlineStatsQuery = () => {
         throw new Error('Failed to load redline stats');
       }
 
-      console.log('[REACT-QUERY-REDLINE] ✅ Stats loaded:', result);
+      logger.queries('Stats loaded:', result);
 
       return result;
     },
@@ -304,7 +291,7 @@ export const useCheckRedlineStaleQuery = (localId, enabled = true) => {
   return useQuery({
     queryKey: ['redlineStale', localId],
     queryFn: async () => {
-      console.log('[REACT-QUERY-REDLINE] 🔍 Checking staleness for:', localId);
+      logger.queries('Checking staleness for:', localId);
 
       const result = await invoke('checkRedlineStale', { localId });
 
@@ -312,7 +299,7 @@ export const useCheckRedlineStaleQuery = (localId, enabled = true) => {
         throw new Error('Failed to check redline staleness');
       }
 
-      console.log('[REACT-QUERY-REDLINE] ✅ Staleness check:', {
+      logger.queries('Staleness check:', {
         localId,
         isStale: result.isStale,
         reason: result.reason
@@ -335,11 +322,9 @@ export const useCheckRedlineStaleQuery = (localId, enabled = true) => {
  * @returns {Object} React Query mutation result
  */
 export const usePostRedlineCommentMutation = () => {
-  const queryClient = useQueryClient();
-
   return useMutation({
     mutationFn: async ({ localId, pageId, commentText, userId }) => {
-      console.log('[REACT-QUERY-REDLINE] 💬 Posting inline comment:', { localId, pageId });
+      logger.queries('Posting inline comment:', { localId, pageId });
 
       const result = await invoke('postRedlineComment', { localId, pageId, commentText, userId });
 
@@ -347,7 +332,7 @@ export const usePostRedlineCommentMutation = () => {
         throw new Error('Failed to post inline comment');
       }
 
-      console.log('[REACT-QUERY-REDLINE] ✅ Comment posted:', {
+      logger.queries('Comment posted:', {
         commentId: result.commentId,
         location: result.location
       });
@@ -355,11 +340,10 @@ export const usePostRedlineCommentMutation = () => {
       return result;
     },
     onSuccess: () => {
-      console.log('[REACT-QUERY-REDLINE] ✅ Inline comment posted successfully');
       // No need to invalidate queries - comment posting is independent
     },
     onError: (error) => {
-      console.error('[REACT-QUERY-REDLINE] ❌ Failed to post comment:', error);
+      logger.errors('Failed to post comment:', error);
     }
   });
 };

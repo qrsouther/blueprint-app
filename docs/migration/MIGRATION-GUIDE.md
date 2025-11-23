@@ -1,5 +1,8 @@
 # 🔄 MultiExcerpt to Blueprint Standard Migration Guide
 
+> **⚠️ FUNCTIONALLY IRRELEVANT - HISTORICAL RECORD ONLY**  
+> This document describes the script-based migration process that has been replaced by the Migration Tools modal in the Admin UI. The scripts referenced in this guide (e.g., `clone-macros.js`) are no longer in use. Migration is now performed through the UI via the Migration Tools modal. This document is preserved only as a historical record of the migration planning and process.
+
 ## Overview
 
 This guide describes the **definitive approach** for migrating existing Confluence pages from the MultiExcerpt macro plugin to Blueprint Standard Source macros.
@@ -460,3 +463,4 @@ If you encounter issues:
 2. Review the Troubleshooting section above
 3. Check the migration logs for detailed error messages
 4. Reach out for support with specific error messages and page IDs
+

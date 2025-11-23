@@ -35,6 +35,7 @@ import {
   xcss
 } from '@forge/react';
 import { invoke } from '@forge/bridge';
+import { logger } from '../../utils/logger.js';
 
 const summaryBoxStyle = xcss({
   padding: 'space.200',
@@ -122,7 +123,7 @@ export function StorageExportModal({ isOpen, onClose }) {
             setExporting(false);
           }
         } catch (pollError) {
-          console.error('[StorageExport] Error polling progress:', pollError);
+          logger.errors('[StorageExport] Error polling progress:', pollError);
           // Continue polling on error (might be transient)
         }
       };
@@ -137,7 +138,7 @@ export function StorageExportModal({ isOpen, onClose }) {
     } catch (err) {
       const errorMsg = err?.message || String(err) || 'Failed to start export';
       setError(errorMsg);
-      console.error('[StorageExport] Error:', err);
+      logger.errors('[StorageExport] Error:', err);
       setExporting(false);
     }
   };
@@ -192,7 +193,7 @@ export function StorageExportModal({ isOpen, onClose }) {
       setExporting(false);
     } catch (err) {
       setError(`Failed to fetch export data: ${err.message}`);
-      console.error('[StorageExport] Error fetching export data:', err);
+      logger.errors('[StorageExport] Error fetching export data:', err);
       setExporting(false);
     }
   };

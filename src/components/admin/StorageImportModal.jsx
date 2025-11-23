@@ -36,6 +36,7 @@ import {
   xcss
 } from '@forge/react';
 import { invoke } from '@forge/bridge';
+import { logger } from '../../utils/logger.js';
 
 const summaryBoxStyle = xcss({
   padding: 'space.200',
@@ -97,7 +98,7 @@ export function StorageImportModal({ isOpen, onClose }) {
       });
     } catch (err) {
       setError(`Failed to read file: ${err.message}`);
-      console.error('[StorageImport] File read error:', err);
+      logger.errors('[StorageImport] File read error:', err);
     }
   }, []);
 
@@ -117,7 +118,6 @@ export function StorageImportModal({ isOpen, onClose }) {
       input.addEventListener('change', handleFileSelect);
       document.body.appendChild(input);
       fileInputRef.current = input;
-      console.log('[StorageImport] File input created');
     }
 
     return () => {
@@ -267,7 +267,7 @@ export function StorageImportModal({ isOpen, onClose }) {
             setImporting(false);
           }
         } catch (pollError) {
-          console.error('[StorageImport] Error polling progress:', pollError);
+          logger.errors('[StorageImport] Error polling progress:', pollError);
           // Continue polling on error (might be transient)
         }
       };
@@ -281,7 +281,7 @@ export function StorageImportModal({ isOpen, onClose }) {
     } catch (err) {
       const errorMsg = err?.message || String(err) || 'Failed to import storage data';
       setError(errorMsg);
-      console.error('[StorageImport] Error:', err);
+      logger.errors('[StorageImport] Error:', err);
       
       // Clear polling on error
       if (pollingInterval) {
@@ -338,14 +338,12 @@ export function StorageImportModal({ isOpen, onClose }) {
                         input.addEventListener('change', handleFileSelect);
                         document.body.appendChild(input);
                         fileInputRef.current = input;
-                        console.log('[StorageImport] File input created on button click');
                       }
                       
                       if (fileInputRef.current) {
-                        console.log('[StorageImport] Triggering file input click');
                         fileInputRef.current.click();
                       } else {
-                        console.error('[StorageImport] File input not available');
+                        logger.errors('[StorageImport] File input not available');
                         setError('File input not ready. Please try again.');
                       }
                     }}

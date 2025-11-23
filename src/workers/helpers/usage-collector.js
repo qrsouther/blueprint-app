@@ -6,6 +6,7 @@
  */
 
 import { storage, startsWith } from '@forge/api';
+import { logWarning } from '../../utils/forge-logger.js';
 
 /**
  * Collect all Embed instances from ALL usage keys
@@ -23,8 +24,6 @@ export async function collectAllEmbedInstances(excerptIds) {
     .where('key', startsWith('usage:'))
     .getMany();
 
-  console.log(`[WORKER] Found ${allUsageQuery.results.length} usage key(s) to check`);
-
   const allIncludes = [];
   const orphanedUsageKeys = []; // Track usage keys for deleted Sources
 
@@ -37,7 +36,7 @@ export async function collectAllEmbedInstances(excerptIds) {
     const sourceExists = excerptIds.includes(excerptId);
 
     if (!sourceExists) {
-      console.log(`[WORKER] ⚠️ Found orphaned usage key for deleted Source: ${excerptId} (${references.length} references)`);
+      logWarning('collectAllEmbedInstances', 'Found orphaned usage key for deleted Source', { excerptId, referenceCount: references.length });
       orphanedUsageKeys.push({ excerptId, key: entry.key, references });
     }
 

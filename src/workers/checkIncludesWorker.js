@@ -20,14 +20,14 @@
  * - 100%: Complete
  */
 
-import { AsyncEvent } from '@forge/events';
-import { storage, startsWith } from '@forge/api';
+import { storage } from '@forge/api';
 import { updateProgress, calculatePhaseProgress, buildCompletionMessage } from './helpers/progress-tracker.js';
 import { fetchPageContent, checkMacroExistsInADF, groupIncludesByPage } from './helpers/page-scanner.js';
-import { handlePageNotFound, handleOrphanedMacro, removeFromUsageTracking } from './helpers/orphan-detector.js';
+import { handlePageNotFound, handleOrphanedMacro } from './helpers/orphan-detector.js';
 import { attemptReferenceRepair, checkExcerptExists, buildRepairedRecord, buildBrokenRecord } from './helpers/reference-repairer.js';
 import { createBackupSnapshot } from './helpers/backup-manager.js';
 import { collectAllEmbedInstances, buildActiveIncludeRecord } from './helpers/usage-collector.js';
+import { logFunction, logPhase, logSuccess, logFailure, logWarning } from '../utils/forge-logger.js';
 
 // SAFETY: Dry-run mode configuration
 // Default is true (preview mode) - must be explicitly set to false for cleanup
@@ -39,21 +39,19 @@ const DEFAULT_DRY_RUN_MODE = true;
  * @param {AsyncEvent} event - The async event from the queue (v2: payload is in event.body)
  * @param {Object} context - The context object with jobId, etc.
  */
-export async function handler(event, context) {
+export async function handler(event) {
   // In @forge/events v2, payload is in event.body, not event.payload
   const payload = event.payload || event.body || event;
   const { progressId, dryRun = DEFAULT_DRY_RUN_MODE } = payload;
 
-  console.log(`[WORKER] Starting Check All Includes (progressId: ${progressId}, dryRun: ${dryRun})`);
+  const functionStartTime = Date.now();
+  logFunction('checkIncludesWorker', 'Starting Check All Includes', { progressId, dryRun });
 
   // CRITICAL SAFETY MESSAGE
   if (dryRun) {
-    console.log(`[WORKER] 🛡️ DRY-RUN MODE ENABLED 🛡️`);
-    console.log(`[WORKER] No data will be deleted. Orphaned items will be logged only.`);
-    console.log(`[WORKER] This is a preview - use Clean Up to actually remove orphaned data.`);
+    logPhase('checkIncludesWorker', 'DRY-RUN MODE ENABLED - No data will be deleted. Orphaned items will be logged only.');
   } else {
-    console.log(`[WORKER] ⚠️ LIVE MODE - Deletions ENABLED ⚠️`);
-    console.log(`[WORKER] Orphaned data will be soft-deleted and moved to recovery namespace.`);
+    logWarning('checkIncludesWorker', 'LIVE MODE - Deletions ENABLED. Orphaned data will be soft-deleted and moved to recovery namespace.');
   }
 
   try {
@@ -92,7 +90,7 @@ export async function handler(event, context) {
       });
     } catch (backupError) {
       // Log backup failure but continue - don't block the check operation
-      console.error(`[WORKER] ⚠️ Backup creation failed, continuing anyway:`, backupError);
+      logWarning('checkIncludesWorker', 'Backup creation failed, continuing anyway', { error: backupError.message });
 
       await updateProgress(progressId, {
         phase: 'backup',
@@ -116,7 +114,7 @@ export async function handler(event, context) {
     const index = await storage.get('excerpt-index') || { excerpts: [] };
     const excerptIds = index.excerpts.map(e => e.id);
 
-    console.log(`[WORKER] Found ${excerptIds.length} excerpts to check`);
+    logPhase('checkIncludesWorker', 'Found excerpts to check', { count: excerptIds.length });
 
     await updateProgress(progressId, {
       phase: 'fetching',
@@ -135,14 +133,14 @@ export async function handler(event, context) {
       processed: 0
     });
 
-    const { uniqueIncludes, orphanedUsageKeys } = await collectAllEmbedInstances(excerptIds);
+    const { uniqueIncludes } = await collectAllEmbedInstances(excerptIds);
 
     // Group by pageId for efficient checking
     const includesByPage = groupIncludesByPage(uniqueIncludes);
     const pageIds = Object.keys(includesByPage);
     const totalPages = pageIds.length;
 
-    console.log(`[WORKER] Found ${uniqueIncludes.length} Embed instances across ${totalPages} pages`);
+    logPhase('checkIncludesWorker', 'Found Embed instances', { count: uniqueIncludes.length, pages: totalPages });
 
     await updateProgress(progressId, {
       phase: 'collecting',
@@ -166,16 +164,52 @@ export async function handler(event, context) {
       const pageIncludes = includesByPage[pageId];
 
       try {
-        // Fetch page content to verify macro existence
+        // Fetch page content to verify macro existence (with retry logic)
         const pageResult = await fetchPageContent(pageId);
 
         if (!pageResult.success) {
-          // Page doesn't exist or is inaccessible
-          console.log(`[WORKER] ${pageResult.error}`);
+          // Distinguish between error types to prevent false positives
+          const errorType = pageResult.errorType || 'unknown';
+          const httpStatus = pageResult.httpStatus;
 
-          const orphaned = await handlePageNotFound(pageIncludes, pageResult.error, dryRun);
-          orphanedIncludes.push(...orphaned);
-          orphanedEntriesRemoved.push(...pageIncludes.map(inc => inc.localId));
+          // Only mark as orphaned if page is confirmed deleted (404)
+          // Permission errors (403, 401) and transient failures should NOT mark as orphaned
+          if (errorType === 'page_deleted' && httpStatus === 404) {
+            // Page confirmed deleted - legitimate orphan
+            logWarning('checkIncludesWorker', 'Page confirmed deleted', { pageId, error: pageResult.error });
+
+            const orphaned = await handlePageNotFound(pageIncludes, pageResult.error, dryRun);
+            orphanedIncludes.push(...orphaned);
+            orphanedEntriesRemoved.push(...pageIncludes.map(inc => inc.localId));
+          } else if (errorType === 'permission_denied' || errorType === 'unauthorized') {
+            // Permission error - don't mark as orphaned (may be temporary)
+            logWarning('checkIncludesWorker', 'Page access denied - not marking as orphaned', {
+              pageId,
+              error: pageResult.error,
+              errorType,
+              httpStatus
+            });
+            // Add to a separate list for reporting (optional)
+            // These are not orphaned, just inaccessible
+          } else if (errorType === 'transient_failure') {
+            // Transient failure after retries - don't mark as orphaned
+            logWarning('checkIncludesWorker', 'Page fetch failed after retries - not marking as orphaned', {
+              pageId,
+              error: pageResult.error,
+              errorType,
+              httpStatus
+            });
+            // Add to a separate list for reporting (optional)
+            // These are not orphaned, just temporarily unavailable
+          } else {
+            // Unknown error type - be conservative, don't mark as orphaned
+            logWarning('checkIncludesWorker', 'Page fetch failed with unknown error - not marking as orphaned', {
+              pageId,
+              error: pageResult.error,
+              errorType,
+              httpStatus
+            });
+          }
         } else {
           // Page exists - check each Embed instance
           const { pageData, adfContent } = pageResult;
@@ -202,7 +236,7 @@ export async function handler(event, context) {
           }
         }
       } catch (error) {
-        console.error(`[WORKER] Error checking page ${pageId}:`, error);
+        logFailure('checkIncludesWorker', 'Error checking page', error, { pageId });
         // Mark all Includes on this page as orphaned due to error
         for (const include of pageIncludes) {
           orphanedIncludes.push({
@@ -225,7 +259,6 @@ export async function handler(event, context) {
         processed: pagesProcessed
       });
 
-      console.log(`[WORKER] Processed page ${pagesProcessed}/${totalPages} (${percent}%)`);
     }
 
     // Phase 5: Finalize results (95-100%)
@@ -247,8 +280,6 @@ export async function handler(event, context) {
       orphanedEntriesRemoved: orphanedEntriesRemoved.length,
       pagesChecked: totalPages
     };
-
-    console.log(`[WORKER] Check complete:`, summary);
 
     // Phase 6: Store final results and mark complete (100%)
     const finalResults = {
@@ -280,11 +311,14 @@ export async function handler(event, context) {
       results: finalResults
     });
 
-    console.log(`[WORKER] Check All Includes complete (progressId: ${progressId})`);
+    logSuccess('checkIncludesWorker', 'Check All Includes complete', {
+      progressId,
+      duration: `${Date.now() - functionStartTime}ms`,
+      summary
+    });
 
     if (backupId) {
-      console.log(`[WORKER] 💾 Backup available for recovery: ${backupId}`);
-      console.log(`[WORKER] Use restore functions if data recovery is needed`);
+      logPhase('checkIncludesWorker', 'Backup available for recovery', { backupId });
     }
 
     return {
@@ -295,7 +329,7 @@ export async function handler(event, context) {
     };
 
   } catch (error) {
-    console.error(`[WORKER] Fatal error in Check All Includes:`, error);
+    logFailure('checkIncludesWorker', 'Fatal error in Check All Includes', error, { progressId });
 
     await updateProgress(progressId, {
       phase: 'error',
@@ -327,7 +361,6 @@ async function processActiveEmbed(
   staleIncludes
 ) {
   const excerptId = include.excerptId;
-  console.log(`[CHECK-MACRO] Checking excerptId for localId ${include.localId}: ${excerptId}`);
 
   // Handle missing excerptId (attempt repair)
   if (!excerptId) {
@@ -360,8 +393,6 @@ async function processActiveEmbed(
   }
 
   // Active Include - check if stale and collect metadata
-  console.log(`[CHECK-MACRO] ✅ Excerpt "${excerptCheck.excerpt.name}" found for localId ${include.localId}`);
-  console.log(`[CHECK-MACRO] Checking staleness...`);
 
   const macroVars = await storage.get(`macro-vars:${include.localId}`);
   const cacheData = await storage.get(`macro-cache:${include.localId}`);

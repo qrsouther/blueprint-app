@@ -1,4 +1,5 @@
-import ForgeUI, { render, Fragment, Text, useConfig } from '@forge/ui';
+/* eslint-disable no-unused-vars */
+import { render, Fragment, Text, useConfig } from '@forge/ui';
 
 const App = () => {
   const config = useConfig();

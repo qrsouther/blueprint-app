@@ -38,9 +38,17 @@ modules:
       queue: check-includes-queue
       function: check-includes-worker
 
+    - key: check-sources-consumer
+      queue: check-sources-queue
+      function: check-sources-worker
+
     - key: migration-consumer
       queue: migration-queue
       function: migration-worker
+
+    - key: prune-versions-consumer
+      queue: prune-versions-queue
+      function: prune-versions-worker
 
   function:
     - key: resolver
@@ -50,8 +58,16 @@ modules:
       handler: workers/checkIncludesWorker.handler
       timeoutSeconds: 900
 
+    - key: check-sources-worker
+      handler: workers/checkSourcesWorker.handler
+      timeoutSeconds: 900
+
     - key: migration-worker
       handler: workers/migrationWorker.handler
+      timeoutSeconds: 900
+
+    - key: prune-versions-worker
+      handler: workers/pruneVersionsWorker.handler
       timeoutSeconds: 900
 
 resources:

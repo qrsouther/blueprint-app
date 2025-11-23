@@ -3,13 +3,16 @@
  *
  * Displays current Forge storage usage at the bottom of the Admin page.
  * Shows usage in MB, percentage of 250MB limit, Sources count, and Embeds count.
+ * Displays a warning banner when storage exceeds 100 MB (40% of limit).
  *
  * @param {Object} props
  * @param {number} props.totalMB - Total storage used in MB
  * @param {number} props.limitMB - Storage limit in MB (250)
+ * @param {number} props.warningThresholdMB - Warning threshold in MB (100)
  * @param {number} props.percentUsed - Percentage of limit used
  * @param {number} props.sourcesCount - Total number of Sources
  * @param {number} props.embedsCount - Total number of Embeds
+ * @param {boolean} props.exceedsWarningThreshold - Whether storage exceeds warning threshold
  * @param {boolean} props.isLoading - Whether storage usage is being calculated
  * @param {string|null} props.error - Error message if calculation failed
  * @returns {JSX.Element}
@@ -39,9 +42,11 @@ const footerStyles = xcss({
 export function StorageUsageFooter({
   totalMB,
   limitMB,
+  warningThresholdMB,
   percentUsed,
   sourcesCount,
   embedsCount,
+  exceedsWarningThreshold,
   isLoading,
   error
 }) {
@@ -50,13 +55,20 @@ export function StorageUsageFooter({
     return null;
   }
 
-  // Don't render if there's an error
+  // Show error state if there's an error (instead of hiding completely)
   if (error) {
-    return null;
+    return (
+      <Box xcss={footerStyles}>
+        <Inline space="space.050" alignBlock="center" alignInline="end">
+          <Code>Storage Usage: Error loading ({error})</Code>
+        </Inline>
+      </Box>
+    );
   }
 
   // Don't render if data isn't available yet
-  if (!totalMB || !limitMB || percentUsed === undefined || sourcesCount === undefined || embedsCount === undefined) {
+  // Use != null to allow 0 values (which are valid)
+  if (totalMB == null || limitMB == null || percentUsed == null || sourcesCount == null || embedsCount == null) {
     return null;
   }
 

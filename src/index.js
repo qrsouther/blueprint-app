@@ -1,14 +1,11 @@
 import Resolver from '@forge/resolver';
-import { storage, startsWith } from '@forge/api';
+import { storage } from '@forge/api';
 import api, { route } from '@forge/api';
 import { Queue } from '@forge/events';
 import { generateUUID } from './utils.js';
+import { logFunction, logPhase, logSuccess, logFailure } from './utils/forge-logger.js';
 
 // Import utility functions from modular files
-import { extractTextFromAdf, findHeadingBeforeMacro } from './utils/adf-utils.js';
-import { detectVariables, detectToggles } from './utils/detection-utils.js';
-import { updateExcerptIndex } from './utils/storage-utils.js';
-import { decodeTemplateData, storageToPlainText, cleanMultiExcerptMacros } from './utils/migration-utils.js';
 
 // Import simple resolver functions (Phase 2 modularization)
 import {
@@ -58,6 +55,7 @@ import {
 import {
   sourceHeartbeat as sourceHeartbeatResolver,
   checkAllSources as checkAllSourcesResolver,
+  startCheckAllSources as startCheckAllSourcesResolver,
   checkAllIncludes as checkAllIncludesResolver,
   startCheckAllIncludes as startCheckAllIncludesResolver,
   getStorageUsage as getStorageUsageResolver
@@ -104,6 +102,7 @@ import {
   getVersionDetails,
   restoreFromVersion,
   pruneVersionsNow,
+  startPruneVersions,
   getVersioningStatsResolver
 } from './resolvers/version-resolvers.js';
 
@@ -258,6 +257,9 @@ resolver.define('sourceHeartbeat', sourceHeartbeatResolver);
 // Active check: Verify each Source still exists on its page
 resolver.define('checkAllSources', checkAllSourcesResolver);
 
+// Start Check All Sources (async trigger - immediately returns jobId + progressId)
+resolver.define('startCheckAllSources', startCheckAllSourcesResolver);
+
 // Get all orphaned usage entries (usage data for excerpts that no longer exist)
 resolver.define('getOrphanedUsage', getOrphanedUsageResolver);
 
@@ -364,7 +366,7 @@ resolver.define('startMigrationJob', async (req) => {
   const { sources, deleteOldMigrations, spaceKey } = req.payload;
   const jobId = generateUUID();
 
-  console.log(`Starting migration job ${jobId} with ${sources.length} sources`);
+  logFunction('startMigrationJob', 'START', { jobId, sourceCount: sources.length });
 
   // Initialize job status in storage
   await storage.set(`migration-job:${jobId}`, {
@@ -445,8 +447,6 @@ resolver.define('deleteTestMigrationPages', async (req) => {
     const searchData = await searchResponse.json();
     const pagesToDelete = searchData.results || [];
 
-    console.log(`Found ${pagesToDelete.length} test pages to delete`);
-
     const deleted = [];
     const errors = [];
 
@@ -459,7 +459,6 @@ resolver.define('deleteTestMigrationPages', async (req) => {
 
         if (deleteResponse.ok) {
           deleted.push(page.id);
-          console.log(`Deleted page ${page.id}: ${page.title}`);
         } else {
           errors.push({ pageId: page.id, title: page.title, error: deleteResponse.status });
         }
@@ -486,7 +485,7 @@ resolver.define('startAdfMigration', async (req) => {
   const { sourcePageId, spaceKey } = req.payload;
   const jobId = generateUUID();
 
-  console.log(`Starting ADF migration job ${jobId} for page ${sourcePageId}`);
+  logFunction('startAdfMigration', 'START', { jobId, sourcePageId });
 
   try {
     // Initialize job status in storage
@@ -513,7 +512,7 @@ resolver.define('startAdfMigration', async (req) => {
       jobId
     };
   } catch (error) {
-    console.error(`Failed to start ADF migration job:`, error);
+    logFailure('startAdfMigration', 'Failed to start ADF migration job', error);
     return {
       success: false,
       error: error.message
@@ -522,7 +521,7 @@ resolver.define('startAdfMigration', async (req) => {
 });
 
 // Delete all migrated sources from storage (ONE-TIME USE CLEANUP)
-resolver.define('deleteAllMigratedSources', async (req) => {
+resolver.define('deleteAllMigratedSources', async () => {
   const excerptIndex = await storage.get('excerpt-index') || { excerpts: [] };
   const toDelete = [];
 
@@ -576,7 +575,7 @@ async function extractForgeMetadataTemplate(workingPageId) {
       render: extension.attrs.parameters.render
     };
   } catch (error) {
-    console.error('Failed to extract Forge metadata template:', error);
+    logFailure('extractForgeMetadataTemplate', 'Failed to extract Forge metadata template', error);
     throw error;
   }
 }
@@ -624,17 +623,15 @@ function transformToBlueprintStandardAdf(multiExcerptAdf, excerptId, excerptName
 }
 
 // Test content conversion with hardcoded example and transform to Blueprint Standard (DIAGNOSTIC)
-resolver.define('testHardcodedConversion', async (req) => {
+resolver.define('testHardcodedConversion', async () => {
   const content = '<ac:structured-macro ac:name="multiexcerpt-macro" ac:schema-version="1" data-layout="default" ac:local-id="985f5450-4cdf-4d0b-a03d-600f8df78455" ac:macro-id="d1f16605-d998-4b76-a585-5c62b68285f2"><ac:parameter ac:name="hidden">false</ac:parameter><ac:parameter ac:name="name">Test0</ac:parameter><ac:parameter ac:name="fallback">false</ac:parameter><ac:rich-text-body><p>{{client}} 12345.</p></ac:rich-text-body></ac:structured-macro>';
 
-  console.log('Testing hardcoded MultiExcerpt conversion + transformation');
-  console.log('Input length:', content.length);
+  logFunction('testHardcodedConversion', 'START', { inputLength: content.length });
 
   try {
     // Step 0: Extract Forge metadata template from a working page
-    console.log('Step 0: Extracting Forge metadata template from working page...');
+    logPhase('testHardcodedConversion', 'Step 0: Extracting Forge metadata template', {});
     const forgeMetadata = await extractForgeMetadataTemplate('64880643');
-    console.log('Step 0: Forge metadata extracted:', JSON.stringify(forgeMetadata, null, 2));
 
     // Step 1: Convert MultiExcerpt storage to ADF
     const response = await api.asApp().requestConfluence(
@@ -654,7 +651,7 @@ resolver.define('testHardcodedConversion', async (req) => {
 
     if (!response.ok) {
       const errorText = await response.text();
-      console.error('Conversion failed:', errorText);
+      logFailure('testHardcodedConversion', 'Step 1: Conversion failed', new Error(errorText));
       return {
         success: false,
         error: `Conversion failed: ${response.status}`,
@@ -663,11 +660,9 @@ resolver.define('testHardcodedConversion', async (req) => {
     }
 
     const conversionResult = await response.json();
-    console.log('Step 1: Conversion result:', JSON.stringify(conversionResult, null, 2));
 
     // Parse the stringified ADF from the value property
     const multiExcerptAdf = JSON.parse(conversionResult.value);
-    console.log('Step 1b: Parsed MultiExcerpt ADF:', JSON.stringify(multiExcerptAdf, null, 2));
 
     // Step 2: Transform to Blueprint Standard ADF with complete Forge metadata
     const blueprintAdf = transformToBlueprintStandardAdf(
@@ -679,13 +674,11 @@ resolver.define('testHardcodedConversion', async (req) => {
       forgeMetadata  // Complete Forge metadata from working page
     );
 
-    console.log('Step 2: Blueprint Standard ADF:', JSON.stringify(blueprintAdf, null, 2));
-
     // Step 3: Create a test page with the Blueprint Standard ADF
     const spaceId = '163842'; // Your space ID
     const pageTitle = `Blueprint Standard Test - ${new Date().toISOString()}`;
 
-    console.log('Step 3: Creating test page...');
+    logPhase('testHardcodedConversion', 'Step 3: Creating test page', { spaceId, pageTitle });
 
     const createPageResponse = await api.asApp().requestConfluence(
       route`/wiki/api/v2/pages`,
@@ -709,7 +702,7 @@ resolver.define('testHardcodedConversion', async (req) => {
 
     if (!createPageResponse.ok) {
       const errorText = await createPageResponse.text();
-      console.error('Page creation failed:', errorText);
+      logFailure('testHardcodedConversion', 'Step 3: Page creation failed', new Error(errorText));
       return {
         success: false,
         step: 'page_creation',
@@ -720,7 +713,7 @@ resolver.define('testHardcodedConversion', async (req) => {
     }
 
     const newPage = await createPageResponse.json();
-    console.log('Step 3: Page created successfully!', newPage.id);
+    logSuccess('testHardcodedConversion', 'Step 3: Page created successfully', { pageId: newPage.id });
 
     return {
       success: true,
@@ -733,7 +726,7 @@ resolver.define('testHardcodedConversion', async (req) => {
     };
 
   } catch (error) {
-    console.error('Conversion error:', error);
+    logFailure('testHardcodedConversion', 'Conversion error', error);
     return {
       success: false,
       error: error.message
@@ -758,9 +751,6 @@ resolver.define('comparePageAdf', async (req) => {
     );
     const brokenPage = await brokenResponse.json();
 
-    console.log('Working page ADF:', workingPage.body.atlas_doc_format.value);
-    console.log('Broken page ADF:', brokenPage.body.atlas_doc_format.value);
-
     return {
       success: true,
       workingAdf: JSON.parse(workingPage.body.atlas_doc_format.value),
@@ -768,7 +758,7 @@ resolver.define('comparePageAdf', async (req) => {
     };
 
   } catch (error) {
-    console.error('Comparison error:', error);
+    logFailure('comparePageAdf', 'Comparison error', error);
     return {
       success: false,
       error: error.message
@@ -780,8 +770,7 @@ resolver.define('comparePageAdf', async (req) => {
 resolver.define('testDirectConversion', async (req) => {
   const { content } = req.payload;
 
-  console.log('Testing direct conversion');
-  console.log('Input length:', content.length);
+  logFunction('testDirectConversion', 'START', { inputLength: content.length });
 
   try {
     const response = await api.asApp().requestConfluence(
@@ -801,7 +790,7 @@ resolver.define('testDirectConversion', async (req) => {
 
     if (!response.ok) {
       const errorText = await response.text();
-      console.error('Conversion failed:', errorText);
+      logFailure('testDirectConversion', 'Conversion failed', new Error(errorText));
       return {
         success: false,
         error: `Conversion failed: ${response.status}`,
@@ -810,8 +799,7 @@ resolver.define('testDirectConversion', async (req) => {
     }
 
     const result = await response.json();
-    console.log('Conversion successful!');
-    console.log('Result:', JSON.stringify(result, null, 2));
+    logSuccess('testDirectConversion', 'Conversion successful', {});
 
     return {
       success: true,
@@ -820,7 +808,7 @@ resolver.define('testDirectConversion', async (req) => {
     };
 
   } catch (error) {
-    console.error('Conversion error:', error);
+    logFailure('testDirectConversion', 'Conversion error', error);
     return {
       success: false,
       error: error.message
@@ -846,9 +834,7 @@ resolver.define('testContentConversionByName', async (req) => {
     return { success: false, error: 'Excerpt not found in storage' };
   }
 
-  console.log(`Testing conversion for: ${name}`);
-  console.log('Original content length:', excerpt.content.length);
-  console.log('First 200 chars:', excerpt.content.substring(0, 200));
+  logFunction('testConversionForExcerpt', 'START', { excerptName: name, contentLength: excerpt.content.length });
 
   try {
     // Call Confluence conversion API
@@ -869,7 +855,7 @@ resolver.define('testContentConversionByName', async (req) => {
 
     if (!response.ok) {
       const errorText = await response.text();
-      console.error('Conversion failed:', errorText);
+      logFailure('testConversionForExcerpt', 'Conversion failed', new Error(errorText), { excerptName: name });
       return {
         success: false,
         error: `Conversion failed: ${response.status}`,
@@ -879,8 +865,7 @@ resolver.define('testContentConversionByName', async (req) => {
     }
 
     const result = await response.json();
-    console.log('Converted to ADF successfully');
-    console.log('ADF result:', JSON.stringify(result).substring(0, 200));
+    logSuccess('testConversionForExcerpt', 'Converted to ADF successfully', { excerptName: name, excerptId: excerptSummary.id });
 
     return {
       success: true,
@@ -891,7 +876,7 @@ resolver.define('testContentConversionByName', async (req) => {
     };
 
   } catch (error) {
-    console.error('Conversion error:', error);
+    logFailure('testConversionForExcerpt', 'Conversion error', error, { excerptName: name });
     return {
       success: false,
       error: error.message
@@ -994,8 +979,11 @@ resolver.define('getVersionDetails', getVersionDetails);
 // Restore from a specific version snapshot
 resolver.define('restoreFromVersion', restoreFromVersion);
 
-// Manually trigger version pruning (admin function)
+// Manually trigger version pruning (admin function - synchronous, for small datasets)
 resolver.define('pruneVersionsNow', pruneVersionsNow);
+
+// Start async version pruning job (for large datasets - 50+ pages)
+resolver.define('startPruneVersions', startPruneVersions);
 
 // Get versioning system statistics
 resolver.define('getVersioningStats', getVersioningStatsResolver);

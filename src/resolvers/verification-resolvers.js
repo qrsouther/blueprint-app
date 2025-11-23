@@ -17,42 +17,9 @@ import { storage, startsWith } from '@forge/api';
 import api, { route } from '@forge/api';
 import { Queue } from '@forge/events';
 import { generateUUID } from '../utils.js';
-import { extractTextFromAdf } from '../utils/adf-utils.js';
-import { saveVersion, restoreVersion } from '../utils/version-manager.js';
 import { validateExcerptData } from '../utils/storage-validator.js';
-
-/**
- * Helper function to extract variables from ADF content
- */
-function extractVariablesFromAdf(adfDoc) {
-  const variables = new Set();
-  const variableRegex = /\{\{([^}]+)\}\}/g;
-
-  const extractFromNode = (node) => {
-    // Check text content
-    if (node.text) {
-      let match;
-      while ((match = variableRegex.exec(node.text)) !== null) {
-        variables.add(match[1]);
-      }
-    }
-
-    // Recurse into content
-    if (node.content) {
-      for (const child of node.content) {
-        extractFromNode(child);
-      }
-    }
-  };
-
-  extractFromNode(adfDoc);
-
-  return Array.from(variables).map(name => ({
-    name,
-    defaultValue: '',
-    description: ''
-  }));
-}
+import { extractVariablesFromAdf } from '../utils/adf-utils.js';
+import { logFunction, logPhase, logSuccess, logFailure, logWarning } from '../utils/forge-logger.js';
 
 /**
  * Source macro heartbeat - tracks when a Source macro was last seen/active
@@ -73,409 +40,169 @@ export async function sourceHeartbeat(req) {
 
     return { success: true };
   } catch (error) {
-    console.error('Error in sourceHeartbeat:', error);
+    logFailure('sourceHeartbeat', 'Error in sourceHeartbeat', error);
     return { success: false, error: error.message };
   }
 }
 
 /**
- * Check all Sources - verify each Source macro still exists on its page
- * Also cleans up stale Include usage entries
+ * Start Check All Sources - Trigger resolver for async processing
+ *
+ * This replaces the old synchronous checkAllSources function with an async
+ * queue-based approach that can handle large scale operations with real-time
+ * progress tracking.
+ *
+ * Architecture:
+ * 1. This trigger pushes event to queue and returns immediately with jobId + progressId
+ * 2. Consumer worker (src/workers/checkSourcesWorker.js) processes asynchronously
+ * 3. Frontend polls getCheckProgress for real-time updates
+ *
+ * Returns immediately with:
+ * - success: boolean
+ * - jobId: string (for Async Events API job tracking)
+ * - progressId: string (for progress polling via getCheckProgress)
  */
-export async function checkAllSources(req) {
-  const progressId = `sources-check-${Date.now()}`;
-
+export async function startCheckAllSources(req) {
   try {
-    console.log('🔍 ACTIVE CHECK: Checking all Sources against their pages...');
+    logFunction('startCheckAllSources', 'Starting Check All Sources async operation');
 
-    // Initialize progress tracking
+    // One-time cleanup: Prune all old Source versions (2-minute retention)
+    // This runs automatically when Check All Sources is called
+    // Uses synchronous pruning (10 pages at a time) for piecemeal processing
+    // User can run multiple times until all pages are processed
+    const lastSourcePruneTime = await storage.get('last-source-prune-time');
+    
+    // Always attempt pruning if timestamp doesn't exist, or if we're still hitting page limits
+    // Check if we have more than 20 pages of version data (indicates pruning needed)
+    let shouldPrune = !lastSourcePruneTime;
+    
+    if (lastSourcePruneTime) {
+      try {
+        // Quick check: query with a limit to see if we hit the page limit
+        // If we hit the limit, there are still too many versions and we need to prune more
+        let cursor = await storage.query()
+          .where('key', startsWith('version:'))
+          .getMany();
+        let pageCount = 1;
+        
+        // Count pages up to 20 (the limit that triggers warnings in getAllKeysWithPrefix)
+        while (cursor.nextCursor && pageCount < 20) {
+          cursor = await storage.query()
+            .where('key', startsWith('version:'))
+            .cursor(cursor.nextCursor)
+            .getMany();
+          pageCount++;
+        }
+        
+        // If we still have more pages after 20, we need to prune
+        // This means we're hitting the page limit warning
+        if (cursor.nextCursor) {
+          logPhase('startCheckAllSources', `Storage still high (${pageCount}+ pages of versions detected), forcing re-prune`);
+          shouldPrune = true;
+        } else {
+          logPhase('startCheckAllSources', `Version count check: ${pageCount} pages (within limit, no pruning needed)`);
+        }
+        
+        logPhase('startCheckAllSources', `Pruning decision: shouldPrune=${shouldPrune}, lastSourcePruneTime=${!!lastSourcePruneTime}, hasMorePages=${!!cursor.nextCursor}`);
+      } catch (checkError) {
+        // If check fails, assume we need to prune (safer to prune than skip)
+        logWarning('startCheckAllSources', 'Could not check version count, will attempt pruning', { error: checkError.message });
+        shouldPrune = true;
+      }
+    }
+    
+    if (shouldPrune) {
+      logPhase('startCheckAllSources', 'Queuing Source version pruning job (async worker, 1000 versions at a time)');
+      
+      // Queue the pruning job as async worker (avoids 25-second timeout)
+      const { Queue } = await import('@forge/events');
+      const pruneProgressId = generateUUID();
+      
+      // Initialize progress state
+      await storage.set(`progress:${pruneProgressId}`, {
+        phase: 'queued',
+        percent: 0,
+        status: 'Source version pruning job queued...',
+        total: 0,
+        processed: 0,
+        queuedAt: new Date().toISOString()
+      });
+      
+      // Create queue and push event
+      const pruneQueue = new Queue({ key: 'prune-versions-queue' });
+      const { jobId: pruneJobId } = await pruneQueue.push({
+        body: { 
+          progressId: pruneProgressId, 
+          onlySourceVersions: true, 
+          sourceRetentionMinutes: 2,
+          maxVersions: 1000 // Process 1000 versions at a time
+        }
+      });
+      
+      logSuccess('startCheckAllSources', 'Source version pruning job queued', {
+        jobId: pruneJobId,
+        progressId: pruneProgressId
+      });
+      // Note: The worker will set last-source-prune-time when all versions are processed
+    } else {
+      logPhase('startCheckAllSources', 'Source version pruning already complete, skipping');
+    }
+
+    // Generate progressId for frontend polling
+    const progressId = generateUUID();
+
+    // Initialize progress state (queued)
     await storage.set(`progress:${progressId}`, {
-      phase: 'initializing',
-      status: 'Loading excerpts...',
+      phase: 'queued',
       percent: 0,
+      status: 'Check All Sources job queued...',
       total: 0,
       processed: 0,
-      startTime: Date.now()
+      queuedAt: new Date().toISOString()
     });
 
-    // Get all excerpts from the index
-    const excerptIndex = await storage.get('excerpt-index') || { excerpts: [] };
-    console.log('Total excerpts to check:', excerptIndex.excerpts.length);
-
-    const orphanedSources = [];
-    const checkedSources = [];
-    let totalStaleEntriesRemoved = 0;
-    let contentConversionsCount = 0; // Track how many Storage Format -> ADF conversions we do
-
-    // Load all excerpts and group by page to minimize API calls
-    const excerptsByPage = new Map(); // pageId -> [excerpts]
-    const skippedExcerpts = [];
-
-    await storage.set(`progress:${progressId}`, {
-      phase: 'loading',
-      status: 'Grouping excerpts by page...',
-      percent: 10,
-      total: excerptIndex.excerpts.length,
-      processed: 0,
-      startTime: Date.now()
+    // Create queue and push event
+    const queue = new Queue({ key: 'check-sources-queue' });
+    const { jobId } = await queue.push({
+      body: { progressId }
     });
 
-    for (const excerptSummary of excerptIndex.excerpts) {
-      const excerpt = await storage.get(`excerpt:${excerptSummary.id}`);
-      if (!excerpt) continue;
+    logSuccess('startCheckAllSources', 'Job queued successfully', { jobId, progressId });
 
-      // Skip if this excerpt doesn't have page info
-      if (!excerpt.sourcePageId || !excerpt.sourceLocalId) {
-        console.log(`⚠️ Excerpt "${excerpt.name}" missing sourcePageId or sourceLocalId, skipping`);
-        skippedExcerpts.push(excerpt.name);
-        continue;
-      }
-
-      if (!excerptsByPage.has(excerpt.sourcePageId)) {
-        excerptsByPage.set(excerpt.sourcePageId, []);
-      }
-      excerptsByPage.get(excerpt.sourcePageId).push(excerpt);
-    }
-
-    console.log(`Grouped excerpts into ${excerptsByPage.size} pages to check`);
-    if (skippedExcerpts.length > 0) {
-      console.log(`Skipped ${skippedExcerpts.length} excerpts with missing page info`);
-    }
-
-    await storage.set(`progress:${progressId}`, {
-      phase: 'checking',
-      status: `Checking ${excerptsByPage.size} pages...`,
-      percent: 20,
-      total: excerptIndex.excerpts.length,
-      processed: 0,
-      totalPages: excerptsByPage.size,
-      currentPage: 0,
-      startTime: Date.now()
-    });
-
-    // Check each page once
-    let pageNumber = 0;
-    for (const [pageId, pageExcerpts] of excerptsByPage.entries()) {
-      pageNumber++;
-      console.log(`Fetching page ${pageId} (${pageExcerpts.length} excerpts)...`);
-
-      // Update progress
-      const percentComplete = 20 + Math.floor((pageNumber / excerptsByPage.size) * 70);
-      await storage.set(`progress:${progressId}`, {
-        phase: 'checking',
-        status: `Checking page ${pageNumber} of ${excerptsByPage.size}...`,
-        percent: percentComplete,
-        total: excerptIndex.excerpts.length,
-        processed: checkedSources.length + orphanedSources.length,
-        totalPages: excerptsByPage.size,
-        currentPage: pageNumber,
-        startTime: Date.now()
-      });
-
-      try {
-        // STEP 1: Fetch in storage format for orphan detection (proven to work)
-        const storageResponse = await api.asApp().requestConfluence(
-          route`/wiki/api/v2/pages/${pageId}?body-format=storage`,
-          {
-            headers: {
-              'Accept': 'application/json'
-            }
-          }
-        );
-
-        if (!storageResponse.ok) {
-          console.log(`❌ Page ${pageId} not accessible, marking ${pageExcerpts.length} Sources as orphaned`);
-          pageExcerpts.forEach(excerpt => {
-            orphanedSources.push({
-              ...excerpt,
-              orphanedReason: 'Source page not found or deleted'
-            });
-          });
-          continue;
-        }
-
-        const storageData = await storageResponse.json();
-        const storageBody = storageData?.body?.storage?.value || '';
-
-        if (!storageBody) {
-          console.warn(`⚠️ No storage body found for page ${pageId}`);
-          pageExcerpts.forEach(excerpt => {
-            orphanedSources.push({
-              ...excerpt,
-              orphanedReason: 'Unable to read page content'
-            });
-          });
-          continue;
-        }
-
-        // STEP 2: Check which Sources exist on the page (string matching - works for all Sources)
-        const sourcesToConvert = []; // Track Sources that need conversion
-
-        for (const excerpt of pageExcerpts) {
-          const macroExists = storageBody.includes(excerpt.sourceLocalId);
-
-          if (!macroExists) {
-            console.log(`❌ Source "${excerpt.name}" NOT found on page - ORPHANED`);
-            orphanedSources.push({
-              ...excerpt,
-              orphanedReason: 'Macro deleted from source page'
-            });
-            continue;
-          }
-
-          // Source exists on page
-          console.log(`✅ Source "${excerpt.name}" found on page`);
-          checkedSources.push(excerpt.name);
-
-          /*
-           * ═══════════════════════════════════════════════════════════════════════
-           * AUTO-CONVERSION RE-ENABLED (Phase 3 - v7.19.0)
-           * ═══════════════════════════════════════════════════════════════════════
-           *
-           * The Storage Format (XML) → ADF JSON conversion is now SAFE with:
-           *
-           * ✅ Pre-conversion version snapshots (saveVersion)
-           * ✅ Post-conversion validation (validateExcerptData)
-           * ✅ Automatic rollback on corruption detection (restoreVersion)
-           * ✅ Error handling with auto-rollback on conversion errors
-           *
-           * This prevents the data corruption issues that occurred in the past:
-           * - Variables disappearing → Now detected by validation
-           * - Content becoming malformed → Now detected by ADF structure validation
-           * - Silent failures → Now logged and auto-rolled back
-           *
-           * Every conversion creates a version snapshot with 14-day retention.
-           * If validation fails, the Source is immediately restored to its pre-conversion
-           * state, and the conversion is cancelled.
-           *
-           * See: DATA-SAFETY-VERSIONING-PROPOSAL.md for full implementation details
-           * ═══════════════════════════════════════════════════════════════════════
-           */
-
-          // Check if content needs conversion (Storage Format XML -> ADF JSON)
-          const needsConversion = excerpt.content && typeof excerpt.content === 'string';
-          if (needsConversion) {
-            console.log(`🔄 Source "${excerpt.name}" needs Storage Format → ADF conversion (ENABLED with versioning protection)`);
-            sourcesToConvert.push(excerpt);
-          }
-        }
-
-        // STEP 3: If any Sources need conversion, fetch page in ADF format
-        // PHASE 3 (v7.19.0): RE-ENABLED WITH VERSIONING PROTECTION
-        if (sourcesToConvert.length > 0) {
-          console.log(`🔄 ${sourcesToConvert.length} Sources need conversion, fetching ADF...`);
-
-          const adfResponse = await api.asApp().requestConfluence(
-            route`/wiki/api/v2/pages/${pageId}?body-format=atlas_doc_format`,
-            {
-              headers: {
-                'Accept': 'application/json'
-              }
-            }
-          );
-
-          if (!adfResponse.ok) {
-            console.warn(`⚠️ Could not fetch ADF for page ${pageId}, skipping conversion`);
-            continue;
-          }
-
-          const adfData = await adfResponse.json();
-          const adfBody = adfData?.body?.atlas_doc_format?.value;
-
-          if (!adfBody) {
-            console.warn(`⚠️ No ADF body found for page ${pageId}, skipping conversion`);
-            continue;
-          }
-
-          const adfDoc = typeof adfBody === 'string' ? JSON.parse(adfBody) : adfBody;
-
-          // Find all bodiedExtension nodes
-          const findExtensions = (node, extensions = []) => {
-            if (node.type === 'bodiedExtension' && node.attrs?.extensionKey?.includes('blueprint-standard-source')) {
-              extensions.push(node);
-            }
-            if (node.content) {
-              for (const child of node.content) {
-                findExtensions(child, extensions);
-              }
-            }
-            return extensions;
-          };
-
-          const extensionNodes = findExtensions(adfDoc);
-          console.log(`Found ${extensionNodes.length} Source macro extension nodes in ADF`);
-
-          // Convert each Source that needs it (with versioning protection)
-          for (const excerpt of sourcesToConvert) {
-            const extensionNode = extensionNodes.find(node =>
-              node.attrs?.localId === excerpt.sourceLocalId
-            );
-
-            if (!extensionNode || !extensionNode.content) {
-              console.warn(`⚠️ Could not find ADF node for "${excerpt.name}", skipping conversion`);
-              continue;
-            }
-
-            // ═══════════════════════════════════════════════════════════════════════
-            // PHASE 3 VERSIONING PROTECTION
-            // ═══════════════════════════════════════════════════════════════════════
-            console.log(`🛡️ [PHASE 3] Creating version snapshot BEFORE converting "${excerpt.name}"...`);
-
-            // STEP 1: Create pre-conversion version snapshot
-            const versionResult = await saveVersion(
-              storage,
-              `excerpt:${excerpt.id}`,
-              excerpt,
-              {
-                changeType: 'STORAGE_FORMAT_CONVERSION',
-                changedBy: 'checkAllSources',
-                trigger: 'automatic_conversion'
-              }
-            );
-
-            if (!versionResult.success) {
-              console.error(`❌ Failed to create version snapshot for "${excerpt.name}": ${versionResult.error}`);
-              console.error(`⚠️ Skipping conversion for safety (cannot rollback without version snapshot)`);
-              continue; // Skip conversion if we can't create backup
-            }
-
-            const backupVersionId = versionResult.versionId;
-            console.log(`✅ Version snapshot created: ${backupVersionId}`);
-
-            // STEP 2: Perform conversion
-            console.log(`🔄 Converting "${excerpt.name}" from Storage Format to ADF JSON...`);
-
-            try {
-              // Extract ADF content from the bodiedExtension node
-              const bodyContent = {
-                type: 'doc',
-                version: 1,
-                content: extensionNode.content
-              };
-
-              // Extract variables from ADF content
-              const variables = extractVariablesFromAdf(bodyContent);
-
-              // Generate content hash
-              const crypto = require('crypto');
-              const contentHash = crypto.createHash('sha256').update(JSON.stringify(bodyContent)).digest('hex');
-
-              // Create converted excerpt object
-              const convertedExcerpt = {
-                ...excerpt,
-                content: bodyContent,
-                variables: variables,
-                contentHash: contentHash,
-                updatedAt: new Date().toISOString()
-              };
-
-              // STEP 3: Post-conversion validation
-              console.log(`🔍 [PHASE 3] Validating converted data for "${excerpt.name}"...`);
-              const validation = validateExcerptData(convertedExcerpt);
-
-              if (!validation.valid) {
-                // VALIDATION FAILED - AUTO-ROLLBACK
-                console.error(`❌ [PHASE 3] Validation FAILED for "${excerpt.name}": ${validation.errors.join(', ')}`);
-                console.error(`🔄 [PHASE 3] AUTO-ROLLBACK: Restoring from version ${backupVersionId}...`);
-
-                const rollbackResult = await restoreVersion(storage, backupVersionId);
-
-                if (rollbackResult.success) {
-                  console.error(`✅ [PHASE 3] AUTO-ROLLBACK SUCCESSFUL for "${excerpt.name}"`);
-                  console.error(`⚠️ Conversion cancelled - Source remains in Storage Format`);
-                } else {
-                  console.error(`❌ [PHASE 3] AUTO-ROLLBACK FAILED: ${rollbackResult.error}`);
-                  console.error(`⚠️ MANUAL INTERVENTION REQUIRED for "${excerpt.name}" (excerptId: ${excerpt.id})`);
-                }
-
-                continue; // Skip to next Source
-              }
-
-              // STEP 4: Validation passed - save converted data
-              console.log(`✅ [PHASE 3] Validation passed for "${excerpt.name}"`);
-              await storage.set(`excerpt:${excerpt.id}`, convertedExcerpt);
-              console.log(`✅ Converted "${excerpt.name}" to ADF JSON (${variables.length} variables)`);
-              contentConversionsCount++;
-
-            } catch (conversionError) {
-              // CONVERSION ERROR - AUTO-ROLLBACK
-              console.error(`❌ [PHASE 3] Conversion ERROR for "${excerpt.name}": ${conversionError.message}`);
-              console.error(`🔄 [PHASE 3] AUTO-ROLLBACK: Restoring from version ${backupVersionId}...`);
-
-              const rollbackResult = await restoreVersion(storage, backupVersionId);
-
-              if (rollbackResult.success) {
-                console.error(`✅ [PHASE 3] AUTO-ROLLBACK SUCCESSFUL for "${excerpt.name}"`);
-                console.error(`⚠️ Conversion cancelled - Source remains in Storage Format`);
-              } else {
-                console.error(`❌ [PHASE 3] AUTO-ROLLBACK FAILED: ${rollbackResult.error}`);
-                console.error(`⚠️ MANUAL INTERVENTION REQUIRED for "${excerpt.name}" (excerptId: ${excerpt.id})`);
-              }
-
-              continue; // Skip to next Source
-            }
-          }
-        }
-      } catch (apiError) {
-        console.error(`Error checking page ${pageId}:`, apiError);
-        pageExcerpts.forEach(excerpt => {
-          orphanedSources.push({
-            ...excerpt,
-            orphanedReason: `API error: ${apiError.message}`
-          });
-        });
-      }
-    }
-
-    console.log(`✅ Source check complete: ${checkedSources.length} active, ${orphanedSources.length} orphaned`);
-    if (contentConversionsCount > 0) {
-      console.log(`🔄 Converted ${contentConversionsCount} Sources from Storage Format to ADF JSON`);
-    }
-
-    // Skip stale Include cleanup to avoid timeout (use "Check All Embeds" for that)
-    console.log('ℹ️ Skipping stale Include cleanup (use "Check All Embeds" button for comprehensive Include verification)');
-    totalStaleEntriesRemoved = 0; // Not running cleanup, so set to 0
-
-    // Build completion status message
-    let statusMessage = `Complete! ${checkedSources.length} active, ${orphanedSources.length} orphaned`;
-    if (contentConversionsCount > 0) {
-      statusMessage += `, ${contentConversionsCount} converted to ADF`;
-    }
-
-    // Mark as complete
-    await storage.set(`progress:${progressId}`, {
-      phase: 'complete',
-      status: statusMessage,
-      percent: 100,
-      total: excerptIndex.excerpts.length,
-      processed: checkedSources.length + orphanedSources.length,
-      activeCount: checkedSources.length,
-      orphanedCount: orphanedSources.length,
-      contentConversionsCount,
-      startTime: Date.now(),
-      endTime: Date.now()
-    });
-
+    // Return immediately - consumer will process in background
     return {
       success: true,
-      progressId,  // Return progressId for frontend polling
-      orphanedSources,
-      checkedCount: checkedSources.length + orphanedSources.length,
-      activeCount: checkedSources.length,
-      staleEntriesRemoved: totalStaleEntriesRemoved,
-      contentConversionsCount
+      jobId,
+      progressId,
+      message: 'Check All Sources job queued successfully'
     };
+
   } catch (error) {
-    console.error('Error in checkAllSources:', error);
+    logFailure('startCheckAllSources', 'Error starting Check All Sources', error);
     return {
       success: false,
-      error: error.message,
-      orphanedSources: [],
-      staleEntriesRemoved: 0,
-      contentConversionsCount: 0
+      error: error.message
     };
   }
 }
+
+/**
+ * Check all Sources - wrapper for backwards compatibility
+ * Redirects to startCheckAllSources (async worker)
+ */
+export async function checkAllSources(req) {
+  return startCheckAllSources(req);
+}
+
+/**
+ * OLD SYNC VERSION - REMOVED
+ * 
+ * The old synchronous checkAllSources function has been replaced by
+ * startCheckAllSources + async worker to avoid 25-second timeout limits.
+ * The worker can run for up to 15 minutes.
+ * 
+ * The old implementation code has been moved to checkSourcesWorker.js
+ */
 
 // ============================================================================
 // OLD SYNCHRONOUS CHECK ALL INCLUDES - COMMENTED OUT
@@ -487,7 +214,7 @@ export async function checkAllSources(req) {
 /*
 export async function checkAllIncludes_OLD_SYNC_VERSION(req) {
   try {
-    console.log('🔍 ACTIVE CHECK: Checking all Include instances...');
+    // OLD SYNC VERSION - COMMENTED OUT - console statements removed
 
     // Accept progressId from frontend, or generate if not provided
     const progressId = req.payload?.progressId || generateUUID();
@@ -496,7 +223,6 @@ export async function checkAllIncludes_OLD_SYNC_VERSION(req) {
     // Get all macro-vars entries (each represents an Include instance)
     const allMacroVars = await storage.query().where('key', startsWith('macro-vars:')).getMany();
     const totalIncludes = allMacroVars.results.length;
-    console.log('Total Include instances to check:', totalIncludes);
 
     // Initialize progress tracking
     await storage.set(`progress:${progressId}`, {
@@ -551,7 +277,6 @@ export async function checkAllIncludes_OLD_SYNC_VERSION(req) {
       const reference = usageData.references.find(ref => ref.localId === localId);
 
       if (!reference) {
-        console.log(`⚠️ No usage reference found for localId ${localId}, marking as orphaned`);
         orphanedIncludes.push({
           localId,
           excerptId,
@@ -615,7 +340,6 @@ export async function checkAllIncludes_OLD_SYNC_VERSION(req) {
         );
 
         if (!response.ok) {
-          console.log(`❌ Page ${pageId} not accessible, marking ${includes.length} Includes as orphaned`);
           includes.forEach(inc => {
             orphanedIncludes.push({
               localId: inc.localId,
@@ -639,7 +363,6 @@ export async function checkAllIncludes_OLD_SYNC_VERSION(req) {
 
           // Check if Include still exists on page
           if (!pageBody.includes(localId)) {
-            console.log(`❌ Include ${localId} NOT found on page "${pageTitle}"`);
             orphanedIncludes.push({
               localId,
               pageId,
@@ -652,7 +375,6 @@ export async function checkAllIncludes_OLD_SYNC_VERSION(req) {
 
           // Check if excerpt still exists
           if (!existingExcerptIds.has(excerptId)) {
-            console.log(`❌ Include ${localId} references non-existent excerpt ${excerptId}`);
             brokenReferences.push({
               localId,
               pageId,
@@ -666,7 +388,6 @@ export async function checkAllIncludes_OLD_SYNC_VERSION(req) {
           // Get excerpt details
           const excerpt = excerptMap.get(excerptId);
           if (!excerpt) {
-            console.log(`⚠️ Excerpt ${excerptId} not in map, skipping`);
             continue;
           }
 
@@ -701,7 +422,7 @@ export async function checkAllIncludes_OLD_SYNC_VERSION(req) {
             renderedContent = renderedContent.replace(/\{\{\/toggle:[^}]+\}\}/g, '');
 
           } catch (err) {
-            console.error(`Error rendering content for ${localId}:`, err);
+            logFailure('checkAllIncludes_OLD_SYNC_VERSION', 'Error rendering content', err, { localId });
             renderedContent = '[Error rendering content]';
           }
 
@@ -731,7 +452,6 @@ export async function checkAllIncludes_OLD_SYNC_VERSION(req) {
           }
 
           activeIncludes.push(includeData);
-          console.log(`✅ Include "${excerpt.name}" on "${pageTitle}" - ${isStale ? 'STALE' : 'UP TO DATE'}`);
 
           // Increment processed count
           processedIncludes++;
@@ -741,7 +461,7 @@ export async function checkAllIncludes_OLD_SYNC_VERSION(req) {
         processedIncludes += includes.filter(inc => !pageBody || !pageBody.includes(inc.localId) || !existingExcerptIds.has(inc.macroVars.excerptId)).length;
 
       } catch (apiError) {
-        console.error(`Error checking page ${pageId}:`, apiError);
+        logFailure('checkAllIncludes_OLD_SYNC_VERSION', 'Error checking page', apiError, { pageId });
         includes.forEach(inc => {
           orphanedIncludes.push({
             localId: inc.localId,
@@ -755,7 +475,6 @@ export async function checkAllIncludes_OLD_SYNC_VERSION(req) {
     }
 
     // Clean up orphaned entries
-    console.log('🧹 CLEANUP: Removing orphaned Include entries...');
     await storage.set(`progress:${progressId}`, {
       phase: 'cleanup',
       total: totalIncludes,
@@ -774,14 +493,12 @@ export async function checkAllIncludes_OLD_SYNC_VERSION(req) {
         await storage.delete(`macro-cache:${orphaned.localId}`);
 
         orphanedEntriesRemoved++;
-        console.log(`🗑️ Removed orphaned entries for localId ${orphaned.localId}`);
       } catch (err) {
-        console.error(`Error removing orphaned entry ${orphaned.localId}:`, err);
+        logFailure('checkAllIncludes_OLD_SYNC_VERSION', 'Error removing orphaned entry', err, { localId: orphaned.localId });
       }
     }
 
     // Clean up stale usage tracking references
-    console.log('🧹 CLEANUP: Removing stale usage tracking references...');
     let staleUsageReferencesRemoved = 0;
 
     for (const orphaned of [...orphanedIncludes, ...brokenReferences]) {
@@ -798,19 +515,15 @@ export async function checkAllIncludes_OLD_SYNC_VERSION(req) {
 
             if (usageData.references.length > 0) {
               await storage.set(usageKey, usageData);
-              console.log(`🗑️ Removed stale usage reference for localId ${orphaned.localId} from excerpt ${orphaned.excerptId}`);
             } else {
               await storage.delete(usageKey);
-              console.log(`🗑️ Deleted empty usage key for excerpt ${orphaned.excerptId}`);
             }
           }
         }
       } catch (err) {
-        console.error(`Error cleaning usage data for ${orphaned.excerptId}:`, err);
+        logFailure('checkAllIncludes_OLD_SYNC_VERSION', 'Error cleaning usage data', err, { excerptId: orphaned.excerptId });
       }
     }
-
-    console.log(`✅ Cleanup complete: removed ${staleUsageReferencesRemoved} stale usage references`);
 
     // Final progress update
     await storage.set(`progress:${progressId}`, {
@@ -823,14 +536,12 @@ export async function checkAllIncludes_OLD_SYNC_VERSION(req) {
       status: 'Complete!'
     });
 
-    console.log(`✅ Check complete: ${activeIncludes.length} active, ${orphanedIncludes.length} orphaned, ${brokenReferences.length} broken references, ${staleIncludes.length} stale`);
-
     // Clean up progress data after a delay (frontend will have time to read it)
     setTimeout(async () => {
       try {
         await storage.delete(`progress:${progressId}`);
       } catch (err) {
-        console.error('Error cleaning up progress data:', err);
+        logFailure('checkAllIncludes_OLD_SYNC_VERSION', 'Error cleaning up progress data', err);
       }
     }, 60000); // 1 minute
 
@@ -852,7 +563,7 @@ export async function checkAllIncludes_OLD_SYNC_VERSION(req) {
     };
 
   } catch (error) {
-    console.error('Error in checkAllIncludes:', error);
+    logFailure('checkAllIncludes', 'Error in checkAllIncludes', error);
     return {
       success: false,
       error: error.message,
@@ -899,7 +610,7 @@ export async function startCheckAllIncludes(req) {
     // Extract dryRun parameter from request (defaults to true for safety)
     const { dryRun = true } = req.payload || {};
 
-    console.log(`[TRIGGER] Starting Check All Includes async operation (dryRun: ${dryRun})...`);
+    logFunction('startCheckAllIncludes', 'Starting Check All Includes async operation', { dryRun });
 
     // Generate progressId for frontend polling
     const progressId = generateUUID();
@@ -921,7 +632,7 @@ export async function startCheckAllIncludes(req) {
       body: { progressId, dryRun }
     });
 
-    console.log(`[TRIGGER] Job queued: jobId=${jobId}, progressId=${progressId}, dryRun=${dryRun}`);
+    logSuccess('startCheckAllIncludes', 'Job queued successfully', { jobId, progressId, dryRun });
 
     // Return immediately - consumer will process in background
     return {
@@ -933,7 +644,7 @@ export async function startCheckAllIncludes(req) {
     };
 
   } catch (error) {
-    console.error('[TRIGGER] Error starting Check All Includes:', error);
+    logFailure('startCheckAllIncludes', 'Error starting Check All Includes', error);
     return {
       success: false,
       error: error.message
@@ -952,17 +663,26 @@ export async function checkAllIncludes(req) {
 /**
  * Helper: Fetch all pages from a storage query cursor
  */
-async function getAllKeysWithPrefix(prefix) {
+async function getAllKeysWithPrefix(prefix, maxPages = 50) {
   const allKeys = [];
   let cursor = await storage.query().where('key', startsWith(prefix)).getMany();
+  let pageCount = 1;
 
   // Add first page
   allKeys.push(...(cursor.results || []));
 
-  // Paginate through remaining pages
-  while (cursor.nextCursor) {
+  // Paginate through remaining pages with safety limit
+  // Limit prevents infinite loops and timeout issues
+  while (cursor.nextCursor && pageCount < maxPages) {
     cursor = await storage.query().where('key', startsWith(prefix)).cursor(cursor.nextCursor).getMany();
     allKeys.push(...(cursor.results || []));
+    pageCount++;
+  }
+
+  // Log warning if we hit the page limit (indicates very large dataset)
+  // Only warn if we actually processed multiple pages (not just a false positive from nextCursor)
+  if (cursor.nextCursor && pageCount >= maxPages && pageCount > 1) {
+    logWarning('getAllKeysWithPrefix', `Hit page limit (${maxPages}) for prefix "${prefix}". Results may be incomplete.`);
   }
 
   return allKeys;
@@ -976,40 +696,31 @@ async function getAllKeysWithPrefix(prefix) {
  */
 export async function getStorageUsage() {
   try {
-    console.log('[STORAGE-USAGE] Calculating storage usage...');
+    logFunction('getStorageUsage', 'Calculating storage usage');
 
-    // Query all keys from storage (with pagination)
-    const allKeys = [];
+    // Query all keys from storage in parallel (with pagination)
+    // This is much faster than sequential calls and reduces timeout risk
+    // Use lower page limits for prefixes that might have many entries (versions, deleted)
+    // Reduced version: limit to 20 pages to prevent timeout (can still calculate approximate usage)
+    const [excerpts, excerptPrevious, usage, categories, versions, deleted, metadata] = await Promise.all([
+      getAllKeysWithPrefix('excerpt:', 20),           // Sources (current) - typically < 200
+      getAllKeysWithPrefix('excerpt-previous:', 20), // Sources (previous versions) - typically < 200
+      getAllKeysWithPrefix('usage:', 20),             // Usage data - typically < 200
+      getAllKeysWithPrefix('categories', 5),          // Categories - typically single key, but allow a few pages for safety
+      getAllKeysWithPrefix('version:', 20),           // Versions (Embed versions only now) - reduced from 50 to 20 to prevent timeout
+      getAllKeysWithPrefix('deleted:', 20),          // Deleted items - typically < 200
+      getAllKeysWithPrefix('meta:', 10)               // Metadata - typically few keys
+    ]);
 
-    // Get excerpts (paginated)
-    const excerpts = await getAllKeysWithPrefix('excerpt:');
-    allKeys.push(...excerpts);
-    console.log(`[STORAGE-USAGE] Found ${excerpts.length} excerpt keys`);
-
-    // Get usage data (paginated)
-    const usage = await getAllKeysWithPrefix('usage:');
-    allKeys.push(...usage);
-    console.log(`[STORAGE-USAGE] Found ${usage.length} usage keys`);
-
-    // Get categories
-    const categories = await getAllKeysWithPrefix('categories');
-    allKeys.push(...categories);
-    console.log(`[STORAGE-USAGE] Found ${categories.length} category keys`);
-
-    // Get versions (paginated)
-    const versions = await getAllKeysWithPrefix('version:');
-    allKeys.push(...versions);
-    console.log(`[STORAGE-USAGE] Found ${versions.length} version keys`);
-
-    // Get deleted (recovery namespace) (paginated)
-    const deleted = await getAllKeysWithPrefix('deleted:');
-    allKeys.push(...deleted);
-    console.log(`[STORAGE-USAGE] Found ${deleted.length} deleted keys`);
-
-    // Get metadata keys
-    const metadata = await getAllKeysWithPrefix('meta:');
-    allKeys.push(...metadata);
-    console.log(`[STORAGE-USAGE] Found ${metadata.length} metadata keys`);
+    const allKeys = [
+      ...excerpts,
+      ...excerptPrevious,
+      ...usage,
+      ...categories,
+      ...versions,
+      ...deleted,
+      ...metadata
+    ];
 
     // Calculate total size in bytes
     let totalBytes = 0;
@@ -1034,7 +745,7 @@ export async function getStorageUsage() {
       totalBytes += itemSize;
 
       // Categorize
-      if (key.startsWith('excerpt:')) {
+      if (key.startsWith('excerpt:') || key.startsWith('excerpt-previous:')) {
         breakdown.excerpts += itemSize;
       } else if (key.startsWith('usage:')) {
         breakdown.usage += itemSize;
@@ -1052,7 +763,9 @@ export async function getStorageUsage() {
     // Convert to MB
     const totalMB = totalBytes / (1024 * 1024);
     const limitMB = 250;
+    const warningThresholdMB = 100; // Warn at 40% of limit
     const percentUsed = (totalMB / limitMB) * 100;
+    const exceedsWarningThreshold = totalMB >= warningThresholdMB;
 
     // Convert breakdown to MB
     const breakdownMB = {
@@ -1063,9 +776,6 @@ export async function getStorageUsage() {
       deleted: breakdown.deleted / (1024 * 1024),
       metadata: breakdown.metadata / (1024 * 1024)
     };
-
-    console.log(`[STORAGE-USAGE] Total: ${totalMB.toFixed(2)} MB / ${limitMB} MB (${percentUsed.toFixed(1)}%)`);
-    console.log('[STORAGE-USAGE] Breakdown:', breakdownMB);
 
     // Count Sources (excerpts) and Embeds (usage references)
     const sourcesCount = excerpts.length;
@@ -1079,14 +789,32 @@ export async function getStorageUsage() {
       }
     }
 
-    console.log(`[STORAGE-USAGE] Sources: ${sourcesCount}, Embeds: ${embedsCount}`);
+    if (exceedsWarningThreshold) {
+      logWarning('getStorageUsage', `Storage usage exceeds warning threshold (${warningThresholdMB} MB)`, {
+        totalMB: totalMB.toFixed(2),
+        warningThresholdMB,
+        limitMB,
+        percentUsed: percentUsed.toFixed(1)
+      });
+    } else {
+      logSuccess('getStorageUsage', 'Storage usage calculated', {
+        totalMB: totalMB.toFixed(2),
+        limitMB,
+        percentUsed: percentUsed.toFixed(1),
+        sourcesCount,
+        embedsCount,
+        breakdown: breakdownMB
+      });
+    }
 
     return {
       success: true,
       totalBytes,
       totalMB: parseFloat(totalMB.toFixed(2)),
       limitMB,
+      warningThresholdMB,
       percentUsed: parseFloat(percentUsed.toFixed(1)),
+      exceedsWarningThreshold,
       keyCount: allKeys.length,
       sourcesCount,
       embedsCount,
@@ -1097,7 +825,7 @@ export async function getStorageUsage() {
     };
 
   } catch (error) {
-    console.error('[STORAGE-USAGE] Error calculating storage usage:', error);
+    logFailure('getStorageUsage', 'Error calculating storage usage', error);
     return {
       success: false,
       error: error.message

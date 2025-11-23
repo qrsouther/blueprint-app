@@ -15,8 +15,9 @@
  */
 
 import { storage } from '@forge/api';
+import { Queue } from '@forge/events';
+import { generateUUID } from '../utils.js';
 import {
-  saveVersion,
   listVersions,
   getVersion,
   restoreVersion,
@@ -216,28 +217,87 @@ export async function restoreFromVersion(req) {
 }
 
 /**
- * Manually trigger version pruning
+ * Start version pruning - Trigger resolver for async processing
  *
- * Admin function to immediately prune expired versions.
- * Normally pruning runs automatically once per day.
+ * Queues a pruning job that runs in the background with up to 15 minutes timeout.
+ * Frontend should poll getCheckProgress for status updates.
  *
  * @param {Object} req - Forge request object
- * @param {number} req.payload.retentionDays - Optional: Override retention period (default: 14)
- * @returns {Promise<Object>} { success: boolean, prunedCount: number }
+ * @param {boolean} req.payload.onlySourceVersions - Optional: Only prune Source versions (default: false)
+ * @param {number} req.payload.sourceRetentionMinutes - Optional: Retention in minutes for Source versions (default: 2)
+ * @returns {Promise<Object>} { success: boolean, jobId: string, progressId: string }
  *
  * @example
- * const result = await invoke('pruneVersionsNow', { retentionDays: 14 });
+ * // Prune all old Source versions (2-minute retention, one-time cleanup)
+ * const result = await invoke('startPruneVersions', { 
+ *   onlySourceVersions: true, 
+ *   sourceRetentionMinutes: 2 
+ * });
+ */
+export async function startPruneVersions(req) {
+  const FUNCTION_NAME = 'startPruneVersions';
+  const { onlySourceVersions = false, sourceRetentionMinutes = 2 } = req.payload || {};
+
+  logFunction(FUNCTION_NAME, 'START', { onlySourceVersions, sourceRetentionMinutes });
+
+  try {
+    // Generate progressId for frontend polling
+    const progressId = generateUUID();
+
+    // Initialize progress state (queued)
+    await storage.set(`progress:${progressId}`, {
+      phase: 'queued',
+      percent: 0,
+      status: 'Version pruning job queued...',
+      total: 0,
+      processed: 0,
+      queuedAt: new Date().toISOString()
+    });
+
+    // Create queue and push event
+    const queue = new Queue({ key: 'prune-versions-queue' });
+    const { jobId } = await queue.push({
+      body: { progressId, onlySourceVersions, sourceRetentionMinutes }
+    });
+
+    logSuccess(FUNCTION_NAME, 'Job queued successfully', { jobId, progressId, onlySourceVersions, sourceRetentionMinutes });
+
+    return {
+      success: true,
+      jobId,
+      progressId,
+      message: 'Version pruning job queued successfully'
+    };
+
+  } catch (error) {
+    logFailure(FUNCTION_NAME, 'Failed to queue pruning job', error);
+    return {
+      success: false,
+      error: error.message
+    };
+  }
+}
+
+/**
+ * Manually trigger version pruning (synchronous - for small datasets only)
+ *
+ * @deprecated Use startPruneVersions for large datasets (50+ pages)
+ * This function is kept for backwards compatibility but will timeout on large datasets.
  */
 export async function pruneVersionsNow(req) {
   const FUNCTION_NAME = 'pruneVersionsNow';
-  const { retentionDays } = req.payload || {};
+  const { retentionDays, onlySourceVersions, sourceRetentionMinutes, maxPages = 10 } = req.payload || {};
 
-  logFunction(FUNCTION_NAME, 'START', { retentionDays });
+  logFunction(FUNCTION_NAME, 'START', { retentionDays, onlySourceVersions, sourceRetentionMinutes, maxPages });
 
   try {
-    logPhase(FUNCTION_NAME, 'Manually triggering version pruning');
+    logPhase(FUNCTION_NAME, `Manually triggering version pruning (synchronous, ${maxPages} pages per call)`);
 
-    const result = await pruneExpiredVersions(storage, retentionDays);
+    const result = await pruneExpiredVersions(storage, retentionDays, {
+      onlySourceVersions: onlySourceVersions || false,
+      sourceRetentionMinutes: sourceRetentionMinutes || null,
+      maxPages: maxPages || null // Default to 10 pages for piecemeal processing
+    });
 
     if (!result.success) {
       throw new Error(result.error || 'Failed to prune versions');
@@ -246,7 +306,9 @@ export async function pruneVersionsNow(req) {
     logSuccess(FUNCTION_NAME, `Pruned ${result.prunedCount} expired version(s)`, {
       pruned: result.prunedCount,
       kept: result.skippedCount,
-      errors: result.errors.length
+      errors: result.errors.length,
+      pagesProcessed: result.pagesProcessed,
+      hasMorePages: result.hasMorePages
     });
 
     logFunction(FUNCTION_NAME, 'END', { success: true, prunedCount: result.prunedCount });
@@ -256,7 +318,9 @@ export async function pruneVersionsNow(req) {
       prunedCount: result.prunedCount,
       skippedCount: result.skippedCount,
       errors: result.errors,
-      message: `Successfully pruned ${result.prunedCount} expired version(s)`
+      pagesProcessed: result.pagesProcessed,
+      hasMorePages: result.hasMorePages,
+      message: result.message || `Successfully pruned ${result.prunedCount} expired version(s)`
     };
 
   } catch (error) {
@@ -282,7 +346,7 @@ export async function pruneVersionsNow(req) {
  * const result = await invoke('getVersioningStats');
  * // Returns: { success: true, stats: { totalVersions: 50, totalSizeMB: 1.5, ... } }
  */
-export async function getVersioningStatsResolver(req) {
+export async function getVersioningStatsResolver() {
   const FUNCTION_NAME = 'getVersioningStats';
 
   logFunction(FUNCTION_NAME, 'START');

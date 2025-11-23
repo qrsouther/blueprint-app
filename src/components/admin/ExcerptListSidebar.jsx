@@ -35,6 +35,7 @@ import {
   xcss
 } from '@forge/react';
 import { StableTextfield } from '../common/StableTextfield';
+import { logger } from '../../utils/logger.js';
 
 // Pressable item styling for excerpt list items
 const excerptItemStyle = (isSelected) => xcss({
@@ -152,7 +153,6 @@ export function ExcerptListSidebar({
               <Pressable
                 key={excerpt.id}
                 onClick={() => {
-                  console.log('[ExcerptListSidebar] Row clicked for:', excerpt.name);
                   setSelectedExcerptForDetails(excerpt);
                 }}
                 xcss={excerptItemStyle(isSelected)}
