@@ -44,9 +44,39 @@ import { logPhase, logSuccess, logFailure, logWarning } from '../utils/forge-log
  * @returns {Object} { embeds: [...], groups: {...} }
  */
 export async function getRedlineQueue(req) {
-  const { filters = {}, sortBy = 'status', groupBy = null } = req.payload;
+  const { filters = {}, sortBy = 'status', groupBy = null } = req.payload || {};
 
   try {
+    // Input validation
+    if (filters !== undefined && (typeof filters !== 'object' || Array.isArray(filters) || filters === null)) {
+      logFailure('getRedlineQueue', 'Validation failed: filters must be an object', new Error('Invalid filters type'));
+      return {
+        success: false,
+        error: 'filters must be an object',
+        embeds: [],
+        groups: {}
+      };
+    }
+
+    if (sortBy !== undefined && typeof sortBy !== 'string') {
+      logFailure('getRedlineQueue', 'Validation failed: sortBy must be a string', new Error('Invalid sortBy type'));
+      return {
+        success: false,
+        error: 'sortBy must be a string',
+        embeds: [],
+        groups: {}
+      };
+    }
+
+    if (groupBy !== undefined && groupBy !== null && typeof groupBy !== 'string') {
+      logFailure('getRedlineQueue', 'Validation failed: groupBy must be a string or null', new Error('Invalid groupBy type'));
+      return {
+        success: false,
+        error: 'groupBy must be a string or null',
+        embeds: [],
+        groups: {}
+      };
+    }
     // Get all macro-vars:* keys (Embed configs)
     // Note: getMany() has a default limit, so we need to paginate through all results
     let allKeys = [];
@@ -217,14 +247,47 @@ export async function getRedlineQueue(req) {
  * @returns {Object} { success: true, localId, newStatus }
  */
 export async function setRedlineStatus(req) {
-  const { localId, status, userId, reason = '' } = req.payload;
+  const { localId, status, userId, reason = '' } = req.payload || {};
 
-  if (!localId) {
-    throw new Error('localId is required');
+  // Input validation
+  if (!localId || typeof localId !== 'string' || localId.trim() === '') {
+    logFailure('setRedlineStatus', 'Validation failed: localId is required and must be a non-empty string', new Error('Invalid localId'));
+    return {
+      success: false,
+      error: 'localId is required and must be a non-empty string'
+    };
+  }
+
+  if (!status || typeof status !== 'string') {
+    logFailure('setRedlineStatus', 'Validation failed: status is required and must be a string', new Error('Invalid status'));
+    return {
+      success: false,
+      error: 'status is required and must be a string'
+    };
   }
 
   if (!['reviewable', 'pre-approved', 'needs-revision', 'approved'].includes(status)) {
-    throw new Error(`Invalid status: ${status}`);
+    logFailure('setRedlineStatus', 'Validation failed: status must be one of: reviewable, pre-approved, needs-revision, approved', new Error('Invalid status value'));
+    return {
+      success: false,
+      error: `Invalid status: ${status}. Must be one of: reviewable, pre-approved, needs-revision, approved`
+    };
+  }
+
+  if (userId !== undefined && userId !== null && (typeof userId !== 'string' || userId.trim() === '')) {
+    logFailure('setRedlineStatus', 'Validation failed: userId must be a non-empty string if provided', new Error('Invalid userId'));
+    return {
+      success: false,
+      error: 'userId must be a non-empty string if provided'
+    };
+  }
+
+  if (reason !== undefined && typeof reason !== 'string') {
+    logFailure('setRedlineStatus', 'Validation failed: reason must be a string', new Error('Invalid reason type'));
+    return {
+      success: false,
+      error: 'reason must be a string'
+    };
   }
 
   try {
@@ -233,7 +296,11 @@ export async function setRedlineStatus(req) {
     const config = await storage.get(configKey);
 
     if (!config) {
-      throw new Error(`Embed config not found for localId: ${localId}`);
+      logFailure('setRedlineStatus', 'Embed config not found', new Error('Embed config not found'), { localId });
+      return {
+        success: false,
+        error: `Embed config not found for localId: ${localId}`
+      };
     }
 
     const now = new Date().toISOString();
@@ -302,13 +369,20 @@ export async function setRedlineStatus(req) {
     };
 
   } catch (error) {
-    logFailure('setRedlineStatus', 'Error setting redline status', error);
-    throw new Error(`Failed to set redline status: ${error.message}`);
+    logFailure('setRedlineStatus', 'Error setting redline status', error, { localId: req.payload?.localId });
+    return {
+      success: false,
+      error: `Failed to set redline status: ${error.message}`
+    };
   }
 }
 
 /**
  * Bulk status update for multiple Embeds
+ *
+ * NOTE: This function exists for backend/internal use only. The Admin UI does NOT
+ * support bulk status updates - users can only update one Embed at a time.
+ * This function is kept for potential future use or programmatic access.
  *
  * @param {Object} req.payload
  * @param {string[]} req.payload.localIds - Array of Embed instance IDs
@@ -318,10 +392,76 @@ export async function setRedlineStatus(req) {
  * @returns {Object} { success: true, updated: 10, failed: 2, errors: [...] }
  */
 export async function bulkSetRedlineStatus(req) {
-  const { localIds, status, userId, reason = 'Bulk status update' } = req.payload;
+  const { localIds, status, userId, reason = 'Bulk status update' } = req.payload || {};
 
-  if (!localIds || localIds.length === 0) {
-    throw new Error('localIds array is required and must not be empty');
+  // Input validation
+  if (!localIds || !Array.isArray(localIds) || localIds.length === 0) {
+    logFailure('bulkSetRedlineStatus', 'Validation failed: localIds is required and must be a non-empty array', new Error('Invalid localIds'));
+    return {
+      success: false,
+      error: 'localIds is required and must be a non-empty array',
+      updated: 0,
+      failed: 0,
+      errors: []
+    };
+  }
+
+  // Validate each localId in the array
+  for (let i = 0; i < localIds.length; i++) {
+    if (!localIds[i] || typeof localIds[i] !== 'string' || localIds[i].trim() === '') {
+      logFailure('bulkSetRedlineStatus', 'Validation failed: all localIds must be non-empty strings', new Error('Invalid localId in array'));
+      return {
+        success: false,
+        error: `localIds[${i}] must be a non-empty string`,
+        updated: 0,
+        failed: 0,
+        errors: []
+      };
+    }
+  }
+
+  if (!status || typeof status !== 'string') {
+    logFailure('bulkSetRedlineStatus', 'Validation failed: status is required and must be a string', new Error('Invalid status'));
+    return {
+      success: false,
+      error: 'status is required and must be a string',
+      updated: 0,
+      failed: 0,
+      errors: []
+    };
+  }
+
+  if (!['reviewable', 'pre-approved', 'needs-revision', 'approved'].includes(status)) {
+    logFailure('bulkSetRedlineStatus', 'Validation failed: status must be one of: reviewable, pre-approved, needs-revision, approved', new Error('Invalid status value'));
+    return {
+      success: false,
+      error: `Invalid status: ${status}. Must be one of: reviewable, pre-approved, needs-revision, approved`,
+      updated: 0,
+      failed: 0,
+      errors: []
+    };
+  }
+
+  if (userId !== undefined && userId !== null && (typeof userId !== 'string' || userId.trim() === '')) {
+    logFailure('bulkSetRedlineStatus', 'Validation failed: userId must be a non-empty string if provided', new Error('Invalid userId'));
+    return {
+      success: false,
+      error: 'userId must be a non-empty string if provided',
+      updated: 0,
+      failed: 0,
+      errors: []
+    };
+  }
+
+  if (reason !== undefined && typeof reason !== 'string') {
+    logFailure('bulkSetRedlineStatus', 'Validation failed: reason must be a string', new Error('Invalid reason type'));
+    return {
+      success: false,
+      error: 'reason must be a string',
+      updated: 0,
+      failed: 0,
+      errors: []
+    };
   }
 
   const results = {
@@ -333,10 +473,19 @@ export async function bulkSetRedlineStatus(req) {
 
   for (const localId of localIds) {
     try {
-      await setRedlineStatus({
+      const result = await setRedlineStatus({
         payload: { localId, status, userId, reason }
       });
-      results.updated++;
+      if (result.success) {
+        results.updated++;
+      } else {
+        results.failed++;
+        results.errors.push({
+          localId,
+          error: result.error || 'Unknown error'
+        });
+        logFailure('bulkSetRedlineStatus', 'Failed to update status', new Error(result.error), { localId });
+      }
     } catch (error) {
       results.failed++;
       results.errors.push({
@@ -360,10 +509,15 @@ export async function bulkSetRedlineStatus(req) {
  * @returns {Object} { isStale: boolean, currentHash, approvedHash }
  */
 export async function checkRedlineStale(req) {
-  const { localId } = req.payload;
+  const { localId } = req.payload || {};
 
-  if (!localId) {
-    throw new Error('localId is required');
+  // Input validation
+  if (!localId || typeof localId !== 'string' || localId.trim() === '') {
+    logFailure('checkRedlineStale', 'Validation failed: localId is required and must be a non-empty string', new Error('Invalid localId'));
+    return {
+      success: false,
+      error: 'localId is required and must be a non-empty string'
+    };
   }
 
   try {
@@ -372,7 +526,11 @@ export async function checkRedlineStale(req) {
     const config = await storage.get(configKey);
 
     if (!config) {
-      throw new Error(`Embed config not found for localId: ${localId}`);
+      logFailure('setRedlineStatus', 'Embed config not found', new Error('Embed config not found'), { localId });
+      return {
+        success: false,
+        error: `Embed config not found for localId: ${localId}`
+      };
     }
 
     // If not approved, can't be stale
@@ -412,8 +570,11 @@ export async function checkRedlineStale(req) {
     };
 
   } catch (error) {
-    logFailure('checkRedlineStale', 'Error checking redline staleness', error);
-    throw new Error(`Failed to check redline staleness: ${error.message}`);
+    logFailure('checkRedlineStale', 'Error checking redline staleness', error, { localId: req.payload?.localId });
+    return {
+      success: false,
+      error: `Failed to check redline staleness: ${error.message}`
+    };
   }
 }
 
@@ -425,10 +586,21 @@ export async function checkRedlineStale(req) {
  * @returns {Object} User data with avatar URL
  */
 export async function getConfluenceUser(req) {
-  const { accountId } = req.payload;
+  const { accountId } = req.payload || {};
 
-  if (!accountId) {
-    throw new Error('accountId is required');
+  // Input validation
+  if (!accountId || typeof accountId !== 'string' || accountId.trim() === '') {
+    logFailure('getConfluenceUser', 'Validation failed: accountId is required and must be a non-empty string', new Error('Invalid accountId'));
+    return {
+      accountId: accountId || 'unknown',
+      displayName: 'Unknown User',
+      publicName: 'Unknown User',
+      profilePicture: {
+        path: null,
+        isDefault: true
+      },
+      error: 'accountId is required and must be a non-empty string'
+    };
   }
 
   // System user (for automatic transitions)

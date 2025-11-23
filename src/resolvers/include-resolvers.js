@@ -267,14 +267,17 @@ export async function saveVariableValues(req) {
         const isAdf = previewContent && typeof previewContent === 'object' && previewContent.type === 'doc';
 
         if (isAdf) {
-          // Process ADF content: filter toggles, substitute variables, insert custom content
-          // Note: Using current (buggy) behavior to match client-side for consistency
-          // TODO: Fix for GitHub issue #2 - Insert custom paragraphs BEFORE toggle filtering
+          // Process ADF content: Match Edit Mode processing order for consistency
+          // CRITICAL: Insert custom paragraphs BEFORE toggle filtering so paragraph indices match
+          // The insertion logic needs to work on the original structure (with toggle markers) 
+          // so it knows where toggle boundaries are. Then toggle filtering will preserve 
+          // the insertion if the toggle is enabled.
           try {
-            previewContent = filterContentByToggles(previewContent, toggleStates || {});
             previewContent = substituteVariablesInAdf(previewContent, variableValues || {});
             previewContent = insertCustomParagraphsInAdf(previewContent, customInsertions || []);
             previewContent = insertInternalNotesInAdf(previewContent, internalNotes || []);
+            // Then filter toggles (this will preserve insertions inside enabled toggles)
+            previewContent = filterContentByToggles(previewContent, toggleStates || {});
             previewContent = cleanAdfForRenderer(previewContent);
           } catch (processingError) {
             logFailure('saveVariableValues', 'Error during ADF processing', processingError, {

@@ -112,13 +112,19 @@ export async function getVersionHistory(req) {
  */
 export async function getVersionDetails(req) {
   const FUNCTION_NAME = 'getVersionDetails';
-  const { versionId } = req.payload;
+  const { versionId } = req.payload || {};
 
   logFunction(FUNCTION_NAME, 'START', { versionId });
 
   try {
-    if (!versionId || typeof versionId !== 'string') {
-      throw new Error('Missing or invalid versionId parameter');
+    // Input validation
+    if (!versionId || typeof versionId !== 'string' || versionId.trim() === '') {
+      logFailure(FUNCTION_NAME, 'Validation failed: versionId is required and must be a non-empty string', new Error('Invalid versionId'));
+      logFunction(FUNCTION_NAME, 'END', { success: false });
+      return {
+        success: false,
+        error: 'versionId is required and must be a non-empty string'
+      };
     }
 
     const result = await getVersion(storage, versionId);
@@ -174,13 +180,19 @@ export async function getVersionDetails(req) {
  */
 export async function restoreFromVersion(req) {
   const FUNCTION_NAME = 'restoreFromVersion';
-  const { versionId } = req.payload;
+  const { versionId } = req.payload || {};
 
   logFunction(FUNCTION_NAME, 'START', { versionId });
 
   try {
-    if (!versionId || typeof versionId !== 'string') {
-      throw new Error('Missing or invalid versionId parameter');
+    // Input validation
+    if (!versionId || typeof versionId !== 'string' || versionId.trim() === '') {
+      logFailure(FUNCTION_NAME, 'Validation failed: versionId is required and must be a non-empty string', new Error('Invalid versionId'));
+      logFunction(FUNCTION_NAME, 'END', { success: false });
+      return {
+        success: false,
+        error: 'versionId is required and must be a non-empty string'
+      };
     }
 
     logPhase(FUNCTION_NAME, `Restoring from version: ${versionId}`);

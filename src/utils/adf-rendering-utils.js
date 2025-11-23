@@ -423,22 +423,27 @@ export const insertCustomParagraphsInAdf = (adfNode, customInsertions) => {
     // Create a copy of the node
     const processedNode = { ...node };
 
-    // If this node has content array, recursively process it
+    // If this node has content array, process it and insert custom paragraphs
     if (processedNode.content && Array.isArray(processedNode.content)) {
       const newContent = [];
 
       processedNode.content.forEach(childNode => {
-        // Process the child node recursively first
+        // Process the child node recursively first (depth-first traversal)
+        // This matches how extractParagraphsFromAdf counts paragraphs
         const processedChild = processNode(childNode);
         newContent.push(processedChild);
 
-        // If the child is a paragraph, check if we need to insert custom content after it
-        if (childNode.type === 'paragraph') {
+        // CRITICAL: Check if the processed child is a paragraph AFTER processing it
+        // This ensures we're checking at the correct nesting level
+        // For example, if a paragraph is inside a tableCell, we check here (at the tableCell level)
+        // and insert into the tableCell's content array, not the tableRow's content array
+        if (processedChild.type === 'paragraph') {
           // Find all insertions for this position
           const insertionsHere = customInsertions.filter(ins => ins.position === paragraphIndex.value);
 
           insertionsHere.forEach(insertion => {
             // Create a new paragraph node with the custom text
+            // Insert it into the parent's content array (which is the correct nesting level)
             newContent.push({
               type: 'paragraph',
               content: [

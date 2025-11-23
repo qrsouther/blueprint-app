@@ -38,16 +38,49 @@ export async function detectVariablesFromContent(req) {
       };
     }
 
-    if (typeof content !== 'object' || Array.isArray(content)) {
-      logFailure('detectVariablesFromContent', 'Validation failed: content must be an ADF object', new Error('Invalid content type'));
+    // Handle different content formats
+    // detectVariables() can handle both ADF objects and plain text strings
+    // So we accept both formats here
+    let contentToProcess = content;
+    
+    // If content is a string, check if it's JSON or plain text
+    if (typeof content === 'string') {
+      // Try to parse as JSON first (in case it's a stringified ADF object)
+      try {
+        const parsed = JSON.parse(content);
+        // Only use parsed result if it's an object (not a primitive)
+        if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+          contentToProcess = parsed;
+        }
+        // Otherwise, treat the string as plain text (which detectVariables can handle)
+      } catch (parseErr) {
+        // Not JSON - treat as plain text string (which detectVariables can handle)
+        // No error, just use the string as-is
+      }
+    }
+
+    // Validate it's either an object (ADF) or a string (plain text)
+    // Both are acceptable since detectVariables handles both
+    if (contentToProcess === null || contentToProcess === undefined) {
+      logFailure('detectVariablesFromContent', 'Validation failed: content is null or undefined', new Error('Invalid content'));
       return {
         success: false,
-        error: 'content must be an ADF object',
+        error: 'content must be an ADF object or text string',
         variables: []
       };
     }
 
-    const variables = detectVariables(content);
+    // Reject arrays (not a valid format)
+    if (Array.isArray(contentToProcess)) {
+      logFailure('detectVariablesFromContent', 'Validation failed: content cannot be an array', new Error('Invalid content type'));
+      return {
+        success: false,
+        error: 'content must be an ADF object or text string, not an array',
+        variables: []
+      };
+    }
+
+    const variables = detectVariables(contentToProcess);
     return {
       success: true,
       variables
@@ -79,16 +112,49 @@ export async function detectTogglesFromContent(req) {
       };
     }
 
-    if (typeof content !== 'object' || Array.isArray(content)) {
-      logFailure('detectTogglesFromContent', 'Validation failed: content must be an ADF object', new Error('Invalid content type'));
+    // Handle different content formats
+    // detectToggles() can handle both ADF objects and plain text strings
+    // So we accept both formats here
+    let contentToProcess = content;
+    
+    // If content is a string, check if it's JSON or plain text
+    if (typeof content === 'string') {
+      // Try to parse as JSON first (in case it's a stringified ADF object)
+      try {
+        const parsed = JSON.parse(content);
+        // Only use parsed result if it's an object (not a primitive)
+        if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+          contentToProcess = parsed;
+        }
+        // Otherwise, treat the string as plain text (which detectToggles can handle)
+      } catch (parseErr) {
+        // Not JSON - treat as plain text string (which detectToggles can handle)
+        // No error, just use the string as-is
+      }
+    }
+
+    // Validate it's either an object (ADF) or a string (plain text)
+    // Both are acceptable since detectToggles handles both
+    if (contentToProcess === null || contentToProcess === undefined) {
+      logFailure('detectTogglesFromContent', 'Validation failed: content is null or undefined', new Error('Invalid content'));
       return {
         success: false,
-        error: 'content must be an ADF object',
+        error: 'content must be an ADF object or text string',
         toggles: []
       };
     }
 
-    const toggles = detectToggles(content);
+    // Reject arrays (not a valid format)
+    if (Array.isArray(contentToProcess)) {
+      logFailure('detectTogglesFromContent', 'Validation failed: content cannot be an array', new Error('Invalid content type'));
+      return {
+        success: false,
+        error: 'content must be an ADF object or text string, not an array',
+        toggles: []
+      };
+    }
+
+    const toggles = detectToggles(contentToProcess);
     return {
       success: true,
       toggles

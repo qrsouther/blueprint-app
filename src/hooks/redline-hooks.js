@@ -161,8 +161,9 @@ export const useSetRedlineStatusMutation = () => {
 /**
  * Hook for bulk status update for multiple Embeds
  *
- * Mutation for updating the redline status of multiple Embed instances at once.
- * Useful for batch approval or revision workflows.
+ * NOTE: This hook exists for backend/internal use only. The Admin UI does NOT
+ * support bulk status updates - users can only update one Embed at a time.
+ * This hook is kept for potential future use or programmatic access.
  *
  * @returns {Object} React Query mutation result
  */

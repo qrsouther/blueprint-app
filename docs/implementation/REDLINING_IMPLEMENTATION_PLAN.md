@@ -296,6 +296,9 @@ export function useSetRedlineStatusMutation() {
 }
 
 // Bulk status update
+// NOTE: This hook exists for backend/internal use only. The Admin UI does NOT
+// support bulk status updates - users can only update one Embed at a time.
+// This hook is kept for potential future use or programmatic access.
 export function useBulkSetRedlineStatusMutation() {
   const queryClient = useQueryClient();
 

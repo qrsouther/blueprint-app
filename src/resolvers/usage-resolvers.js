@@ -33,6 +33,22 @@ export async function trackExcerptUsage(req) {
   const extractedLocalId = localId; // Extract for use in catch block
   
   try {
+    // Input validation
+    if (!excerptId || typeof excerptId !== 'string' || excerptId.trim() === '') {
+      logFailure('trackExcerptUsage', 'Validation failed: excerptId is required and must be a non-empty string', new Error('Invalid excerptId'));
+      return {
+        success: false,
+        error: 'excerptId is required and must be a non-empty string'
+      };
+    }
+
+    if (!localId || typeof localId !== 'string' || localId.trim() === '') {
+      logFailure('trackExcerptUsage', 'Validation failed: localId is required and must be a non-empty string', new Error('Invalid localId'));
+      return {
+        success: false,
+        error: 'localId is required and must be a non-empty string'
+      };
+    }
 
     // Extract page information from backend context
     const pageId = req.context?.extension?.content?.id;
@@ -140,6 +156,22 @@ export async function removeExcerptUsage(req) {
   const extractedLocalId = localId; // Extract for use in catch block
   
   try {
+    // Input validation
+    if (!excerptId || typeof excerptId !== 'string' || excerptId.trim() === '') {
+      logFailure('removeExcerptUsage', 'Validation failed: excerptId is required and must be a non-empty string', new Error('Invalid excerptId'));
+      return {
+        success: false,
+        error: 'excerptId is required and must be a non-empty string'
+      };
+    }
+
+    if (!localId || typeof localId !== 'string' || localId.trim() === '') {
+      logFailure('removeExcerptUsage', 'Validation failed: localId is required and must be a non-empty string', new Error('Invalid localId'));
+      return {
+        success: false,
+        error: 'localId is required and must be a non-empty string'
+      };
+    }
 
     const usageKey = `usage:${excerptId}`;
     const usageData = await storage.get(usageKey);
@@ -175,6 +207,15 @@ export async function getExcerptUsage(req) {
   const extractedExcerptId = excerptId; // Extract for use in catch block
   
   try {
+    // Input validation
+    if (!excerptId || typeof excerptId !== 'string' || excerptId.trim() === '') {
+      logFailure('getExcerptUsage', 'Validation failed: excerptId is required and must be a non-empty string', new Error('Invalid excerptId'));
+      return {
+        success: false,
+        error: 'excerptId is required and must be a non-empty string',
+        usage: []
+      };
+    }
 
     const usageKey = `usage:${excerptId}`;
     const usageData = await storage.get(usageKey) || { references: [] };
@@ -213,6 +254,15 @@ export async function getExcerptUsageForCSV(req) {
   const extractedExcerptId = excerptId; // Extract for use in catch block
   
   try {
+    // Input validation
+    if (!excerptId || typeof excerptId !== 'string' || excerptId.trim() === '') {
+      logFailure('getExcerptUsageForCSV', 'Validation failed: excerptId is required and must be a non-empty string', new Error('Invalid excerptId'));
+      return {
+        success: false,
+        error: 'excerptId is required and must be a non-empty string',
+        usage: []
+      };
+    }
 
     // Get the excerpt for metadata
     const excerpt = await storage.get(`excerpt:${extractedExcerptId}`);

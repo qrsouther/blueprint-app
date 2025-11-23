@@ -244,8 +244,19 @@ export function CreateEditSourceModal({
       setCategory(excerptData.category || initialExcerptData?.category || 'General');
       
       // Load editor content (ADF format)
+      // Handle both object and string (JSON) formats
       if (excerptData.content) {
-        setEditorContent(excerptData.content);
+        let content = excerptData.content;
+        // If content is a string, try to parse it as JSON
+        if (typeof content === 'string') {
+          try {
+            content = JSON.parse(content);
+          } catch (parseErr) {
+            logger.errors('Failed to parse excerpt content as JSON:', parseErr);
+            content = { type: 'doc', version: 1, content: [] };
+          }
+        }
+        setEditorContent(content);
       } else {
         setEditorContent({ type: 'doc', version: 1, content: [] });
       }
@@ -297,19 +308,49 @@ export function CreateEditSourceModal({
       
       const detectVars = async () => {
         try {
-          // Extract text from ADF for detection
-          const contentText = extractTextFromAdf(editorContent);
-          if (!contentText) {
+          // Ensure editorContent is a valid ADF object
+          // Handle case where content might be a string (JSON) that needs parsing
+          let contentToDetect = editorContent;
+          
+          if (typeof editorContent === 'string') {
+            try {
+              contentToDetect = JSON.parse(editorContent);
+            } catch (parseErr) {
+              logger.errors('Failed to parse content as JSON:', parseErr);
+              setDetectedVariables([]);
+              return;
+            }
+          }
+          
+          // Validate it's an object and not an array
+          if (!contentToDetect || typeof contentToDetect !== 'object' || Array.isArray(contentToDetect)) {
+            logger.errors('Invalid content format for variable detection:', { 
+              type: typeof contentToDetect, 
+              isArray: Array.isArray(contentToDetect),
+              hasType: !!contentToDetect?.type,
+              contentPreview: JSON.stringify(contentToDetect).substring(0, 200)
+            });
             setDetectedVariables([]);
             return;
           }
 
-          const result = await invoke('detectVariablesFromContent', { content: contentText });
+          // Log what we're sending for debugging
+          logger.info('Detecting variables with content:', { 
+            hasType: !!contentToDetect.type,
+            hasContent: !!contentToDetect.content,
+            contentIsArray: Array.isArray(contentToDetect.content)
+          });
+
+          const result = await invoke('detectVariablesFromContent', { content: contentToDetect });
           if (result.success) {
             setDetectedVariables(result.variables);
+          } else {
+            logger.errors('Failed to detect variables:', result.error);
+            setDetectedVariables([]);
           }
         } catch (err) {
           logger.errors('Error detecting variables:', err);
+          setDetectedVariables([]);
         }
       };
 
@@ -324,19 +365,41 @@ export function CreateEditSourceModal({
       
       const detectToggs = async () => {
         try {
-          // Extract text from ADF for detection
-          const contentText = extractTextFromAdf(editorContent);
-          if (!contentText) {
+          // Ensure editorContent is a valid ADF object
+          // Handle case where content might be a string (JSON) that needs parsing
+          let contentToDetect = editorContent;
+          
+          if (typeof editorContent === 'string') {
+            try {
+              contentToDetect = JSON.parse(editorContent);
+            } catch (parseErr) {
+              logger.errors('Failed to parse content as JSON:', parseErr);
+              setDetectedToggles([]);
+              return;
+            }
+          }
+          
+          // Validate it's an object and not an array
+          if (!contentToDetect || typeof contentToDetect !== 'object' || Array.isArray(contentToDetect)) {
+            logger.errors('Invalid content format for toggle detection:', { 
+              type: typeof contentToDetect, 
+              isArray: Array.isArray(contentToDetect),
+              content: contentToDetect 
+            });
             setDetectedToggles([]);
             return;
           }
 
-          const result = await invoke('detectTogglesFromContent', { content: contentText });
+          const result = await invoke('detectTogglesFromContent', { content: contentToDetect });
           if (result.success) {
             setDetectedToggles(result.toggles);
+          } else {
+            logger.errors('Failed to detect toggles:', result.error);
+            setDetectedToggles([]);
           }
         } catch (err) {
           logger.errors('Error detecting toggles:', err);
+          setDetectedToggles([]);
         }
       };
 
@@ -410,30 +473,18 @@ export function CreateEditSourceModal({
     // Clear validation errors before save attempt
     setValidationErrors({});
 
-    // Use React Query mutation to save
-    // Prepare optimistic update data
-    const optimisticExcerpt = {
-      id: editingExcerptId || `temp-${Date.now()}`,
-      excerptId: editingExcerptId || `temp-${Date.now()}`,
-      name: excerptName.trim(),
-      excerptName: excerptName.trim(),
-      category: category || 'General',
-      content: contentToSave,
-      variables: variablesWithMetadata,
-      toggles: togglesWithMetadata,
-      documentationLinks: documentationLinks || [],
-      sourcePageId: excerptData?.sourcePageId || `virtual-${editingExcerptId || 'new'}`,
-      sourceSpaceKey: excerptData?.sourceSpaceKey || 'virtual-blueprint-source',
-      sourceLocalId: excerptData?.sourceLocalId || `virtual-${editingExcerptId || 'new'}`,
-      updatedAt: new Date().toISOString(),
-      createdAt: excerptData?.createdAt || new Date().toISOString()
-    };
+    // Capture current values to ensure we use the latest state
+    const currentExcerptName = excerptName.trim();
+    const currentCategory = category;
+    const currentContent = contentToSave;
+    const currentExcerptId = editingExcerptId || null;
 
+    // Use React Query mutation to save
     saveExcerptMutation({
-      excerptName: excerptName.trim(),
-      category,
-      content: contentToSave,
-      excerptId: editingExcerptId || null,
+      excerptName: currentExcerptName,
+      category: currentCategory,
+      content: currentContent,
+      excerptId: currentExcerptId,
       variableMetadata: variablesWithMetadata,
       toggleMetadata: togglesWithMetadata,
       documentationLinks,
@@ -441,17 +492,42 @@ export function CreateEditSourceModal({
       existingSourceSpaceKey: excerptData?.sourceSpaceKey,
       existingSourceLocalId: excerptData?.sourceLocalId
     }, {
-      onMutate: async () => {
+      onMutate: async (variables) => {
+        // CRITICAL: Use mutation variables instead of closure values to avoid race conditions
+        // The variables parameter contains the exact values being sent to the server
+        const mutationExcerptName = variables.excerptName;
+        const mutationCategory = variables.category;
+        const mutationExcerptId = variables.excerptId || editingExcerptId;
+        
         // Optimistically update the cache immediately for instant UI feedback
         // Cancel any outgoing refetches to avoid overwriting our optimistic update
         await queryClient.cancelQueries({ queryKey: ['excerpts', 'list'] });
-        await queryClient.cancelQueries({ queryKey: ['excerpt', editingExcerptId] });
+        await queryClient.cancelQueries({ queryKey: ['excerpt', mutationExcerptId] });
 
         // Snapshot the previous value for rollback if mutation fails
         const previousExcerptsList = queryClient.getQueryData(['excerpts', 'list']);
-        const previousExcerpt = editingExcerptId 
-          ? queryClient.getQueryData(['excerpt', editingExcerptId])
+        const previousExcerpt = mutationExcerptId 
+          ? queryClient.getQueryData(['excerpt', mutationExcerptId])
           : null;
+
+        // Prepare optimistic update data using mutation variables (not closure values)
+        const optimisticExcerpt = {
+          id: mutationExcerptId || `temp-${Date.now()}`,
+          excerptId: mutationExcerptId || `temp-${Date.now()}`,
+          name: mutationExcerptName,
+          excerptName: mutationExcerptName,
+          category: mutationCategory || 'General',
+          content: variables.content,
+          // Use mutation variables to ensure consistency with what's being sent to server
+          variables: variables.variableMetadata || [],
+          toggles: variables.toggleMetadata || [],
+          documentationLinks: variables.documentationLinks || [],
+          sourcePageId: excerptData?.sourcePageId || `virtual-${mutationExcerptId || 'new'}`,
+          sourceSpaceKey: excerptData?.sourceSpaceKey || 'virtual-blueprint-source',
+          sourceLocalId: excerptData?.sourceLocalId || `virtual-${mutationExcerptId || 'new'}`,
+          updatedAt: new Date().toISOString(),
+          createdAt: excerptData?.createdAt || new Date().toISOString()
+        };
 
         // Optimistically update the excerpts list
         queryClient.setQueryData(['excerpts', 'list'], (old) => {
@@ -460,17 +536,18 @@ export function CreateEditSourceModal({
           const excerpts = [...old.excerpts];
           // Find by both id and excerptId to handle different data structures
           const existingIndex = excerpts.findIndex(e => 
-            (e.id === editingExcerptId) || (e.excerptId === editingExcerptId)
+            (e.id === mutationExcerptId) || (e.excerptId === mutationExcerptId)
           );
           
           if (existingIndex >= 0) {
             // Update existing excerpt - preserve all existing fields, only update changed ones
+            // Use mutation variables to ensure we have the latest values
             const existing = excerpts[existingIndex];
             excerpts[existingIndex] = {
               ...existing,
-              name: excerptName.trim(),
-              excerptName: excerptName.trim(),
-              category: category || existing.category || 'General',
+              name: mutationExcerptName,
+              excerptName: mutationExcerptName,
+              category: mutationCategory || existing.category || 'General',
               updatedAt: new Date().toISOString(),
               // Preserve other fields like variables, toggles, etc.
             };
@@ -481,8 +558,8 @@ export function CreateEditSourceModal({
         });
 
         // Optimistically update individual excerpt cache if editing
-        if (editingExcerptId) {
-          queryClient.setQueryData(['excerpt', editingExcerptId], optimisticExcerpt);
+        if (mutationExcerptId) {
+          queryClient.setQueryData(['excerpt', mutationExcerptId], optimisticExcerpt);
         }
 
         // Return context for rollback

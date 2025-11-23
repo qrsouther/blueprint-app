@@ -233,6 +233,22 @@ export async function restoreDeletedEmbed(req) {
   const extractedLocalId = localId; // Extract for use in catch block
   
   try {
+    // Input validation
+    if (!localId || typeof localId !== 'string' || localId.trim() === '') {
+      logFailure('restoreDeletedEmbed', 'Validation failed: localId is required and must be a non-empty string', new Error('Invalid localId'));
+      return {
+        success: false,
+        error: 'localId is required and must be a non-empty string'
+      };
+    }
+
+    if (force !== undefined && typeof force !== 'boolean') {
+      logFailure('restoreDeletedEmbed', 'Validation failed: force must be a boolean', new Error('Invalid force type'));
+      return {
+        success: false,
+        error: 'force must be a boolean'
+      };
+    }
 
     // Get soft-deleted data
     const deletedData = await storage.get(`macro-vars-deleted:${localId}`);
