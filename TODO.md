@@ -1036,6 +1036,30 @@ This review will be MORE VALUABLE after refactoring because:
 **When to Run:**
 After embed-display.jsx refactoring is complete and stable.
 
+### Terminology Refactoring: Standardize to "Sources" and "Embeds"
+**Status:** Planned - Separate from code review improvements
+**Priority:** Medium (code clarity and maintainability)
+**Estimated Effort:** Large (24-36 hours, requires storage migration)
+**Reference:** See `TERMINOLOGY_REFACTORING_TODO.md` for complete plan
+
+**Problem:**
+Codebase uses inconsistent terminology - legacy terms "Excerpts" and "Includes" in code vs. modern terms "Sources" and "Embeds" in documentation. This creates cognitive dissonance and makes codebase harder to understand.
+
+**Scope:**
+- Rename all functions, variables, and storage keys
+- Migrate storage keys (CRITICAL: requires careful migration)
+- Update all resolver functions
+- Update all frontend components
+- Update all documentation
+
+**Key Considerations:**
+- Storage key migration is HIGH RISK (data loss risk)
+- Should be done after critical bug fixes are complete
+- Requires careful planning and testing
+- Consider keeping old names as aliases during transition
+
+**See:** `TERMINOLOGY_REFACTORING_TODO.md` for detailed implementation plan, migration strategy, and risk assessment.
+
 ### "Nuclear Option" - Single Blueprint Renderer Macro
 **Status:** Future consideration - Performance escape hatch
 **Priority:** Low (only if performance issues materialize)

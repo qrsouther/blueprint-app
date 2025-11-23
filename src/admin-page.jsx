@@ -1926,25 +1926,52 @@ const App = () => {
                         const rowCells = [
                           {
                             key: 'page',
-                            content: (
-                              <Button
-                                appearance="link"
-                                onClick={async () => {
-                                  try {
-                                    let url = `/wiki/pages/viewpage.action?pageId=${ref.pageId}`;
-                                    if (ref.headingAnchor) {
-                                      url += `#${ref.headingAnchor}`;
+                            content: (() => {
+                              if (ref.pageTitle === 'Unknown Page' && ref.pageId) {
+                                return (
+                                  <Tooltip
+                                    content={`Page title not available. This may be due to page access restrictions. Page ID: ${ref.pageId}`}
+                                  >
+                                    <Button
+                                      appearance="link"
+                                      onClick={async () => {
+                                        try {
+                                          let url = `/wiki/pages/viewpage.action?pageId=${ref.pageId}`;
+                                          if (ref.headingAnchor) {
+                                            url += `#${ref.headingAnchor}`;
+                                          }
+                                          await router.open(url);
+                                        } catch (err) {
+                                          logger.errors('Navigation error:', err);
+                                        }
+                                      }}
+                                      iconAfter={() => <Icon glyph="shortcut" label="Opens in new tab" />}
+                                    >
+                                      Page {ref.pageId}
+                                    </Button>
+                                  </Tooltip>
+                                );
+                              }
+                              return (
+                                <Button
+                                  appearance="link"
+                                  onClick={async () => {
+                                    try {
+                                      let url = `/wiki/pages/viewpage.action?pageId=${ref.pageId}`;
+                                      if (ref.headingAnchor) {
+                                        url += `#${ref.headingAnchor}`;
+                                      }
+                                      await router.open(url);
+                                    } catch (err) {
+                                      logger.errors('Navigation error:', err);
                                     }
-                                    await router.open(url);
-                                  } catch (err) {
-                                    logger.errors('Navigation error:', err);
-                                  }
-                                }}
-                                iconAfter={() => <Icon glyph="shortcut" label="Opens in new tab" />}
-                              >
-                                {String(ref.pageTitle || 'Unknown Page')}
-                              </Button>
-                            )
+                                  }}
+                                  iconAfter={() => <Icon glyph="shortcut" label="Opens in new tab" />}
+                                >
+                                  {String(ref.pageTitle || 'Unknown Page')}
+                                </Button>
+                              );
+                            })()
                           },
                           // Status cell (second column)
                           {
@@ -2227,7 +2254,16 @@ const App = () => {
 
                     <Text><Strong>Affected Pages:</Strong></Text>
                     {selectedExcerpt.references.map((ref, idx) => (
-                      <Text key={idx}>  - {String(ref.pageTitle || 'Unknown Page')}</Text>
+                      ref.pageTitle === 'Unknown Page' && ref.pageId ? (
+                        <Tooltip
+                          key={idx}
+                          content={`Page title not available. This may be due to page access restrictions. Page ID: ${ref.pageId}`}
+                        >
+                          <Text>  - Page {ref.pageId}</Text>
+                        </Tooltip>
+                      ) : (
+                        <Text key={idx}>  - {String(ref.pageTitle || 'Unknown Page')}</Text>
+                      )
                     ))}
 
                     <Text><Strong>Options:</Strong></Text>
@@ -2430,23 +2466,47 @@ const App = () => {
                                       {
                                         key: 'page',
                                         content: (
-                                          <Button
-                                            appearance="link"
-                                            onClick={async () => {
-                                              try {
-                                                // Build URL with optional heading anchor
-                                                let url = `/wiki/pages/viewpage.action?pageId=${ref.pageId}`;
-                                                if (ref.headingAnchor) {
-                                                  url += `#${ref.headingAnchor}`;
+                                          ref.pageTitle === 'Unknown Page' && ref.pageId ? (
+                                            <Tooltip
+                                              content={`Page title not available. This may be due to page access restrictions.`}
+                                            >
+                                              <Button
+                                                appearance="link"
+                                                onClick={async () => {
+                                                  try {
+                                                    // Build URL with optional heading anchor
+                                                    let url = `/wiki/pages/viewpage.action?pageId=${ref.pageId}`;
+                                                    if (ref.headingAnchor) {
+                                                      url += `#${ref.headingAnchor}`;
+                                                    }
+                                                    await router.open(url);
+                                                  } catch (err) {
+                                                    logger.errors('Navigation error:', err);
+                                                  }
+                                                }}
+                                              >
+                                                Page {ref.pageId}
+                                              </Button>
+                                            </Tooltip>
+                                          ) : (
+                                            <Button
+                                              appearance="link"
+                                              onClick={async () => {
+                                                try {
+                                                  // Build URL with optional heading anchor
+                                                  let url = `/wiki/pages/viewpage.action?pageId=${ref.pageId}`;
+                                                  if (ref.headingAnchor) {
+                                                    url += `#${ref.headingAnchor}`;
+                                                  }
+                                                  await router.open(url);
+                                                } catch (err) {
+                                                  logger.errors('Navigation error:', err);
                                                 }
-                                                await router.open(url);
-                                              } catch (err) {
-                                                logger.errors('Navigation error:', err);
-                                              }
-                                            }}
-                                          >
-                                            {String(ref.pageTitle || 'Unknown Page')}
-                                          </Button>
+                                              }}
+                                            >
+                                              {String(ref.pageTitle || 'Unknown Page')}
+                                            </Button>
+                                          )
                                         )
                                       }
                                     ];

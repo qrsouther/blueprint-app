@@ -172,25 +172,32 @@ export async function handler(event) {
           const errorType = pageResult.errorType || 'unknown';
           const httpStatus = pageResult.httpStatus;
 
-          // Only mark as orphaned if page is confirmed deleted (404)
-          // Permission errors (403, 401) and transient failures should NOT mark as orphaned
-          if (errorType === 'page_deleted' && httpStatus === 404) {
-            // Page confirmed deleted - legitimate orphan
-            logWarning('checkIncludesWorker', 'Page confirmed deleted', { pageId, error: pageResult.error });
-
-            const orphaned = await handlePageNotFound(pageIncludes, pageResult.error, dryRun);
-            orphanedIncludes.push(...orphaned);
-            orphanedEntriesRemoved.push(...pageIncludes.map(inc => inc.localId));
-          } else if (errorType === 'permission_denied' || errorType === 'unauthorized') {
-            // Permission error - don't mark as orphaned (may be temporary)
+          // CRITICAL: 404 can mean either "page deleted" OR "page exists but app has no permission"
+          // Confluence API may return 404 for permission-denied pages to avoid information leakage
+          // Since we can't distinguish, we must be conservative and NOT mark as orphaned on 404
+          // Only mark as orphaned if we can be 100% certain the page is deleted
+          // For now, we treat 404 the same as permission errors - don't mark as orphaned
+          
+          if (errorType === 'permission_denied' || errorType === 'unauthorized' || httpStatus === 403 || httpStatus === 401) {
+            // Permission error - don't mark as orphaned (may be temporary or app lacks permission)
             logWarning('checkIncludesWorker', 'Page access denied - not marking as orphaned', {
               pageId,
               error: pageResult.error,
               errorType,
               httpStatus
             });
-            // Add to a separate list for reporting (optional)
-            // These are not orphaned, just inaccessible
+            // These are not orphaned, just inaccessible to the app
+          } else if (httpStatus === 404) {
+            // 404 could mean deleted OR permission denied - be conservative, don't mark as orphaned
+            // NOTE: This means we may miss some truly deleted pages, but prevents false positives
+            logWarning('checkIncludesWorker', 'Page returned 404 - not marking as orphaned (could be permission issue)', {
+              pageId,
+              error: pageResult.error,
+              errorType,
+              httpStatus,
+              note: '404 may indicate page deleted OR app lacks permission - being conservative'
+            });
+            // These are not orphaned - could be permission issue or actually deleted, but we can't tell
           } else if (errorType === 'transient_failure') {
             // Transient failure after retries - don't mark as orphaned
             logWarning('checkIncludesWorker', 'Page fetch failed after retries - not marking as orphaned', {
@@ -199,7 +206,6 @@ export async function handler(event) {
               errorType,
               httpStatus
             });
-            // Add to a separate list for reporting (optional)
             // These are not orphaned, just temporarily unavailable
           } else {
             // Unknown error type - be conservative, don't mark as orphaned
@@ -215,36 +221,109 @@ export async function handler(event) {
           const { pageData, adfContent } = pageResult;
 
           for (const include of pageIncludes) {
-            // Check if this localId exists in the ADF
-            const macroExists = checkMacroExistsInADF(adfContent, include.localId);
+            try {
+              // Validate localId before processing
+              if (!include.localId || typeof include.localId !== 'string' || include.localId.trim() === '') {
+                logWarning('checkIncludesWorker', 'Invalid localId - skipping include', {
+                  localId: include.localId,
+                  pageId,
+                  include: include
+                });
+                // Mark as broken reference, not orphaned
+                brokenReferences.push({
+                  ...include,
+                  reason: 'Invalid localId in usage data',
+                  pageExists: true
+                });
+                continue;
+              }
 
-            if (!macroExists) {
-              const orphaned = await handleOrphanedMacro(include, pageData, dryRun);
-              orphanedIncludes.push(orphaned);
-              orphanedEntriesRemoved.push(include.localId);
-            } else {
-              // Macro exists - check if referenced excerpt exists
-              await processActiveEmbed(
-                include,
-                pageData,
-                activeIncludes,
-                brokenReferences,
-                repairedReferences,
-                staleIncludes
-              );
+              // Validate ADF content before searching
+              if (!adfContent || typeof adfContent !== 'object' || !adfContent.type) {
+                logWarning('checkIncludesWorker', 'Invalid ADF content - skipping macro check', {
+                  localId: include.localId,
+                  pageId,
+                  adfType: typeof adfContent
+                });
+                // Don't mark as orphaned - ADF validation failed, not macro missing
+                // Continue to next include
+                continue;
+              }
+
+              // Check if this localId exists in the ADF
+              const macroExists = checkMacroExistsInADF(adfContent, include.localId);
+
+              if (!macroExists) {
+                const orphaned = await handleOrphanedMacro(include, pageData, dryRun);
+                orphanedIncludes.push(orphaned);
+                orphanedEntriesRemoved.push(include.localId);
+              } else {
+                // Macro exists - check if referenced excerpt exists
+                // Wrap in try/catch to prevent processing errors from marking as orphaned
+                try {
+                  await processActiveEmbed(
+                    include,
+                    pageData,
+                    activeIncludes,
+                    brokenReferences,
+                    repairedReferences,
+                    staleIncludes
+                  );
+                } catch (processError) {
+                  // Processing error (storage read, data validation, etc.) - NOT an orphan
+                  logFailure('checkIncludesWorker', 'Error processing active embed - NOT marking as orphaned', processError, {
+                    localId: include.localId,
+                    pageId,
+                    errorType: processError.name
+                  });
+                  // Mark as broken reference if we can't process it, but don't mark as orphaned
+                  brokenReferences.push({
+                    ...include,
+                    reason: `Processing error: ${processError.message}`,
+                    pageExists: true
+                  });
+                }
+              }
+            } catch (includeError) {
+              // Catch any other errors in the include processing loop
+              logFailure('checkIncludesWorker', 'Unexpected error processing include - NOT marking as orphaned', includeError, {
+                localId: include.localId,
+                pageId,
+                errorType: includeError.name
+              });
+              // Don't mark as orphaned - unknown error, be conservative
+              brokenReferences.push({
+                ...include,
+                reason: `Unexpected error: ${includeError.message}`,
+                pageExists: true
+              });
             }
           }
         }
       } catch (error) {
-        logFailure('checkIncludesWorker', 'Error checking page', error, { pageId });
-        // Mark all Includes on this page as orphaned due to error
+        // CRITICAL: Do NOT mark as orphaned on processing errors
+        // Only mark as orphaned if page fetch confirms deletion (404)
+        // Processing errors (storage failures, ADF parsing, etc.) should NOT cause false positives
+        logFailure('checkIncludesWorker', 'Error processing page - NOT marking as orphaned', error, { 
+          pageId,
+          includeCount: pageIncludes.length,
+          errorType: error.name,
+          errorMessage: error.message
+        });
+        
+        // Log warning for each include that couldn't be checked
+        // These are NOT orphaned - they just couldn't be verified due to processing error
         for (const include of pageIncludes) {
-          orphanedIncludes.push({
-            ...include,
-            reason: `Error checking page: ${error.message}`,
-            pageExists: false
+          logWarning('checkIncludesWorker', 'Include check skipped due to processing error', {
+            localId: include.localId,
+            pageId,
+            error: error.message
           });
         }
+        
+        // NOTE: We intentionally do NOT add these to orphanedIncludes
+        // They remain in active state until next successful check
+        // This prevents false positives from transient errors
       }
 
       // Update progress

@@ -118,13 +118,40 @@ export async function handler(event) {
         );
 
         if (!storageResponse.ok) {
-          logWarning('checkSourcesWorker', 'Page not accessible', { pageId, excerptCount: pageExcerpts.length });
-          pageExcerpts.forEach(excerpt => {
-            orphanedSources.push({
-              ...excerpt,
-              orphanedReason: 'Source page not found or deleted'
+          // CRITICAL: Distinguish between error types to prevent false positives
+          // 404 can mean either "page deleted" OR "page exists but app has no permission"
+          // Confluence API may return 404 for permission-denied pages to avoid information leakage
+          // Since we can't distinguish, we must be conservative and NOT mark as orphaned on 404
+          const httpStatus = storageResponse.status;
+          
+          if (httpStatus === 403 || httpStatus === 401) {
+            // Permission error - don't mark as orphaned (may be temporary or app lacks permission)
+            logWarning('checkSourcesWorker', 'Page access denied - not marking as orphaned', {
+              pageId,
+              excerptCount: pageExcerpts.length,
+              httpStatus
             });
-          });
+            // These are not orphaned, just inaccessible to the app
+          } else if (httpStatus === 404) {
+            // 404 could mean deleted OR permission denied - be conservative, don't mark as orphaned
+            // NOTE: This means we may miss some truly deleted pages, but prevents false positives
+            logWarning('checkSourcesWorker', 'Page returned 404 - not marking as orphaned (could be permission issue)', {
+              pageId,
+              excerptCount: pageExcerpts.length,
+              httpStatus,
+              note: '404 may indicate page deleted OR app lacks permission - being conservative'
+            });
+            // These are not orphaned - could be permission issue or actually deleted, but we can't tell
+          } else {
+            // Other errors (500, network errors, etc.) - don't mark as orphaned
+            logWarning('checkSourcesWorker', 'Page fetch failed - not marking as orphaned', {
+              pageId,
+              excerptCount: pageExcerpts.length,
+              httpStatus,
+              error: `HTTP ${httpStatus}`
+            });
+            // These are not orphaned, just temporarily unavailable - skip checking but don't mark as orphaned
+          }
           
           // Update progress
           const percentComplete = calculatePhaseProgress(pageNumber, excerptsByPage.size, 20, 90);
@@ -144,13 +171,18 @@ export async function handler(event) {
         const storageBody = storageData?.body?.storage?.value || '';
 
         if (!storageBody) {
-          logWarning('checkSourcesWorker', 'No storage body found for page', { pageId });
-          pageExcerpts.forEach(excerpt => {
-            orphanedSources.push({
-              ...excerpt,
-              orphanedReason: 'Unable to read page content'
-            });
+          // CRITICAL: Empty storage body doesn't mean page is deleted
+          // Could be empty page, parsing error, or API issue
+          // Don't mark as orphaned - be conservative
+          logWarning('checkSourcesWorker', 'No storage body found for page - not marking as orphaned', {
+            pageId,
+            excerptCount: pageExcerpts.length,
+            hasStorageData: !!storageData,
+            hasBody: !!storageData?.body,
+            hasStorage: !!storageData?.body?.storage
           });
+          // Skip checking these Sources but don't mark as orphaned
+          // They remain in active state until next successful check
           
           // Update progress
           const percentComplete = calculatePhaseProgress(pageNumber, excerptsByPage.size, 20, 90);
@@ -304,13 +336,30 @@ export async function handler(event) {
           }
         }
       } catch (apiError) {
-        logFailure('checkSourcesWorker', 'Error checking page', apiError, { pageId });
+        // CRITICAL: Do NOT mark as orphaned on processing errors
+        // Only mark as orphaned if page fetch confirms deletion (404)
+        // Processing errors (network failures, parsing errors, etc.) should NOT cause false positives
+        logFailure('checkSourcesWorker', 'Error processing page - NOT marking as orphaned', apiError, {
+          pageId,
+          excerptCount: pageExcerpts.length,
+          errorType: apiError.name,
+          errorMessage: apiError.message
+        });
+        
+        // Log warning for each excerpt that couldn't be checked
+        // These are NOT orphaned - they just couldn't be verified due to processing error
         pageExcerpts.forEach(excerpt => {
-          orphanedSources.push({
-            ...excerpt,
-            orphanedReason: `API error: ${apiError.message}`
+          logWarning('checkSourcesWorker', 'Source check skipped due to processing error', {
+            excerptId: excerpt.id,
+            excerptName: excerpt.name,
+            pageId,
+            error: apiError.message
           });
         });
+        
+        // NOTE: We intentionally do NOT add these to orphanedSources
+        // They remain in active state until next successful check
+        // This prevents false positives from transient errors
       }
 
       // Update progress after each page
