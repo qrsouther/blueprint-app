@@ -52,14 +52,29 @@ export async function getVersionHistory(req) {
   logFunction(FUNCTION_NAME, 'START', { entityId });
 
   try {
-    if (!entityId || typeof entityId !== 'string') {
-      throw new Error('Missing or invalid entityId parameter');
+    // Input validation
+    if (!entityId || typeof entityId !== 'string' || entityId.trim() === '') {
+      logFailure(FUNCTION_NAME, 'Validation failed: entityId is required and must be a non-empty string', new Error('Invalid entityId'));
+      logFunction(FUNCTION_NAME, 'END', { success: false });
+      return {
+        success: false,
+        error: 'entityId is required and must be a non-empty string',
+        versions: [],
+        totalCount: 0
+      };
     }
 
     const result = await listVersions(storage, entityId);
 
     if (!result.success) {
-      throw new Error(result.error || 'Failed to list versions');
+      logFailure(FUNCTION_NAME, 'Failed to list versions', new Error(result.error || 'Failed to list versions'), { entityId });
+      logFunction(FUNCTION_NAME, 'END', { success: false });
+      return {
+        success: false,
+        error: result.error || 'Failed to list versions',
+        versions: [],
+        totalCount: 0
+      };
     }
 
     // Sort versions by timestamp (newest first) for UI display
@@ -130,7 +145,12 @@ export async function getVersionDetails(req) {
     const result = await getVersion(storage, versionId);
 
     if (!result.success) {
-      throw new Error(result.error || 'Failed to get version');
+      logFailure(FUNCTION_NAME, 'Failed to get version', new Error(result.error || 'Failed to get version'), { versionId });
+      logFunction(FUNCTION_NAME, 'END', { success: false });
+      return {
+        success: false,
+        error: result.error || 'Failed to get version'
+      };
     }
 
     const version = result.version;
@@ -200,7 +220,12 @@ export async function restoreFromVersion(req) {
     const result = await restoreVersion(storage, versionId);
 
     if (!result.success) {
-      throw new Error(result.error || 'Failed to restore version');
+      logFailure(FUNCTION_NAME, 'Failed to restore version', new Error(result.error || 'Failed to restore version'), { versionId });
+      logFunction(FUNCTION_NAME, 'END', { success: false });
+      return {
+        success: false,
+        error: result.error || 'Failed to restore version'
+      };
     }
 
     logSuccess(FUNCTION_NAME, `Successfully restored version: ${versionId}`, {
@@ -312,7 +337,17 @@ export async function pruneVersionsNow(req) {
     });
 
     if (!result.success) {
-      throw new Error(result.error || 'Failed to prune versions');
+      logFailure(FUNCTION_NAME, 'Failed to prune versions', new Error(result.error || 'Failed to prune versions'));
+      logFunction(FUNCTION_NAME, 'END', { success: false });
+      return {
+        success: false,
+        error: result.error || 'Failed to prune versions',
+        prunedCount: 0,
+        skippedCount: 0,
+        errors: [],
+        pagesProcessed: 0,
+        hasMorePages: false
+      };
     }
 
     logSuccess(FUNCTION_NAME, `Pruned ${result.prunedCount} expired version(s)`, {
@@ -367,7 +402,12 @@ export async function getVersioningStatsResolver() {
     const result = await getVersioningStats(storage);
 
     if (!result.success) {
-      throw new Error(result.error || 'Failed to get versioning stats');
+      logFailure(FUNCTION_NAME, 'Failed to get versioning stats', new Error(result.error || 'Failed to get versioning stats'));
+      logFunction(FUNCTION_NAME, 'END', { success: false });
+      return {
+        success: false,
+        error: result.error || 'Failed to get versioning stats'
+      };
     }
 
     logSuccess(FUNCTION_NAME, 'Retrieved versioning stats', result.stats);

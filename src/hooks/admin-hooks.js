@@ -111,10 +111,10 @@ export const useCategoriesQuery = () => {
     queryKey: ['categories'],
     queryFn: async () => {
       const result = await invoke('getCategories');
-      if (result.success && result.categories) {
-        return result.categories;
+      if (result.success && result.data && result.data.categories) {
+        return result.data.categories;
       }
-      // Default categories if none stored
+      // Default categories if none stored or on error
       return ['General', 'Pricing', 'Technical', 'Legal', 'Marketing'];
     },
     staleTime: 1000 * 60 * 10, // 10 minutes - categories change rarely

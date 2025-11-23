@@ -835,6 +835,10 @@ export async function getCachedContent(req) {
 
 /**
  * Get saved categories
+ * 
+ * Standard return format:
+ * - Success: { success: true, data: { categories: [...] } }
+ * - Error: { success: false, error: "error message" }
  */
 export async function getCategories() {
   try {
@@ -846,14 +850,15 @@ export async function getCategories() {
 
     return {
       success: true,
-      categories
+      data: {
+        categories
+      }
     };
   } catch (error) {
     logFailure('getCategories', 'Error getting categories', error);
     return {
       success: false,
-      error: error.message,
-      categories: ['General', 'Pricing', 'Technical', 'Legal', 'Marketing']
+      error: error.message
     };
   }
 }

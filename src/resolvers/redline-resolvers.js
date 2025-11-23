@@ -232,7 +232,12 @@ export async function getRedlineQueue(req) {
 
   } catch (error) {
     logFailure('getRedlineQueue', 'Error loading redline queue', error);
-    throw new Error(`Failed to load redline queue: ${error.message}`);
+    return {
+      success: false,
+      error: `Failed to load redline queue: ${error.message}`,
+      embeds: [],
+      groups: null
+    };
   }
 }
 
@@ -622,7 +627,19 @@ export async function getConfluenceUser(req) {
     );
 
     if (!response.ok) {
-      throw new Error(`Confluence API returned ${response.status}: ${response.statusText}`);
+      const error = new Error(`Confluence API returned ${response.status}: ${response.statusText}`);
+      logFailure('getConfluenceUser', 'Confluence API error', error, { accountId, status: response.status });
+      // Return fallback data instead of throwing
+      return {
+        accountId,
+        displayName: 'Unknown User',
+        publicName: 'Unknown User',
+        profilePicture: {
+          path: null,
+          isDefault: true
+        },
+        error: error.message
+      };
     }
 
     const userData = await response.json();
@@ -711,7 +728,15 @@ export async function getRedlineStats() {
 
   } catch (error) {
     logFailure('getRedlineStats', 'Error getting redline stats', error);
-    throw new Error(`Failed to get redline stats: ${error.message}`);
+    return {
+      success: false,
+      error: `Failed to get redline stats: ${error.message}`,
+      reviewable: 0,
+      preApproved: 0,
+      needsRevision: 0,
+      approved: 0,
+      total: 0
+    };
   }
 }
 
@@ -726,18 +751,31 @@ export async function getRedlineStats() {
  * @returns {Object} { success: true, commentId, location }
  */
 export async function postRedlineComment(req) {
-  const { localId, pageId, commentText } = req.payload;
+  const { localId, pageId, commentText } = req.payload || {};
 
-  if (!localId) {
-    throw new Error('localId is required');
+  // Input validation
+  if (!localId || typeof localId !== 'string' || localId.trim() === '') {
+    logFailure('postRedlineComment', 'Validation failed: localId is required and must be a non-empty string', new Error('Invalid localId'));
+    return {
+      success: false,
+      error: 'localId is required and must be a non-empty string'
+    };
   }
 
-  if (!pageId) {
-    throw new Error('pageId is required');
+  if (!pageId || typeof pageId !== 'string' || pageId.trim() === '') {
+    logFailure('postRedlineComment', 'Validation failed: pageId is required and must be a non-empty string', new Error('Invalid pageId'));
+    return {
+      success: false,
+      error: 'pageId is required and must be a non-empty string'
+    };
   }
 
-  if (!commentText || !commentText.trim()) {
-    throw new Error('commentText is required');
+  if (!commentText || typeof commentText !== 'string' || !commentText.trim()) {
+    logFailure('postRedlineComment', 'Validation failed: commentText is required and must be a non-empty string', new Error('Invalid commentText'));
+    return {
+      success: false,
+      error: 'commentText is required and must be a non-empty string'
+    };
   }
 
   try {
@@ -749,7 +787,12 @@ export async function postRedlineComment(req) {
     );
 
     if (!pageResponse.ok) {
-      throw new Error(`Failed to fetch page: ${pageResponse.status} ${pageResponse.statusText}`);
+      const error = new Error(`Failed to fetch page: ${pageResponse.status} ${pageResponse.statusText}`);
+      logFailure('postRedlineComment', 'Failed to fetch page', error, { pageId, status: pageResponse.status });
+      return {
+        success: false,
+        error: error.message
+      };
     }
 
     const pageData = await pageResponse.json();
@@ -758,14 +801,22 @@ export async function postRedlineComment(req) {
     const adfString = pageData.body?.atlas_doc_format?.value;
 
     if (!adfString) {
-      throw new Error('Page ADF content not found in API response');
+      logFailure('postRedlineComment', 'Page ADF content not found in API response', new Error('Missing ADF content'), { pageId });
+      return {
+        success: false,
+        error: 'Page ADF content not found in API response'
+      };
     }
 
     let adfContent;
     try {
       adfContent = JSON.parse(adfString);
     } catch (parseError) {
-      throw new Error(`Failed to parse ADF content: ${parseError.message}`);
+      logFailure('postRedlineComment', 'Failed to parse ADF content', parseError, { pageId });
+      return {
+        success: false,
+        error: `Failed to parse ADF content: ${parseError.message}`
+      };
     }
 
     logPhase('postRedlineComment', 'Fetched and parsed page ADF', { pageTitle: pageData.title, nodeCount: adfContent?.content?.length || 0 });
@@ -774,7 +825,11 @@ export async function postRedlineComment(req) {
     const { textSelection, matchCount, matchIndex } = findTextNearEmbed(adfContent, localId);
 
     if (!textSelection) {
-      throw new Error(`Could not find suitable text near Embed ${localId} for inline comment`);
+      logFailure('postRedlineComment', 'Could not find suitable text near Embed', new Error('No text selection found'), { localId, pageId });
+      return {
+        success: false,
+        error: `Could not find suitable text near Embed ${localId} for inline comment`
+      };
     }
 
     logPhase('postRedlineComment', 'Found text selection for inline comment', { textSelection, matchIndex: matchIndex + 1, matchCount });
@@ -807,7 +862,12 @@ export async function postRedlineComment(req) {
 
     if (!commentResponse.ok) {
       const errorText = await commentResponse.text();
-      throw new Error(`Failed to post comment: ${commentResponse.status} ${commentResponse.statusText} - ${errorText}`);
+      const error = new Error(`Failed to post comment: ${commentResponse.status} ${commentResponse.statusText} - ${errorText}`);
+      logFailure('postRedlineComment', 'Failed to post comment', error, { pageId, localId, status: commentResponse.status });
+      return {
+        success: false,
+        error: error.message
+      };
     }
 
     const commentData = await commentResponse.json();
@@ -823,7 +883,10 @@ export async function postRedlineComment(req) {
 
   } catch (error) {
     logFailure('postRedlineComment', 'Error posting inline comment', error, { pageId, localId });
-    throw new Error(`Failed to post inline comment: ${error.message}`);
+    return {
+      success: false,
+      error: `Failed to post inline comment: ${error.message}`
+    };
   }
 }
 
