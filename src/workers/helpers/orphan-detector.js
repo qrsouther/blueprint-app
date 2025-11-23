@@ -28,43 +28,63 @@ const DEFAULT_DRY_RUN_MODE = true;
  * @param {boolean} dryRun - If true, only log what would be deleted
  */
 export async function softDeleteMacroVars(localId, reason, metadata = {}, dryRun = DEFAULT_DRY_RUN_MODE) {
-  const data = await storage.get(`macro-vars:${localId}`);
-
-  if (data) {
-    // Phase 3: Create version snapshot before soft delete (v7.17.0)
-    const versionResult = await saveVersion(
-      storage,
-      `macro-vars:${localId}`,
-      data,
-      {
-        changeType: 'DELETE',
-        changedBy: 'checkAllIncludes',
-        deletionReason: reason,
-        localId: localId
-      }
-    );
-    if (versionResult.success) {
-      logSuccess('softDeleteMacroVars', 'Version snapshot created', { versionId: versionResult.versionId, localId });
-    } else {
-      logWarning('softDeleteMacroVars', 'Version snapshot failed', { error: versionResult.error, localId });
-    }
-
-    // Move to deleted namespace with recovery metadata
-    await storage.set(`macro-vars-deleted:${localId}`, {
-      ...data,
-      deletedAt: new Date().toISOString(),
-      deletedBy: 'checkAllIncludes',
-      deletionReason: reason,
-      canRecover: true,
-      ...metadata
-    });
-
-    logSuccess('softDeleteMacroVars', 'Moved to deleted namespace', { localId, reason });
+  // Validate input
+  if (!localId || typeof localId !== 'string' || localId.trim() === '') {
+    logWarning('softDeleteMacroVars', 'Invalid localId - skipping', { localId, reason });
+    return;
   }
 
-  // Remove from active namespace
-  if (!dryRun) {
-    await storage.delete(`macro-vars:${localId}`);
+  try {
+    const data = await storage.get(`macro-vars:${localId}`);
+
+    if (data) {
+      // Phase 3: Create version snapshot before soft delete (v7.17.0)
+      const versionResult = await saveVersion(
+        storage,
+        `macro-vars:${localId}`,
+        data,
+        {
+          changeType: 'DELETE',
+          changedBy: 'checkAllIncludes',
+          deletionReason: reason,
+          localId: localId
+        }
+      );
+      if (versionResult.success) {
+        logSuccess('softDeleteMacroVars', 'Version snapshot created', { versionId: versionResult.versionId, localId });
+      } else {
+        logWarning('softDeleteMacroVars', 'Version snapshot failed', { error: versionResult.error, localId });
+      }
+
+      // Move to deleted namespace with recovery metadata
+      try {
+        await storage.set(`macro-vars-deleted:${localId}`, {
+          ...data,
+          deletedAt: new Date().toISOString(),
+          deletedBy: 'checkAllIncludes',
+          deletionReason: reason,
+          canRecover: true,
+          ...metadata
+        });
+        logSuccess('softDeleteMacroVars', 'Moved to deleted namespace', { localId, reason });
+      } catch (setError) {
+        logWarning('softDeleteMacroVars', 'Failed to move to deleted namespace', { error: setError.message, localId, reason });
+        // Continue - try to delete from active namespace anyway
+      }
+    }
+
+    // Remove from active namespace
+    if (!dryRun) {
+      try {
+        await storage.delete(`macro-vars:${localId}`);
+      } catch (deleteError) {
+        logWarning('softDeleteMacroVars', 'Failed to delete from active namespace', { error: deleteError.message, localId });
+        // Log but don't throw - deletion may have partially succeeded
+      }
+    }
+  } catch (error) {
+    logWarning('softDeleteMacroVars', 'Error during soft delete operation', { error: error.message, localId, reason });
+    // Don't throw - allow operation to continue
   }
 }
 
@@ -77,8 +97,19 @@ export async function softDeleteMacroVars(localId, reason, metadata = {}, dryRun
  * @param {boolean} dryRun - If true, only log what would be deleted
  */
 export async function softDeleteMacroCache(localId, reason, dryRun = DEFAULT_DRY_RUN_MODE) {
+  // Validate input
+  if (!localId || typeof localId !== 'string' || localId.trim() === '') {
+    logWarning('softDeleteMacroCache', 'Invalid localId - skipping', { localId, reason });
+    return;
+  }
+
   if (!dryRun) {
-    await storage.delete(`macro-cache:${localId}`);
+    try {
+      await storage.delete(`macro-cache:${localId}`);
+    } catch (error) {
+      logWarning('softDeleteMacroCache', 'Failed to delete cache', { error: error.message, localId, reason });
+      // Don't throw - cache deletion failure is not critical
+    }
   }
 }
 
@@ -91,29 +122,51 @@ export async function softDeleteMacroCache(localId, reason, dryRun = DEFAULT_DRY
  * @returns {Promise<boolean>} True if removed from usage tracking
  */
 export async function removeFromUsageTracking(localId, excerptId) {
-  if (!excerptId) {
+  // Validate inputs to prevent storage errors
+  if (!excerptId || typeof excerptId !== 'string' || excerptId.trim() === '') {
+    logWarning('removeFromUsageTracking', 'Invalid excerptId - skipping', { localId, excerptId });
     return false;
   }
 
-  const usageKey = `usage:${excerptId}`;
-  const usageData = await storage.get(usageKey);
-
-  if (usageData) {
-    usageData.references = usageData.references.filter(
-      r => r.localId !== localId
-    );
-
-    if (usageData.references.length === 0) {
-      // No more references, delete the usage key entirely
-      await storage.delete(usageKey);
-    } else {
-      // Still has references, update
-      await storage.set(usageKey, usageData);
-    }
-    return true;
+  if (!localId || typeof localId !== 'string' || localId.trim() === '') {
+    logWarning('removeFromUsageTracking', 'Invalid localId - skipping', { localId, excerptId });
+    return false;
   }
 
-  return false;
+  try {
+    const usageKey = `usage:${excerptId}`;
+    const usageData = await storage.get(usageKey);
+
+    if (usageData) {
+      usageData.references = usageData.references.filter(
+        r => r.localId !== localId
+      );
+
+      if (usageData.references.length === 0) {
+        // No more references, delete the usage key entirely
+        try {
+          await storage.delete(usageKey);
+        } catch (deleteError) {
+          logWarning('removeFromUsageTracking', 'Failed to delete usage key', { error: deleteError.message, usageKey });
+          // Continue - not critical if deletion fails
+        }
+      } else {
+        // Still has references, update
+        try {
+          await storage.set(usageKey, usageData);
+        } catch (setError) {
+          logWarning('removeFromUsageTracking', 'Failed to update usage key', { error: setError.message, usageKey });
+          return false; // Return false if update fails
+        }
+      }
+      return true;
+    }
+
+    return false;
+  } catch (error) {
+    logWarning('removeFromUsageTracking', 'Error removing from usage tracking', { error: error.message, localId, excerptId });
+    return false;
+  }
 }
 
 /**

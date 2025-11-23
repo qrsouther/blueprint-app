@@ -11,8 +11,10 @@ import api, { route } from '@forge/api';
  * Fetch page content from Confluence API with retry logic for transient failures
  * 
  * CRITICAL: Distinguishes between error types to prevent false positives:
- * - HTTP 404 = page deleted (legitimate orphan)
+ * - HTTP 404 = Could be page deleted OR permission issue (app credentials may not have access)
+ *   NOTE: We do NOT mark as orphaned on 404 because we can't distinguish between these cases
  * - HTTP 403 = permission denied (may be temporary, don't mark orphaned)
+ * - HTTP 401 = unauthorized (may be temporary, don't mark orphaned)
  * - HTTP 500/network error = transient failure (retry, don't mark orphaned)
  * 
  * @param {string} pageId - Confluence page ID
@@ -121,6 +123,15 @@ export async function fetchPageContent(pageId, maxRetries = 3, retryDelay = 1000
  * @returns {boolean} True if macro exists in ADF
  */
 export function checkMacroExistsInADF(node, targetLocalId, depth = 0, visited = new Set()) {
+  // CRITICAL: Validate targetLocalId to prevent false positives
+  // If localId is invalid, we should return false (macro not found) but this should
+  // be caught by validation in the calling code before reaching here
+  if (!targetLocalId || typeof targetLocalId !== 'string' || targetLocalId.trim() === '') {
+    // Invalid localId - can't search for it, return false
+    // NOTE: This should be validated in calling code, but defensive check here prevents crashes
+    return false;
+  }
+
   // Safety: Maximum depth limit to prevent stack overflow
   const MAX_DEPTH = 100;
   if (depth > MAX_DEPTH) {
