@@ -138,7 +138,7 @@ The current README.md is bloated with irrelevant content, outdated information, 
 **Status:** Approved - Phase 1 Ready to Start
 **Priority:** CRITICAL (prevents data loss)
 **Estimated Effort:** XL (3-4 weeks across 4 phases)
-**Detailed Plan:** See [DATA-SAFETY-VERSIONING-PROPOSAL.md](./DATA-SAFETY-VERSIONING-PROPOSAL.md)
+**Detailed Plan:** See [DATA-SAFETY-VERSIONING-PROPOSAL.md](./docs/planning/DATA-SAFETY-VERSIONING-PROPOSAL.md)
 
 **Problem:**
 Investigation revealed that both "Check All Sources" and "Check All Embeds" functions modify data in potentially dangerous ways:
@@ -487,7 +487,7 @@ Replace with professional diff that:
 Disabled toggle content is visible in BOTH sides of diff (gray italic text) so users see changes even in content they're not currently using. Solves the "Update Available but looks identical" problem.
 
 **Implementation Plan:**
-See `ENHANCED_DIFF_VIEW_TODO.md` for comprehensive 8-phase implementation plan including:
+See `docs/planning/ENHANCED_DIFF_VIEW_TODO.md` for comprehensive 8-phase implementation plan including:
 - Phase 1: Add `syncedContent` to storage (store old Source ADF, not just hash)
 - Phase 2: Install react-diff-viewer dependency
 - Phase 3: Create ghost mode rendering functions (show disabled toggles in gray)
@@ -510,7 +510,7 @@ See `ENHANCED_DIFF_VIEW_TODO.md` for comprehensive 8-phase implementation plan i
 - ✅ Performance <500ms render time
 
 **Next Steps:**
-1. Review implementation plan in ENHANCED_DIFF_VIEW_TODO.md
+1. Review implementation plan in docs/planning/ENHANCED_DIFF_VIEW_TODO.md
 2. Begin Phase 1 (storage schema update)
 3. Install react-diff-viewer
 4. Implement ghost mode rendering functions
@@ -534,7 +534,7 @@ Replace manual state management with industry-standard React Hook Form + Zod acr
 - Consistent validation patterns
 
 **Implementation Plan:**
-See `REACT_HOOK_FORM_ZOD_TODO.md` for comprehensive 9-phase implementation plan including:
+See `docs/implementation/REACT_HOOK_FORM_ZOD_TODO.md` for comprehensive 9-phase implementation plan including:
 - Phase 1: Setup & dependencies (install packages)
 - Phase 2: Create shared Zod schemas (form-schemas.js)
 - Phase 3: Refactor Embed config form (embed-display.jsx)
@@ -560,7 +560,7 @@ See `REACT_HOOK_FORM_ZOD_TODO.md` for comprehensive 9-phase implementation plan 
 - ✅ Easier to add new fields
 
 **Next Steps:**
-1. Review implementation plan in REACT_HOOK_FORM_ZOD_TODO.md
+1. Review implementation plan in docs/implementation/REACT_HOOK_FORM_ZOD_TODO.md
 2. Complete Enhanced Diff View first (smaller, user-facing)
 3. Begin Phase 1 when ready for refactoring sprint
 
@@ -1040,7 +1040,7 @@ After embed-display.jsx refactoring is complete and stable.
 **Status:** Planned - Separate from code review improvements
 **Priority:** Medium (code clarity and maintainability)
 **Estimated Effort:** Large (24-36 hours, requires storage migration)
-**Reference:** See `TERMINOLOGY_REFACTORING_TODO.md` for complete plan
+**Reference:** See `docs/implementation/TERMINOLOGY_REFACTORING_TODO.md` for complete plan
 
 **Problem:**
 Codebase uses inconsistent terminology - legacy terms "Excerpts" and "Includes" in code vs. modern terms "Sources" and "Embeds" in documentation. This creates cognitive dissonance and makes codebase harder to understand.
@@ -1058,7 +1058,7 @@ Codebase uses inconsistent terminology - legacy terms "Excerpts" and "Includes" 
 - Requires careful planning and testing
 - Consider keeping old names as aliases during transition
 
-**See:** `TERMINOLOGY_REFACTORING_TODO.md` for detailed implementation plan, migration strategy, and risk assessment.
+**See:** `docs/implementation/TERMINOLOGY_REFACTORING_TODO.md` for detailed implementation plan, migration strategy, and risk assessment.
 
 ### "Nuclear Option" - Single Blueprint Renderer Macro
 **Status:** Future consideration - Performance escape hatch

@@ -1,6 +1,6 @@
 # Blueprint App - Terminology Reference
 
-**Purpose:** This document maps user-facing terminology (new branding) to internal code terminology (legacy naming) to ensure clear communication during development.
+**Purpose:** This document provides a reference for the terminology used in the Blueprint App, mapping user-facing terms to internal code terminology and documenting key concepts.
 
 **Status:** Display names rebranded, internal code uses legacy names (intentional backward compatibility)
 
@@ -11,19 +11,19 @@
 | User-Facing Term | Internal Code Term | Description |
 |------------------|-------------------|-------------|
 | **Blueprint App** | excerpt/include (internal code) | Overall product/app name |
-| **Blueprint Standard** | Excerpt | A reusable content block with variables/toggles |
-| **Embed** | Include | An instance that displays a Blueprint Standard on a page |
-| **Source** | Source | The macro where Blueprint Standards are created/edited |
-| **Blueprint App Admin** | admin-page | Admin interface for managing Blueprint Standards |
+| **Blueprint App - Source** | Excerpt | A reusable content block with variables/toggles |
+| **Blueprint App - Embed** | Include | An instance that displays a Source on a page |
+| **Source** | Source | The macro where Sources are created/edited |
+| **Blueprint App Admin** | admin-page | Admin interface for managing Sources and Embeds |
 
 ---
 
 ## Macro Names
 
 ### User-Facing (Display Titles)
-- **Blueprint Standard - Source** - Create/edit Blueprint Standards
-- **Blueprint Standard - Embed** - Embed a Blueprint Standard on any page
-- **Blueprint Standards Admin** - Admin interface
+- **Blueprint App - Source** - Create/edit Sources
+- **Blueprint App - Embed** - Embed a Source on any page
+- **Blueprint App Admin** - Admin interface
 
 ### Internal (Module Keys - DO NOT CHANGE)
 - `blueprint-standard-source` - Module key for Source macro
@@ -34,35 +34,19 @@
 
 ---
 
-## File Mapping
-
-### When you say... I'll look in...
-
-| User Request | File Location | Notes |
-|--------------|---------------|-------|
-| "Update the Embed macro display" | `src/include-display.jsx` | Display/rendering component for Embeds |
-| "Modify Embed configuration UI" | `src/include-config.jsx` | Configuration dialog for Embeds |
-| "Change Source macro display" | `src/source-display.jsx` | Display component for Sources |
-| "Update Source configuration" | `src/source-config.jsx` | Configuration dialog for Sources |
-| "Modify Admin page" | `src/admin-page.jsx` | Admin interface |
-| "Update Blueprint Standard resolvers" | `src/resolvers/excerpt-resolvers.js` | Backend CRUD operations |
-| "Modify Embed storage" | `src/resolvers/include-resolvers.js` | Backend config storage |
-
----
-
 ## Resolver Functions (Backend API)
 
-### Blueprint Standard Operations (Excerpt Resolvers)
+### Source Operations (Excerpt Resolvers)
 
 | User-Facing Action | Resolver Function | Purpose |
 |-------------------|-------------------|---------|
-| Create/Edit Blueprint Standard | `saveExcerpt(req)` | Create or update a Blueprint Standard |
-| Update Blueprint Standard content | `updateExcerptContent(req)` | Auto-update content when Source edited |
-| Get Blueprint Standard | `getExcerpt(req)` | Fetch Blueprint Standard data |
-| List all Blueprint Standards | `getAllExcerpts(req)` | Get complete list with metadata |
-| Delete Blueprint Standard | `deleteExcerpt(req)` | Remove Blueprint Standard |
-| Update Blueprint Standard metadata | `updateExcerptMetadata(req)` | Edit name/category |
-| Bulk update Blueprint Standards | `massUpdateExcerpts(req)` | Mass category changes |
+| Create/Edit Source | `saveExcerpt(req)` | Create or update a Source |
+| Update Source content | `updateExcerptContent(req)` | Auto-update content when Source edited |
+| Get Source | `getExcerpt(req)` | Fetch Source data |
+| List all Sources | `getAllExcerpts(req)` | Get complete list with metadata |
+| Delete Source | `deleteExcerpt(req)` | Remove Source |
+| Update Source metadata | `updateExcerptMetadata(req)` | Edit name/category |
+| Bulk update Sources | `massUpdateExcerpts(req)` | Mass category changes |
 
 ### Embed Operations (Include Resolvers)
 
@@ -75,9 +59,9 @@
 
 | User-Facing Action | Resolver Function | Purpose |
 |-------------------|-------------------|---------|
-| Track where Blueprint Standard is used | `trackExcerptUsage(req)` | Register Embed instance usage |
+| Track where Source is used | `trackExcerptUsage(req)` | Register Embed instance usage |
 | Remove usage tracking | `removeExcerptUsage(req)` | Cleanup when Embed deleted |
-| Get usage report | `getExcerptUsage(req)` | List all pages using a Blueprint Standard |
+| Get usage report | `getExcerptUsage(req)` | List all pages using a Source |
 | Push updates to all Embeds | `pushUpdatesToAll(req)` | Force-refresh all instances |
 | Push updates to specific page | `pushUpdatesToPage(req)` | Force-refresh page's instances |
 
@@ -85,12 +69,12 @@
 
 ## Storage Keys
 
-### Blueprint Standard Data
+### Source Data
 
 | What It Stores | Storage Key Pattern | Example |
 |----------------|---------------------|---------|
-| Blueprint Standard content | `excerpt:{id}` | `excerpt:5e7f419c-e862-478a-a368-8ac9a78e4640` |
-| Blueprint Standard index | `excerpt-index` | Single key with array of all IDs |
+| Source content | `excerpt:{id}` | `excerpt:5e7f419c-e862-478a-a368-8ac9a78e4640` |
+| Source index | `excerpt-index` | Single key with array of all IDs |
 | Usage tracking | `excerpt-usage:{id}` | `excerpt-usage:5e7f419c-e862-478a-a368-8ac9a78e4640` |
 
 ### Embed Configuration Data
@@ -99,7 +83,7 @@
 |----------------|---------------------|---------|
 | Embed instance config | `macro-vars:{localId}` | `macro-vars:abc-123-def` |
 
-**Storage Schema - Blueprint Standard (excerpt:{id}):**
+**Storage Schema - Source (excerpt:{id}):**
 ```javascript
 {
   id: "5e7f419c-e862-478a-a368-8ac9a78e4640",
@@ -108,7 +92,7 @@
   content: { /* ADF document */ },
   contentHash: "139115ae78ee9ba42ce6b49c591991c15e6469afaee27ae732be47ffa92d6ff8",
   variables: [
-    { name: "client", description: "Client name", example: "Acme Corp", multiline: false }
+    { name: "client", description: "Client name", example: "Acme Corp" }
   ],
   toggles: [
     { name: "premium-features", description: "Show premium tier info" }
@@ -151,8 +135,8 @@
 **Purpose:** Detect actual content changes (not just page views/republishing)
 
 **How it works:**
-1. When Blueprint Standard is saved → `contentHash` calculated via SHA256
-2. When Embed syncs → stores `syncedContentHash` matching current Blueprint Standard
+1. When Source is saved → `contentHash` calculated via SHA256
+2. When Embed syncs → stores `syncedContentHash` matching current Source
 3. When checking staleness → compare `contentHash` vs `syncedContentHash`
 4. Hash includes: content, name, category, variables, toggles
 5. Hash excludes: id, timestamps, source metadata
@@ -161,16 +145,16 @@
 - `src/utils/hash-utils.js` - Core hashing utilities
 - `src/resolvers/excerpt-resolvers.js:145-148` - Skip save if hash unchanged
 - `src/resolvers/include-resolvers.js:33` - Store syncedContentHash
-- `src/include-display.jsx:1147-1205` - Hash-based staleness detection
+- `src/EmbedContainer.jsx` - Hash-based staleness detection
 
 ---
 
 ## Variable System
 
-**Syntax:** `{{variable-name}}` in Blueprint Standard content
+**Syntax:** `{{variable-name}}` in Source content
 
 **How it works:**
-1. Blueprint Standard content includes variables like `{{client}}`
+1. Source content includes variables like `{{client}}`
 2. Embed configuration provides values: `client: "Acme Corp"`
 3. Rendered content substitutes: "Acme Corp is a valued customer"
 
@@ -178,16 +162,15 @@
 - `name` - Variable identifier
 - `description` - User-facing help text
 - `example` - Sample value
-- `multiline` - Boolean for textarea vs text input
 
 ---
 
 ## Toggle System
 
-**Syntax:** `{{toggle:name}}` surrounding content in Blueprint Standard
+**Syntax:** `{{toggle:name}}` surrounding content in Source
 
 **How it works:**
-1. Blueprint Standard includes toggleable sections
+1. Source includes toggleable sections
 2. Embed configuration enables/disables toggles
 3. Disabled toggle content is hidden in rendered output
 4. Toggle state stored per-Embed instance
@@ -222,42 +205,14 @@
 
 ---
 
-## Communication Examples
-
-### Scenario 1: Adding a Feature to Embeds
-**User says:** "Add a 'Copy to Clipboard' button to the Embed macro"
-
-**I understand:**
-- Target file: `src/include-display.jsx` (Embed = Include)
-- Add button to Embed display component
-- Implement copy functionality
-
-### Scenario 2: Modifying Blueprint Standard Behavior
-**User says:** "When saving a Blueprint Standard, also log the contentHash"
-
-**I understand:**
-- Target file: `src/resolvers/excerpt-resolvers.js`
-- Modify: `saveExcerpt()` function
-- Add console.log for `contentHash` field
-
-### Scenario 3: Admin Page Enhancement
-**User says:** "Add a Redlining UI to the Blueprint Standards Admin page"
-
-**I understand:**
-- Target file: `src/admin-page.jsx`
-- Create new UI component for redlining workflow
-- Will need to query Embed instances via `macro-vars:*` storage keys
-- Use existing resolvers like `getVariableValues()`
-
----
-
 ## Future Phases
 
-### Phase 1: Display-Only Rename ✅ (v7.13.0 - In Progress)
-- Update manifest.yml display titles
-- Update all UI strings in components
-- Update README documentation
-- **Keep unchanged:** module keys, storage keys, resolver names
+### Phase 1: Display-Only Rename ✅ (v8.0.0 - Complete)
+- ✅ Update manifest.yml display titles
+- ✅ Update all UI strings in components
+- ✅ Update README documentation
+- ✅ Simplified nomenclature: "Blueprint App - Source", "Blueprint App - Embed", "Blueprint App Admin"
+- **Keep unchanged:** module keys, storage keys, resolver names (backward compatibility)
 
 ### Phase 2: Internal Code Gradual Rename (Future)
 - Rename variables and comments during refactoring work
@@ -265,27 +220,11 @@
 - **Keep unchanged:** module keys, storage keys (backward compatibility)
 
 ### Phase 3: File Name Alignment (Optional Future)
-- Rename `include-display.jsx` → `embed-display.jsx`
-- Rename `excerpt-resolvers.js` → `standard-resolvers.js`
+- ✅ Rename `include-display.jsx` → `EmbedContainer.jsx` (Complete)
+- Rename `excerpt-resolvers.js` → `source-resolvers.js` (Optional)
 - Only after all other work is stable
 
 ---
 
-## Quick Reference Card
-
-```
-USER SAYS              →  CODE TERM         →  FILE/FUNCTION
-─────────────────────────────────────────────────────────────
-"Blueprint Standard"   →  excerpt           →  excerpt-resolvers.js
-"Embed"                →  include           →  include-display.jsx
-"Source macro"         →  source            →  source-display.jsx
-"Admin page"           →  admin             →  admin-page.jsx
-"Save Embed config"    →  saveVariableValues  →  include-resolvers.js
-"Get Blueprint data"   →  getExcerpt        →  excerpt-resolvers.js
-"Check if stale"       →  hash comparison   →  include-display.jsx:1170
-```
-
----
-
-**Last Updated:** 2025-11-04
-**Version:** 7.12.0 (pre-rename) → 7.13.0 (post-rename)
+**Last Updated:** 2025-01-XX
+**Version:** 8.0.0+ (simplified nomenclature)

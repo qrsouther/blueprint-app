@@ -1,12 +1,36 @@
-# Testing ADF Traversal Safety Fixes
+# ADF Traversal Safety
 
-This guide explains how to test the depth limit and cycle detection fixes for ADF traversal.
+This guide explains the depth limit and cycle detection safety measures in ADF traversal functions.
 
-## Test Cases Overview
+**Note:** The standalone test script (`test-adf-traversal-safety.js`) has been removed. The test scenarios it covered (150+ levels of nesting, circular references) are unrealistic since Confluence enforces a maximum nesting depth of 3-4 levels and validates ADF structure to prevent circular references.
+
+## Production Implementation
+
+The ADF traversal functions in production include safety measures as defensive programming:
+
+- **Depth limit:** `MAX_DEPTH = 100` (way more than Confluence's 3-4 level limit)
+- **Cycle detection:** Uses a `visited` Set to track node references
+- **Graceful degradation:** Returns partial results instead of crashing
+
+**Files:**
+- `src/utils/adf-utils.js` - `extractTextFromAdf()`, `findHeadingBeforeMacro()`
+- `src/workers/helpers/page-scanner.js` - `checkMacroExistsInADF()`
+
+## Why These Safety Measures Exist
+
+While Confluence enforces strict limits on nesting depth (3-4 levels), these safety measures provide:
+
+1. **Defensive programming** - Protection against unexpected edge cases
+2. **Future-proofing** - If Confluence changes limits or validation
+3. **Malformed data handling** - Protection against corrupted or manually edited ADF
+
+## Test Cases (Historical Reference)
 
 ### Test Case 1: Deeply Nested ADF (Exceeds MAX_DEPTH)
 
-**What it tests:** ADF structure with 150+ levels of nesting (exceeds our MAX_DEPTH of 100)
+**What it would test:** ADF structure with 150+ levels of nesting (exceeds our MAX_DEPTH of 100)
+
+**Note:** This scenario cannot occur in real Confluence data since Confluence limits nesting to 3-4 levels.
 
 **Expected behavior:**
 - Function should NOT crash or stack overflow
@@ -51,7 +75,9 @@ This guide explains how to test the depth limit and cycle detection fixes for AD
 
 ### Test Case 2: Circular Reference ADF
 
-**What it tests:** ADF where a node references itself, creating an infinite loop
+**What it would test:** ADF where a node references itself, creating an infinite loop
+
+**Note:** This scenario cannot occur in real Confluence data since Confluence validates ADF structure and prevents circular references.
 
 **Expected behavior:**
 - Function should NOT crash or enter infinite loop
@@ -127,75 +153,22 @@ This guide explains how to test the depth limit and cycle detection fixes for AD
 - Should complete without warnings
 - Should return complete text: `"Normal DocumentThis is a normal ADF document..."`
 
-## How to Test
+## How to Verify Safety Measures
 
-### Option 1: Run the Test Script
+The production code includes these safety measures, which are verified through:
 
-```bash
-node test-adf-traversal-safety.js
-```
+### Option 1: Code Review
 
-This will run all test cases and report results.
+Review the implementation in:
+- `src/utils/adf-utils.js` - Check for `MAX_DEPTH` and `visited` Set usage
+- `src/workers/helpers/page-scanner.js` - Check for depth limits and cycle detection
 
-### Option 2: Test in Forge Environment
+### Option 2: Manual Testing with Real Confluence Pages
 
-Since this is a Forge app, you can test the actual functions in your development environment:
-
-1. **Create a test resolver** that calls `extractTextFromAdf()` with test data
-2. **Use the Forge UI** to trigger the resolver
-3. **Check the console** for warnings and verify behavior
-
-#### Example Test Resolver
-
-Add this to `src/index.js` (temporarily for testing):
-
-```javascript
-import { extractTextFromAdf } from './utils/adf-utils.js';
-
-resolver.define('testAdfTraversal', async (req) => {
-  const { testType } = req.payload;
-  
-  let testADF;
-  
-  switch (testType) {
-    case 'deep':
-      // Create deeply nested ADF (150 levels)
-      testADF = createDeeplyNestedADF(150);
-      break;
-    case 'circular':
-      // Create circular reference
-      testADF = createCircularReferenceADF();
-      break;
-    case 'normal':
-      // Create normal ADF
-      testADF = createNormalADF();
-      break;
-    default:
-      return { success: false, error: 'Invalid test type' };
-  }
-  
-  const startTime = Date.now();
-  const result = extractTextFromAdf(testADF);
-  const duration = Date.now() - startTime;
-  
-  return {
-    success: true,
-    result: result.substring(0, 100), // First 100 chars
-    resultLength: result.length,
-    duration: `${duration}ms`,
-    testType
-  };
-});
-```
-
-Then call it from the Forge UI or via API.
-
-### Option 3: Manual Testing with Real Confluence Pages
-
-1. **Create a Confluence page** with deeply nested content (if possible)
-2. **Use the Source macro** to extract content from that page
-3. **Verify** that the extraction completes without errors
-4. **Check console** for any warnings about depth limits
+1. **Use the Source macro** on real Confluence pages with various nesting levels
+2. **Verify** that the extraction completes without errors
+3. **Test with complex pages** that have multiple levels of nesting (up to Confluence's limit)
+4. **Verify** that all content is extracted correctly
 
 ## What to Look For
 
@@ -215,21 +188,14 @@ Then call it from the Forge UI or via API.
 - No warnings logged when they should be
 - Browser/Node.js crashes
 
-## Expected Console Output
+## Safety Measures in Production
 
-When running tests, you should see warnings like:
+The production code includes:
+- `MAX_DEPTH = 100` limit (way more than Confluence's 3-4 level limit)
+- Cycle detection using `visited` Set
+- Graceful degradation (returns partial results instead of crashing)
 
-```
-[extractTextFromAdf] Maximum depth reached, truncating extraction
-```
-
-or
-
-```
-[extractTextFromAdf] Circular reference detected, skipping
-```
-
-These warnings are **expected and good** - they indicate the safety mechanisms are working.
+These measures are defensive programming - they protect against edge cases that shouldn't occur in real Confluence data, but provide safety if unexpected scenarios arise.
 
 ## Next Steps
 

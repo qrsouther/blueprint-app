@@ -26,7 +26,27 @@ import {
  */
 export async function detectVariablesFromContent(req) {
   try {
-    const { content } = req.payload;
+    const { content } = req.payload || {};
+    
+    // Input validation
+    if (content === undefined || content === null) {
+      logFailure('detectVariablesFromContent', 'Validation failed: content is required', new Error('Missing content'));
+      return {
+        success: false,
+        error: 'content is required',
+        variables: []
+      };
+    }
+
+    if (typeof content !== 'object' || Array.isArray(content)) {
+      logFailure('detectVariablesFromContent', 'Validation failed: content must be an ADF object', new Error('Invalid content type'));
+      return {
+        success: false,
+        error: 'content must be an ADF object',
+        variables: []
+      };
+    }
+
     const variables = detectVariables(content);
     return {
       success: true,
@@ -47,7 +67,27 @@ export async function detectVariablesFromContent(req) {
  */
 export async function detectTogglesFromContent(req) {
   try {
-    const { content } = req.payload;
+    const { content } = req.payload || {};
+    
+    // Input validation
+    if (content === undefined || content === null) {
+      logFailure('detectTogglesFromContent', 'Validation failed: content is required', new Error('Missing content'));
+      return {
+        success: false,
+        error: 'content is required',
+        toggles: []
+      };
+    }
+
+    if (typeof content !== 'object' || Array.isArray(content)) {
+      logFailure('detectTogglesFromContent', 'Validation failed: content must be an ADF object', new Error('Invalid content type'));
+      return {
+        success: false,
+        error: 'content must be an ADF object',
+        toggles: []
+      };
+    }
+
     const toggles = detectToggles(content);
     return {
       success: true,
@@ -88,7 +128,17 @@ export async function getExcerpts() {
  */
 export async function getExcerpt(req) {
   try {
-    const excerptId = req.payload.excerptId;
+    const excerptId = req.payload?.excerptId;
+    
+    // Input validation
+    if (!excerptId || typeof excerptId !== 'string' || excerptId.trim() === '') {
+      logFailure('getExcerpt', 'Validation failed: excerptId is required and must be a non-empty string', new Error('Invalid excerptId'));
+      return {
+        success: false,
+        error: 'excerptId is required and must be a non-empty string'
+      };
+    }
+
     const excerpt = await storage.get(`excerpt:${excerptId}`);
 
     return {
@@ -131,7 +181,16 @@ export async function debugExcerpt(req) {
  */
 export async function getPageTitle(req) {
   try {
-    const contentId = req.payload.contentId;
+    const contentId = req.payload?.contentId;
+    
+    // Input validation
+    if (!contentId || typeof contentId !== 'string' || contentId.trim() === '') {
+      logFailure('getPageTitle', 'Validation failed: contentId is required and must be a non-empty string', new Error('Invalid contentId'));
+      return {
+        success: false,
+        error: 'contentId is required and must be a non-empty string'
+      };
+    }
 
     const response = await api.asApp().requestConfluence(route`/wiki/api/v2/pages/${contentId}`);
     const data = await response.json();
@@ -141,7 +200,7 @@ export async function getPageTitle(req) {
       title: data.title
     };
   } catch (error) {
-    logFailure('getPageTitle', 'Error getting page title', error);
+    logFailure('getPageTitle', 'Error getting page title', error, { contentId: req.payload?.contentId });
     return {
       success: false,
       error: error.message
@@ -154,7 +213,17 @@ export async function getPageTitle(req) {
  */
 export async function getVariableValues(req) {
   try {
-    const { localId } = req.payload;
+    const { localId } = req.payload || {};
+    
+    // Input validation
+    if (!localId || typeof localId !== 'string' || localId.trim() === '') {
+      logFailure('getVariableValues', 'Validation failed: localId is required and must be a non-empty string', new Error('Invalid localId'));
+      return {
+        success: false,
+        error: 'localId is required and must be a non-empty string'
+      };
+    }
+
     const key = `macro-vars:${localId}`;
     const data = await storage.get(key) || {};
 
@@ -175,7 +244,7 @@ export async function getVariableValues(req) {
       lastChangedAt: data.lastChangedAt
     };
   } catch (error) {
-    logFailure('getVariableValues', 'Error getting variable values', error);
+    logFailure('getVariableValues', 'Error getting variable values', error, { localId: req.payload?.localId });
     return {
       success: false,
       error: error.message
@@ -212,7 +281,33 @@ export async function getCanonicalLocalId(req) {
  */
 export async function recoverOrphanedData(req) {
   try {
-    const { pageId, excerptId, currentLocalId } = req.payload;
+    const { pageId, excerptId, currentLocalId } = req.payload || {};
+    
+    // Input validation
+    if (!pageId || typeof pageId !== 'string' || pageId.trim() === '') {
+      logFailure('recoverOrphanedData', 'Validation failed: pageId is required and must be a non-empty string', new Error('Invalid pageId'));
+      return {
+        success: false,
+        error: 'pageId is required and must be a non-empty string'
+      };
+    }
+
+    if (!currentLocalId || typeof currentLocalId !== 'string' || currentLocalId.trim() === '') {
+      logFailure('recoverOrphanedData', 'Validation failed: currentLocalId is required and must be a non-empty string', new Error('Invalid currentLocalId'));
+      return {
+        success: false,
+        error: 'currentLocalId is required and must be a non-empty string'
+      };
+    }
+
+    // excerptId is optional (if not provided, will recover most recent entry on page)
+    if (excerptId !== undefined && excerptId !== null && (typeof excerptId !== 'string' || excerptId.trim() === '')) {
+      logFailure('recoverOrphanedData', 'Validation failed: excerptId must be a non-empty string if provided', new Error('Invalid excerptId'));
+      return {
+        success: false,
+        error: 'excerptId must be a non-empty string if provided'
+      };
+    }
     
     logFunction('recoverOrphanedData', 'Starting recovery', { pageId, excerptId, currentLocalId });
 
@@ -395,12 +490,23 @@ function extractActiveLocalIdsFromADF(node, activeLocalIds = new Set()) {
  */
 export async function detectDeactivatedEmbeds(req) {
   try {
-    const { pageId, currentLocalId } = req.payload;
+    const { pageId, currentLocalId } = req.payload || {};
 
-    if (!pageId) {
+    // Input validation
+    if (!pageId || typeof pageId !== 'string' || pageId.trim() === '') {
+      logFailure('detectDeactivatedEmbeds', 'Validation failed: pageId is required and must be a non-empty string', new Error('Invalid pageId'));
       return {
         success: false,
-        error: 'pageId is required'
+        error: 'pageId is required and must be a non-empty string'
+      };
+    }
+
+    // currentLocalId is optional, but if provided should be valid
+    if (currentLocalId !== undefined && currentLocalId !== null && (typeof currentLocalId !== 'string' || currentLocalId.trim() === '')) {
+      logFailure('detectDeactivatedEmbeds', 'Validation failed: currentLocalId must be a non-empty string if provided', new Error('Invalid currentLocalId'));
+      return {
+        success: false,
+        error: 'currentLocalId must be a non-empty string if provided'
       };
     }
 
@@ -544,12 +650,22 @@ export async function detectDeactivatedEmbeds(req) {
  */
 export async function copyDeactivatedEmbedData(req) {
   try {
-    const { sourceLocalId, targetLocalId } = req.payload;
+    const { sourceLocalId, targetLocalId } = req.payload || {};
 
-    if (!sourceLocalId || !targetLocalId) {
+    // Input validation
+    if (!sourceLocalId || typeof sourceLocalId !== 'string' || sourceLocalId.trim() === '') {
+      logFailure('copyDeactivatedEmbedData', 'Validation failed: sourceLocalId is required and must be a non-empty string', new Error('Invalid sourceLocalId'));
       return {
         success: false,
-        error: 'sourceLocalId and targetLocalId are required'
+        error: 'sourceLocalId is required and must be a non-empty string'
+      };
+    }
+
+    if (!targetLocalId || typeof targetLocalId !== 'string' || targetLocalId.trim() === '') {
+      logFailure('copyDeactivatedEmbedData', 'Validation failed: targetLocalId is required and must be a non-empty string', new Error('Invalid targetLocalId'));
+      return {
+        success: false,
+        error: 'targetLocalId is required and must be a non-empty string'
       };
     }
 
@@ -622,7 +738,16 @@ export async function copyDeactivatedEmbedData(req) {
  */
 export async function getCachedContent(req) {
   try {
-    const { localId } = req.payload;
+    const { localId } = req.payload || {};
+
+    // Input validation
+    if (!localId || typeof localId !== 'string' || localId.trim() === '') {
+      logFailure('getCachedContent', 'Validation failed: localId is required and must be a non-empty string', new Error('Invalid localId'));
+      return {
+        success: false,
+        error: 'localId is required and must be a non-empty string'
+      };
+    }
 
     const key = `macro-cache:${localId}`;
     const cached = await storage.get(key);
@@ -637,7 +762,7 @@ export async function getCachedContent(req) {
       cachedAt: cached.cachedAt
     };
   } catch (error) {
-    logFailure('getCachedContent', 'Error loading cached content', error);
+    logFailure('getCachedContent', 'Error loading cached content', error, { localId: req.payload?.localId });
     return { success: false, error: error.message };
   }
 }
@@ -700,7 +825,24 @@ export async function saveCategories(req) {
  */
 export async function checkVersionStaleness(req) {
   try {
-    const { localId, excerptId } = req.payload;
+    const { localId, excerptId } = req.payload || {};
+
+    // Input validation
+    if (!localId || typeof localId !== 'string' || localId.trim() === '') {
+      logFailure('checkVersionStaleness', 'Validation failed: localId is required and must be a non-empty string', new Error('Invalid localId'));
+      return {
+        success: false,
+        error: 'localId is required and must be a non-empty string'
+      };
+    }
+
+    if (!excerptId || typeof excerptId !== 'string' || excerptId.trim() === '') {
+      logFailure('checkVersionStaleness', 'Validation failed: excerptId is required and must be a non-empty string', new Error('Invalid excerptId'));
+      return {
+        success: false,
+        error: 'excerptId is required and must be a non-empty string'
+      };
+    }
 
     // Get excerpt's lastModified (updatedAt)
     const excerpt = await storage.get(`excerpt:${excerptId}`);
@@ -724,7 +866,7 @@ export async function checkVersionStaleness(req) {
       includeLastSynced: macroVars?.lastSynced || null
     };
   } catch (error) {
-    logFailure('checkVersionStaleness', 'Error checking version staleness', error);
+    logFailure('checkVersionStaleness', 'Error checking version staleness', error, { localId: req.payload?.localId, excerptId: req.payload?.excerptId });
     return { success: false, error: error.message };
   }
 }
@@ -734,7 +876,17 @@ export async function checkVersionStaleness(req) {
  */
 export async function getCheckProgress(req) {
   try {
-    const { progressId } = req.payload;
+    const { progressId } = req.payload || {};
+
+    // Input validation
+    if (!progressId || typeof progressId !== 'string' || progressId.trim() === '') {
+      logFailure('getCheckProgress', 'Validation failed: progressId is required and must be a non-empty string', new Error('Invalid progressId'));
+      return {
+        success: false,
+        error: 'progressId is required and must be a non-empty string'
+      };
+    }
+
     const progress = await storage.get(`progress:${progressId}`);
 
     if (!progress) {
@@ -749,7 +901,7 @@ export async function getCheckProgress(req) {
       progress
     };
   } catch (error) {
-    logFailure('getCheckProgress', 'Error getting progress', error);
+    logFailure('getCheckProgress', 'Error getting progress', error, { progressId: req.payload?.progressId });
     return {
       success: false,
       error: error.message
@@ -818,7 +970,24 @@ export async function getMultiExcerptScanProgress(req) {
  */
 export async function saveCachedContent(req) {
   try {
-    const { localId, renderedContent, syncedContentHash, syncedContent } = req.payload;
+    const { localId, renderedContent, syncedContentHash, syncedContent } = req.payload || {};
+
+    // Input validation
+    if (!localId || typeof localId !== 'string' || localId.trim() === '') {
+      logFailure('saveCachedContent', 'Validation failed: localId is required and must be a non-empty string', new Error('Invalid localId'));
+      return {
+        success: false,
+        error: 'localId is required and must be a non-empty string'
+      };
+    }
+
+    if (renderedContent === undefined || renderedContent === null) {
+      logFailure('saveCachedContent', 'Validation failed: renderedContent is required', new Error('Missing renderedContent'));
+      return {
+        success: false,
+        error: 'renderedContent is required'
+      };
+    }
 
     const key = `macro-cache:${localId}`;
     const now = new Date().toISOString();

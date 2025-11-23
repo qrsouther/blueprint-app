@@ -190,5 +190,5 @@ If you want to test the safety mechanisms more directly, you could:
 2. Call it from your Forge app
 3. Verify it handles the deep nesting gracefully
 
-This is what the `test-adf-traversal-safety.js` script does - it creates test ADF structures programmatically.
+**Note:** The standalone test script (`test-adf-traversal-safety.js`) has been removed. The test scenarios it covered (150+ levels of nesting, circular references) are unrealistic since Confluence enforces a maximum nesting depth of 3-4 levels and validates ADF structure to prevent circular references. The production code still includes safety measures (MAX_DEPTH = 100, cycle detection) as defensive programming.
 

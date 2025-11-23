@@ -35,7 +35,7 @@ Add at the end of the plan, before "Post-Review Actions":
 - **Status:** Currently disabled/unused (enabled: false in EmbedContainer.jsx)
 - **Reason:** Forge UI doesn't support DOM refs for IntersectionObserver
 - **When to Review:** If pursuing the "Nuclear Option" Custom UI rewrite
-- **Reference:** See `CUSTOM_UI_COMPOSITOR_ARCHITECTURE.md` for details on the single-iframe Custom UI React app architecture
+- **Reference:** See `docs/architecture/CUSTOM_UI_COMPOSITOR_ARCHITECTURE.md` for details on the single-iframe Custom UI React app architecture
 - **Purpose:** Lazy loading Embeds when scrolled into viewport (would work in Custom UI with real DOM access)
 
 **`src/resolvers/injection-resolver.js` and `src/resolvers/poc-injection-resolver.js`**

@@ -292,6 +292,8 @@ const VirtualizedBlueprint = ({ sources }) => {
 
 **The Breakthrough:** Custom UI can inject rendered HTML directly into Confluence page DOM, **bypassing iframes entirely** for View Mode.
 
+**Reference Implementation:** See `src/resolvers/poc-injection-resolver.js` for a proof-of-concept that demonstrates injecting content directly into Confluence page body via REST API. This POC validates the core injection mechanism and serves as a foundation for the desired ideal implementation.
+
 ```
 ┌─────────────────────────────────────────────┐
 │  Confluence Page                            │
@@ -391,6 +393,8 @@ Custom UI apps need a module location. Options:
 ### Page Rewrite Approach (Most Radical - Zero Runtime Overhead)
 
 **The Ultimate Vision:** Edit Mode is a full-page compositor, View Mode has **ZERO app involvement** - just native Confluence content.
+
+**Note:** A proof-of-concept implementation exists in `src/resolvers/poc-injection-resolver.js` that demonstrates the core concept of injecting rendered content directly into Confluence page body via REST API. This POC validates the technical feasibility of the page rewrite approach and serves as a reference implementation for the desired ideal architecture.
 
 ```
 ┌──────────────────────────────────────────┐
@@ -773,6 +777,6 @@ The Custom UI Compositor architecture is **technically sound** and would provide
 **Related Documents:**
 - TODO.md - Current roadmap
 - PERFORMANCE_TEST_GUIDE.md - Testing methodology
-- KNOWN_ISSUES.md - Current limitations
+- docs/status/KNOWN_ISSUES.md - Current limitations
 
 **Contact:** Document author/maintainer information here

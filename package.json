@@ -35,7 +35,6 @@
   },
   "devDependencies": {
     "@forge/cli": "^12.7.1",
-    "eslint": "^9.0.0",
-    "puppeteer": "^24.29.1"
+    "eslint": "^9.0.0"
   }
 }

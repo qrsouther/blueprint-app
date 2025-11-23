@@ -100,9 +100,6 @@ import {
   useCachedContent
 } from './hooks/embed-hooks';
 
-// Import lazy loading hook
-import { useIntersectionObserver } from './hooks/use-intersection-observer';
-
 // Import UI components
 import { VariableConfigPanel } from './components/VariableConfigPanel';
 import { ToggleConfigPanel } from './components/ToggleConfigPanel';
@@ -222,16 +219,6 @@ const App = () => {
   const [showDiffView, setShowDiffView] = useState(false);
   const [latestRenderedContent, setLatestRenderedContent] = useState(null);
   const [syncedContent, setSyncedContent] = useState(null); // Old Source ADF from last sync for diff comparison
-
-  // Lazy loading - DISABLED for now due to Forge UI limitations
-  // Forge UI components don't expose real DOM nodes, so IntersectionObserver doesn't work
-  // TODO: Investigate alternative lazy loading approach compatible with Forge UI
-  const [containerRef, isVisible] = useIntersectionObserver({
-    threshold: 0.1,
-    rootMargin: '200px',
-    triggerOnce: true,
-    enabled: false // DISABLED - Forge UI doesn't support DOM refs for IntersectionObserver
-  });
 
   // Use React Query to fetch excerpt data (enabled in both edit and view modes)
   // We need excerpt metadata (like documentationLinks) in both modes

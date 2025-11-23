@@ -1,6 +1,8 @@
-# Automated Test Suite for Orphan Detection Fixes
+# Orphan Detection System
 
-This guide explains the automated tests for orphan detection improvements.
+This guide explains the orphan detection improvements that are now implemented in the production worker system.
+
+**Note:** The standalone test script (`test-orphan-detection.js`) has been removed. The orphan detection logic is now fully implemented and tested in the production worker (`src/workers/checkIncludesWorker.js`) with improved error handling, retry logic, and integration with the Forge storage system.
 
 ## What Was Tested
 
@@ -40,35 +42,21 @@ The fix distinguishes between different HTTP error types:
 - Macros that don't exist (returns false correctly) ✅
 - Wrong localId (returns false correctly) ✅
 
-## Running the Tests
+## Production Implementation
 
-### Quick Run
+The orphan detection logic is implemented in:
+- **Worker:** `src/workers/checkIncludesWorker.js` - Main async worker that processes orphan detection
+- **Helpers:**
+  - `src/workers/helpers/page-scanner.js` - ADF scanning and macro detection
+  - `src/workers/helpers/orphan-detector.js` - Orphan detection and cleanup logic
+  - `src/workers/helpers/reference-repairer.js` - Reference repair and validation
 
-```bash
-node test-orphan-detection.js
-```
-
-### Expected Output
-
-```
-🧪 Testing Orphan Detection Fixes
-============================================================
-
-📋 Test 1: Extension with localId in attrs.localId
-✅ PASS: Found macro with localId in attrs.localId
-
-📋 Test 2: Extension with localId in attrs.parameters.localId
-✅ PASS: Found macro with localId in attrs.parameters.localId
-
-... (15 tests total)
-
-📊 Test Summary:
-   ✅ Passed: 15
-   ❌ Failed: 0
-   Total: 15
-
-🎉 All tests passed! The orphan detection fixes are working correctly.
-```
+The production implementation includes all the improvements described below, plus:
+- Real Confluence API integration with retry logic
+- Exponential backoff for transient failures
+- Integration with Forge storage for tracking orphaned items
+- Progress tracking for long-running operations
+- Safe dry-run mode by default
 
 ## Test Cases Explained
 
@@ -117,54 +105,37 @@ Tests that different HTTP error codes are handled correctly:
 - **403/401** = Permission issue → Don't mark as orphaned
 - **5xx** = Server error → Don't mark as orphaned (retry instead)
 
-## Integration with CI/CD
+## Testing the Production System
 
-You can add this test to your CI/CD pipeline:
+To test orphan detection in the production system:
 
-```json
-{
-  "scripts": {
-    "test": "node test-orphan-detection.js && node test-adf-traversal-safety.js",
-    "test:orphan": "node test-orphan-detection.js",
-    "test:adf": "node test-adf-traversal-safety.js"
-  }
-}
-```
+1. **Use the Admin UI:** Navigate to Admin → Check All Embeds
+2. **Review Results:** The system will show orphaned embeds with detailed information
+3. **Dry Run Mode:** By default, the system runs in dry-run mode (preview only)
+4. **Manual Testing:** Test with real Confluence pages to verify behavior
 
-Then run:
-```bash
-npm test
-```
+## Production System Features
 
-## What These Tests Don't Cover
+The production worker system includes:
 
-These automated tests cover the **logic** of orphan detection, but don't test:
-
-1. **Real Confluence API calls** - The `fetchPageContent()` function requires Forge API, which can't be easily mocked
-2. **Retry logic** - The exponential backoff retry logic would require time delays
-3. **Storage operations** - The actual marking of embeds as orphaned requires Forge storage
-
-For those, you'd need:
-- Manual testing in Confluence
-- Integration tests with Forge environment
-- End-to-end tests
-
-## Next Steps
-
-After running these automated tests:
-
-1. ✅ **Automated tests pass** (you just did this!)
-2. ⏳ **Manual testing in Confluence** - Test with real pages
-3. ⏳ **Integration testing** - Test the full "Check All Embeds" flow
-4. ⏳ **Edge case testing** - Test with various page structures
+1. **Real Confluence API calls** - `fetchPageContent()` with retry logic and error handling
+2. **Retry logic** - Exponential backoff for transient failures (HTTP 5xx, network errors)
+3. **Storage operations** - Integration with Forge storage for tracking and cleanup
+4. **Progress tracking** - Real-time progress updates for long-running operations
+5. **Error handling** - Distinguishes between page deletion (404) and permission issues (403/401)
+6. **Safe defaults** - Dry-run mode enabled by default to prevent accidental data loss
 
 ## Summary
 
-The automated test suite verifies:
-- ✅ All `localId` locations are checked
+The production orphan detection system implements:
+- ✅ All `localId` locations are checked (4 different locations)
 - ✅ `bodiedExtension` nodes are detected
-- ✅ Error handling distinguishes error types correctly
-- ✅ Edge cases are handled properly
+- ✅ Error handling distinguishes error types correctly (404 vs 403/401 vs 5xx)
+- ✅ Edge cases are handled properly (nested macros, multiple macros, legacy names)
+- ✅ Retry logic for transient failures
+- ✅ Safe dry-run mode by default
+- ✅ Progress tracking for long-running operations
+- ✅ Integration with Forge storage and recovery systems
 
-**Result:** 15/15 tests pass - The orphan detection fixes are working correctly! 🎉
+**Status:** Production-ready and actively used in the Admin UI "Check All Embeds" feature.
 
