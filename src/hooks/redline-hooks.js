@@ -42,16 +42,16 @@ export const useRedlineQueueQuery = (filters = {}, sortBy = 'status', groupBy = 
 
       const result = await invoke('getRedlineQueue', { filters, sortBy, groupBy });
 
-      if (!result || !result.embeds) {
-        throw new Error('Failed to load redline queue');
+      if (!result.success || !result.data) {
+        throw new Error(result.error || 'Failed to load redline queue');
       }
 
       logger.queries('Loaded redline queue:', {
-        embedCount: result.embeds.length,
-        hasGroups: !!result.groups
+        embedCount: result.data.embeds.length,
+        hasGroups: !!result.data.groups
       });
 
-      return result;
+      return result.data;
     },
     staleTime: 1000 * 30, // 30 seconds - queue data is fairly dynamic
     gcTime: 1000 * 60 * 5, // 5 minutes
@@ -76,12 +76,12 @@ export const useSetRedlineStatusMutation = () => {
       const result = await invoke('setRedlineStatus', { localId, status, userId, reason });
 
       if (!result || !result.success) {
-        throw new Error('Failed to set redline status');
+        throw new Error(result.error || 'Failed to set redline status');
       }
 
-      logger.queries('Status updated:', result);
+      logger.queries('Status updated:', result.data);
 
-      return result;
+      return result.data;
     },
     onSuccess: (data, variables) => {
       const { localId, status, userId } = variables;
@@ -235,13 +235,13 @@ export const useConfluenceUserQuery = (accountId) => {
 
       const result = await invoke('getConfluenceUser', { accountId });
 
-      if (!result || !result.accountId) {
-        throw new Error('Failed to load user data');
+      if (!result || !result.success || !result.data) {
+        throw new Error(result.error || 'Failed to load user data');
       }
 
-      logger.queries('User data loaded:', result.displayName);
+      logger.queries('User data loaded:', result.data.displayName);
 
-      return result;
+      return result.data;
     },
     enabled: !!accountId, // Only run if accountId is provided
     staleTime: 1000 * 60 * 60, // 1 hour - user data rarely changes
@@ -265,13 +265,13 @@ export const useRedlineStatsQuery = () => {
 
       const result = await invoke('getRedlineStats');
 
-      if (!result) {
-        throw new Error('Failed to load redline stats');
+      if (!result || !result.success || !result.data) {
+        throw new Error(result.error || 'Failed to load redline stats');
       }
 
-      logger.queries('Stats loaded:', result);
+      logger.queries('Stats loaded:', result.data);
 
-      return result;
+      return result.data;
     },
     staleTime: 1000 * 30, // 30 seconds - stats change as status updates occur
     gcTime: 1000 * 60 * 5, // 5 minutes
@@ -329,16 +329,16 @@ export const usePostRedlineCommentMutation = () => {
 
       const result = await invoke('postRedlineComment', { localId, pageId, commentText, userId });
 
-      if (!result || !result.success) {
-        throw new Error('Failed to post inline comment');
+      if (!result || !result.success || !result.data) {
+        throw new Error(result.error || 'Failed to post inline comment');
       }
 
       logger.queries('Comment posted:', {
-        commentId: result.commentId,
-        location: result.location
+        commentId: result.data.commentId,
+        location: result.data.location
       });
 
-      return result;
+      return result.data;
     },
     onSuccess: () => {
       // No need to invalidate queries - comment posting is independent

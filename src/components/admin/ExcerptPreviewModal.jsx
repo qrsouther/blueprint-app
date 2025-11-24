@@ -89,18 +89,17 @@ const useSaveExcerptMutation = () => {
           sourceLocalId
         });
 
-        // Handle backend validation errors (new format)
-        if (result && result.success === false && result.error) {
-          throw new Error(result.error);
+        // Handle backend validation errors
+        if (!result || !result.success) {
+          throw new Error(result.error || 'Failed to save excerpt');
         }
 
-        // Backend returns excerpt data directly on success (no success wrapper)
-        // NOTE: Return format will be standardized in Phase 4 (API Consistency)
-        if (!result || !result.excerptId) {
+        // Return data from standardized format
+        if (!result.data || !result.data.excerptId) {
           throw new Error('Failed to save excerpt - invalid response');
         }
 
-        return result;
+        return result.data;
       } catch (error) {
         logger.errors('[REACT-QUERY-ADMIN-PREVIEW] Save error:', error);
         throw error;
@@ -255,8 +254,8 @@ export function ExcerptPreviewModal({
     const detectVars = async () => {
       try {
         const result = await invoke('detectVariablesFromContent', { content: contentText });
-        if (result.success) {
-          setDetectedVariables(result.variables);
+        if (result.success && result.data) {
+          setDetectedVariables(result.data.variables);
         }
       } catch (err) {
         logger.errors('Error detecting variables:', err);
@@ -277,8 +276,8 @@ export function ExcerptPreviewModal({
     const detectToggs = async () => {
       try {
         const result = await invoke('detectTogglesFromContent', { content: contentText });
-        if (result.success) {
-          setDetectedToggles(result.toggles);
+        if (result.success && result.data) {
+          setDetectedToggles(result.data.toggles);
         }
       } catch (err) {
         logger.errors('Error detecting toggles:', err);

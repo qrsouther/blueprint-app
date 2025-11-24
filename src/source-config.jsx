@@ -48,11 +48,11 @@ const useExcerptQuery = (excerptId, enabled) => {
     queryFn: async () => {
       const result = await invoke('getExcerpt', { excerptId });
 
-      if (!result.success || !result.excerpt) {
-        throw new Error('Failed to load excerpt');
+      if (!result.success || !result.data?.excerpt) {
+        throw new Error(result.error || 'Failed to load excerpt');
       }
 
-      return result.excerpt;
+      return result.data.excerpt;
     },
     enabled: enabled && !!excerptId,
     staleTime: 0, // Always consider data stale - force refetch every time
@@ -295,8 +295,8 @@ const App = () => {
     const detectVars = async () => {
       try {
         const result = await invoke('detectVariablesFromContent', { content: macroBody });
-        if (result.success) {
-          setDetectedVariables(result.variables);
+        if (result.success && result.data) {
+          setDetectedVariables(result.data.variables);
         }
       } catch (err) {
         logger.errors('Error detecting variables:', err);
@@ -317,8 +317,8 @@ const App = () => {
     const detectToggs = async () => {
       try {
         const result = await invoke('detectTogglesFromContent', { content: macroBody });
-        if (result.success) {
-          setDetectedToggles(result.toggles);
+        if (result.success && result.data) {
+          setDetectedToggles(result.data.toggles);
         }
       } catch (err) {
         logger.errors('Error detecting toggles:', err);
@@ -372,6 +372,7 @@ const App = () => {
         onSuccess: async (result) => {
           try {
             // Only submit the config fields (not the content, which is in the body)
+            // result is from saveExcerpt mutation which now returns result.data
             const configToSubmit = {
               excerptId: result.excerptId,
               excerptName: excerptName,

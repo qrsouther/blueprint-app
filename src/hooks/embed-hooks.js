@@ -187,8 +187,8 @@ export const useCachedContent = (
       // First, try to get cached content
       const cachedResult = await invoke('getCachedContent', { localId });
 
-      if (cachedResult && cachedResult.content) {
-        return { content: cachedResult.content, fromCache: true };
+      if (cachedResult.success && cachedResult.data?.content) {
+        return { content: cachedResult.data.content, fromCache: true };
       }
 
       // No cached content - fetch fresh and process

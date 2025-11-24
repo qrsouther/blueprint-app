@@ -117,9 +117,9 @@ export function VersionHistoryModal({ isOpen, onClose, embedUuid }) {
 
       const response = await invoke('getVersionHistory', { entityId });
 
-      if (response.success) {
-        setVersions(response.versions || []);
-        if (response.versions.length === 0) {
+      if (response.success && response.data) {
+        setVersions(response.data.versions || []);
+        if (response.data.versions.length === 0) {
           setVersionError('No version history found for this Embed UUID');
         }
       } else {
@@ -143,8 +143,8 @@ export function VersionHistoryModal({ isOpen, onClose, embedUuid }) {
     try {
       const response = await invoke('getVersionDetails', { versionId });
 
-      if (response.success) {
-        setSelectedVersion(response.version);
+      if (response.success && response.data) {
+        setSelectedVersion(response.data.version);
       } else {
         setVersionError(`Failed to load version details: ${response.error}`);
       }
@@ -176,8 +176,8 @@ export function VersionHistoryModal({ isOpen, onClose, embedUuid }) {
     try {
       const response = await invoke('restoreFromVersion', { versionId });
 
-      if (response.success) {
-        alert(`✅ Successfully restored Embed!\n\nRestored from: ${formatTimestamp(response.restoredFrom)}\nBackup created: ${response.backupVersionId}\n\nThe Embed is now live with the restored data.`);
+      if (response.success && response.data) {
+        alert(`✅ Successfully restored Embed!\n\nRestored from: ${formatTimestamp(response.data.versionId)}\nBackup created: ${response.data.backupVersionId}\n\nThe Embed is now live with the restored data.`);
         setSelectedVersion(null);
         // Refresh version list to show new backup
         handleLoadVersions();

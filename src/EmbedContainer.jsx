@@ -491,8 +491,8 @@ const App = () => {
               currentLocalId: context.localId
             });
 
-            if (detectionResult.success && detectionResult.deactivatedEmbeds && detectionResult.deactivatedEmbeds.length > 0) {
-              setDeactivatedEmbeds(detectionResult.deactivatedEmbeds);
+            if (detectionResult.success && detectionResult.data?.deactivatedEmbeds && detectionResult.data.deactivatedEmbeds.length > 0) {
+              setDeactivatedEmbeds(detectionResult.data.deactivatedEmbeds);
               setShowDeactivatedSelector(true);
             } else {
               setDeactivatedEmbeds([]);
@@ -581,13 +581,13 @@ const App = () => {
             currentLocalId: context.localId
           });
 
-          if (recoveryResult.success && recoveryResult.recovered) {
+          if (recoveryResult.success && recoveryResult.data?.recovered) {
             // Reload the data now that it's been migrated
             varsResultForLoading = await invoke('getVariableValues', { localId: effectiveLocalId });
             
             // CRITICAL: If excerptId was missing, set it from recovered data
-            if (!selectedExcerptId && recoveryResult.data?.excerptId) {
-              setSelectedExcerptId(recoveryResult.data.excerptId);
+            if (!selectedExcerptId && recoveryResult.data.data?.excerptId) {
+              setSelectedExcerptId(recoveryResult.data.data.excerptId);
             }
           }
         }

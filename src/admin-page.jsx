@@ -1174,8 +1174,8 @@ const App = () => {
 
         // Reload excerpts to show newly imported ones
         const reloadResult = await invoke('getAllExcerpts');
-        if (reloadResult.success) {
-          const sanitized = (reloadResult.excerpts || []).map(excerpt => ({
+        if (reloadResult.success && reloadResult.data) {
+          const sanitized = (reloadResult.data.excerpts || []).map(excerpt => ({
             ...excerpt,
             variables: Array.isArray(excerpt.variables) ? excerpt.variables.filter(v => v && typeof v === 'object' && v.name) : [],
             toggles: Array.isArray(excerpt.toggles) ? excerpt.toggles.filter(t => t && typeof t === 'object' && t.name) : [],
@@ -1770,13 +1770,13 @@ const App = () => {
                                 excerptId: selectedExcerptForDetails.id 
                               });
 
-                              if (!result || !result.success || !result.usage || result.usage.length === 0) {
+                              if (!result || !result.success || !result.data?.usage || result.data.usage.length === 0) {
                                 alert('No usage data to export');
                                 return;
                               }
 
                               // Use the same CSV export function as "Check All Embeds"
-                              const csv = generateIncludesCSV(result.usage);
+                              const csv = generateIncludesCSV(result.data.usage);
                               if (!csv) {
                                 alert('No data to export');
                                 return;
