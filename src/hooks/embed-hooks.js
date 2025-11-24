@@ -139,11 +139,13 @@ export const useVariableValues = (localId, enabled) => {
     queryFn: async () => {
       const result = await invoke('getVariableValues', { localId });
 
-      if (!result.success) {
+      if (!result.success || !result.data) {
         throw new Error('Failed to load variable values');
       }
 
-      return result;
+      // Return the data object directly (not the wrapper) for backward compatibility
+      // React Query caches this, and EmbedContainer expects direct access to properties
+      return result.data;
     },
     enabled: enabled && !!localId,
     staleTime: 1000 * 30, // 30 seconds - this changes frequently during editing
