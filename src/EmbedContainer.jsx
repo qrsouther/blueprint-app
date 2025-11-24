@@ -810,7 +810,7 @@ const App = () => {
       try {
         // Get excerpt metadata to check contentHash
         const excerptResult = await invoke('getExcerpt', { excerptId: selectedExcerptId });
-        if (!excerptResult.success || !excerptResult.excerpt) {
+        if (!excerptResult.success || !excerptResult.data || !excerptResult.data.excerpt) {
           setIsCheckingStaleness(false);
           return;
         }
@@ -822,7 +822,8 @@ const App = () => {
           return;
         }
 
-        const sourceContentHash = excerptResult.excerpt.contentHash;
+        const excerpt = excerptResult.data.excerpt;
+        const sourceContentHash = excerpt.contentHash;
         const syncedContentHash = varsResult.syncedContentHash;
 
         // Hash-based staleness detection (primary method)
@@ -833,7 +834,7 @@ const App = () => {
         } else {
           // Fallback to timestamp comparison for backward compatibility
           // (for Include instances created before hash implementation)
-          const sourceUpdatedAt = excerptResult.excerpt.updatedAt;
+          const sourceUpdatedAt = excerpt.updatedAt;
           const lastSynced = varsResult.lastSynced;
 
           if (sourceUpdatedAt && lastSynced) {
@@ -844,12 +845,12 @@ const App = () => {
         }
 
         setIsStale(stale);
-        setSourceLastModified(excerptResult.excerpt.updatedAt);
+        setSourceLastModified(excerpt.updatedAt);
         setIncludeLastSynced(varsResult.lastSynced);
 
         // If stale, store both old and new content for enhanced diff view
         if (stale) {
-          setLatestRenderedContent(excerptResult.excerpt.content); // New Source content
+          setLatestRenderedContent(excerpt.content); // New Source content
           setSyncedContent(varsResult.syncedContent || null); // Old Source content from last sync
 
           // Load variable values and toggle states for diff view rendering
@@ -1144,13 +1145,13 @@ const App = () => {
     try {
       // Fetch fresh excerpt
       const excerptResult = await invoke('getExcerpt', { excerptId: selectedExcerptId });
-      if (!excerptResult.success || !excerptResult.excerpt) {
+      if (!excerptResult.success || !excerptResult.data || !excerptResult.data.excerpt) {
         alert('Failed to fetch latest Blueprint Standard content');
         return;
       }
 
       // Update the excerpt state so the new data (including documentationLinks) is available
-      setExcerptForViewMode(excerptResult.excerpt);
+      setExcerptForViewMode(excerptResult.data.excerpt);
 
       // Get current variable values, toggle states, custom insertions, and internal notes
       const varsResult = await invoke('getVariableValues', { localId: effectiveLocalId });

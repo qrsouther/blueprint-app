@@ -171,26 +171,35 @@ export async function detectTogglesFromContent(req) {
 
 /**
  * Get all excerpts from index
+ * 
+ * Standard return format:
+ * - Success: { success: true, data: { excerpts: [...] } }
+ * - Error: { success: false, error: "error message" }
  */
 export async function getExcerpts() {
   try {
     const index = await storage.get('excerpt-index') || { excerpts: [] };
     return {
       success: true,
-      excerpts: index.excerpts
+      data: {
+        excerpts: index.excerpts
+      }
     };
   } catch (error) {
     logFailure('getExcerpts', 'Error getting excerpts', error);
     return {
       success: false,
-      error: error.message,
-      excerpts: []
+      error: error.message
     };
   }
 }
 
 /**
  * Get specific excerpt by ID
+ * 
+ * Standard return format:
+ * - Success: { success: true, data: { excerpt: {...} } }
+ * - Error: { success: false, error: "error message" }
  */
 export async function getExcerpt(req) {
   try {
@@ -209,7 +218,9 @@ export async function getExcerpt(req) {
 
     return {
       success: true,
-      excerpt: excerpt
+      data: {
+        excerpt: excerpt
+      }
     };
   } catch (error) {
     logFailure('getExcerpt', 'Error getting excerpt', error, { excerptId: req.payload?.excerptId });
@@ -1279,20 +1290,25 @@ export async function getForgeEnvironment(req) {
 /**
  * Get the stored Admin page URL
  * Returns the URL stored when the admin page first loads
+ * 
+ * Standard return format:
+ * - Success: { success: true, data: { adminUrl: string | null } }
+ * - Error: { success: false, error: "error message" }
  */
 export async function getAdminUrl() {
   try {
     const adminUrl = await storage.get('app-config:adminUrl');
     return {
       success: true,
-      adminUrl: adminUrl || null
+      data: {
+        adminUrl: adminUrl || null
+      }
     };
   } catch (error) {
     logFailure('getAdminUrl', 'Error getting admin URL', error);
     return {
       success: false,
-      error: error.message,
-      adminUrl: null
+      error: error.message
     };
   }
 }
@@ -1300,6 +1316,10 @@ export async function getAdminUrl() {
 /**
  * Store the Admin page URL
  * Called by the admin page when it first loads to store its URL
+ * 
+ * Standard return format:
+ * - Success: { success: true, data: {} }
+ * - Error: { success: false, error: "error message" }
  */
 export async function setAdminUrl(req) {
   try {
@@ -1312,7 +1332,8 @@ export async function setAdminUrl(req) {
     }
     await storage.set('app-config:adminUrl', adminUrl);
     return {
-      success: true
+      success: true,
+      data: {}
     };
   } catch (error) {
     logFailure('setAdminUrl', 'Error setting admin URL', error);

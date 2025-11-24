@@ -68,8 +68,8 @@ const useAdminUrlQuery = () => {
     queryKey: ['adminUrl'],
     queryFn: async () => {
       const result = await invoke('getAdminUrl');
-      if (result.success && result.adminUrl) {
-        return result.adminUrl;
+      if (result.success && result.data && result.data.adminUrl) {
+        return result.data.adminUrl;
       }
       return null;
     },
