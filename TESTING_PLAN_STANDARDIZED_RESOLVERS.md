@@ -1,332 +1,224 @@
-# Testing Plan: Standardized Resolver Returns
+# Testing Plan: Standardized Resolver Return Formats
 
 ## Overview
-This document outlines testing procedures for the standardized resolver return format changes. All resolvers now return `{ success: true, data: {...} }` or `{ success: false, error: "..." }`.
-
-## Resolvers Standardized (So Far)
-1. ✅ `getCategories()` - Category management
-2. ✅ `getAdminUrl()` / `setAdminUrl()` - Admin URL storage
-3. ✅ `getExcerpts()` / `getExcerpt()` - Source loading
-4. ✅ `getPageTitle()` - Page title fetching
-5. ✅ `getVariableValues()` - Embed variable/toggle data loading
+All resolvers now return `{ success: true, data: {...} }` or `{ success: false, error: "..." }`. This plan prioritizes testing by risk and frequency of use.
 
 ---
 
-## Test 1: Categories (getCategories)
+## Priority 1: CRITICAL - Core Embed Functionality ⚠️
 
-### What to Test
-- Categories load and display in Admin UI
-- Category dropdown works when creating/editing Sources
+**Why First:** Embeds are the primary user-facing feature. If broken, the app is unusable.
 
-### How to Test
-1. **Open Admin Page**
-   - Navigate to the Blueprint Admin page
-   - Check that categories load in the sidebar or category manager
-   - Expected: Categories display correctly (General, Pricing, Technical, Legal, Marketing, or custom)
+### Test 1.1: Embed Loading & Display
+- [ ] Open a page with an existing Embed
+- [ ] **Expected:** Embed loads and displays content correctly
+- [ ] **Check:** No console errors, content renders properly
+- [ ] **Resolvers tested:** `getVariableValues`, `getExcerpt`, `getCachedContent`
 
-2. **Create/Edit Source Modal**
-   - Click "Create Source" or edit an existing Source
-   - Open the Category dropdown
-   - Expected: All categories appear in the dropdown
-   - Select a category and save
-   - Expected: Category saves correctly
+### Test 1.2: Embed Variable Input
+- [ ] Edit variable values in an Embed
+- [ ] Save the Embed
+- [ ] **Expected:** Values save and persist after page refresh
+- [ ] **Resolvers tested:** `saveVariableValues`, `getVariableValues`
 
-### What to Check
-- ✅ Categories appear in UI
-- ✅ No console errors related to categories
-- ✅ Category selection works
-- ✅ Category saves correctly
+### Test 1.3: Embed Source Selection
+- [ ] Change the selected Source in an Embed dropdown
+- [ ] **Expected:** New Source loads, variables update correctly
+- [ ] **Resolvers tested:** `getExcerpt`, `getVariableValues`
 
-### Potential Issues
-- Categories don't load → Check browser console for errors
-- Category dropdown is empty → Check if `result.data.categories` is being accessed correctly
+### Test 1.4: Embed Toggle States
+- [ ] Toggle content sections on/off
+- [ ] Save and refresh
+- [ ] **Expected:** Toggle states persist correctly
+- [ ] **Resolvers tested:** `saveVariableValues`, `getVariableValues`
 
----
+### Test 1.5: Custom Insertions
+- [ ] Add external/internal custom paragraphs
+- [ ] Save and view in published page
+- [ ] **Expected:** Insertions appear in correct positions
+- [ ] **Resolvers tested:** `saveVariableValues`, `getCachedContent`
 
-## Test 2: Admin URL (getAdminUrl / setAdminUrl)
-
-### What to Test
-- Admin page URL is stored and retrieved correctly
-
-### How to Test
-1. **Open Admin Page**
-   - Navigate to the Blueprint Admin page
-   - The page should automatically store its URL
-   - Expected: No errors, URL stored silently
-
-2. **Check Source Config**
-   - Open a Source macro in Edit Mode
-   - Check if admin links work (if applicable)
-   - Expected: Links to admin page work correctly
-
-### What to Check
-- ✅ No console errors
-- ✅ Admin page loads normally
-- ✅ Any admin links work correctly
-
-### Potential Issues
-- Admin page fails to load → Check if `result.data.adminUrl` is being accessed correctly
+### Test 1.6: Orphaned Data Recovery
+- [ ] Create an Embed, then delete the macro from page
+- [ ] Re-add the macro (same localId)
+- [ ] **Expected:** Embed recovers previous variable values
+- [ ] **Resolvers tested:** `recoverOrphanedData`, `getVariableValues`
 
 ---
 
-## Test 3: Source Loading (getExcerpt / getExcerpts)
+## Priority 2: HIGH - Source Management 🔴
 
-### What to Test
-- Sources load in Admin UI
-- Source details load when editing
-- Source selection works in Embed macro
+**Why Second:** Sources are created/edited frequently. Breaking this blocks content creation.
 
-### How to Test
-1. **Admin Page - Source List**
-   - Open Admin page
-   - Check the Sources list in the sidebar
-   - Expected: All Sources appear in the list
+### Test 2.1: Create New Source
+- [ ] Open Source macro config
+- [ ] Create a new Source with name, category, content
+- [ ] Save
+- [ ] **Expected:** Source saves, appears in Admin sidebar
+- [ ] **Resolvers tested:** `saveExcerpt`, `getAllExcerpts`
 
-2. **Edit Source Modal**
-   - Click on a Source to edit it
-   - Expected: Source details load correctly (name, category, content, variables, toggles)
-   - Make a change and save
-   - Expected: Source saves and updates correctly
+### Test 2.2: Edit Existing Source
+- [ ] Open Admin, select a Source
+- [ ] Edit name, category, or content
+- [ ] Save
+- [ ] **Expected:** Changes persist, modal closes correctly
+- [ ] **Resolvers tested:** `getExcerpt`, `saveExcerpt`
 
-3. **Embed Macro - Source Selection**
-   - Open an Embed macro in Edit Mode
-   - Click the Source dropdown
-   - Expected: All Sources appear in the dropdown
-   - Select a Source
-   - Expected: Source loads, variables/toggles appear
+### Test 2.3: Variable Detection
+- [ ] Edit Source content with `{{variableName}}` syntax
+- [ ] Navigate to Variables tab
+- [ ] **Expected:** Variables detected and displayed
+- [ ] **Resolvers tested:** `detectVariablesFromContent`
 
-### What to Check
-- ✅ Sources list displays correctly
-- ✅ Source details load when editing
-- ✅ Source selection in Embed works
-- ✅ No console errors related to Sources
+### Test 2.4: Toggle Detection
+- [ ] Edit Source content with toggle syntax
+- [ ] Navigate to Toggles tab
+- [ ] **Expected:** Toggles detected and displayed
+- [ ] **Resolvers tested:** `detectTogglesFromContent`
 
-### Potential Issues
-- Sources don't appear → Check if `result.data.excerpt` or `result.data.excerpts` is being accessed
-- Source details don't load → Check CreateEditSourceModal.jsx usage
-- Source selection fails → Check EmbedContainer.jsx usage
-
----
-
-## Test 4: Page Title (getPageTitle)
-
-### What to Test
-- Page titles are fetched and displayed correctly
-
-### How to Test
-1. **Embed Container**
-   - Open an Embed macro on any Confluence page
-   - Check if page title is used anywhere (e.g., for auto-inferring "client" variable)
-   - Expected: Page title is fetched correctly
-
-2. **Admin Page - Usage Details**
-   - Open Admin page
-   - Check Usage details for any Source
-   - Expected: Page titles display correctly (or Page ID if title unavailable)
-
-### What to Check
-- ✅ Page titles load correctly
-- ✅ No console errors related to page titles
-- ✅ Auto-inference of "client" variable works (if page title contains "Blueprint: [Client Name]")
-
-### Potential Issues
-- Page title doesn't load → Check if `result.data.title` is being accessed correctly
+### Test 2.5: Source Categories
+- [ ] Edit Source category
+- [ ] Save
+- [ ] **Expected:** Category updates in Admin sidebar
+- [ ] **Resolvers tested:** `saveExcerpt`, `getCategories`
 
 ---
 
-## Test 5: Variable Values (getVariableValues) - **CRITICAL**
+## Priority 3: MEDIUM - Admin UI & Usage Tracking 🟡
 
-### What to Test
-This is the most critical resolver - it's used everywhere for loading Embed data.
+**Why Third:** Admin features are important but not blocking for end users.
 
-### Test Scenarios
+### Test 3.1: Admin Page Load
+- [ ] Open Admin page
+- [ ] **Expected:** Sources list loads, usage counts display
+- [ ] **Resolvers tested:** `getAllExcerpts`, `getAllUsageCounts`
 
-#### 5.1: Embed Loading
-1. **Open Embed in Edit Mode**
-   - Open any Embed macro on a Confluence page
-   - Expected: 
-     - Variables load with their current values
-     - Toggles load with their current states
-     - Custom insertions load
-     - Internal notes load
-     - Source selection is correct
+### Test 3.2: Usage Details
+- [ ] Click on a Source in Admin
+- [ ] View Usage Details tab
+- [ ] **Expected:** List of pages using this Source displays correctly
+- [ ] **Resolvers tested:** `getExcerptUsage`
 
-2. **Open Embed in View Mode**
-   - View a published Embed macro
-   - Expected: Content renders correctly with all variable values applied
+### Test 3.3: CSV Export
+- [ ] In Usage Details, click "Export to CSV"
+- [ ] **Expected:** CSV downloads with correct data
+- [ ] **Resolvers tested:** `getExcerptUsageForCSV`
 
-#### 5.2: Variable Editing
-1. **Edit Variable Values**
-   - Open Embed in Edit Mode
-   - Change a variable value
-   - Save
-   - Expected: Value saves and persists
-
-2. **Toggle States**
-   - Toggle a toggle on/off
-   - Save
-   - Expected: Toggle state saves and persists
-
-#### 5.3: Custom Insertions
-1. **Add Custom Insertion**
-   - Add a custom paragraph
-   - Save
-   - Expected: Custom insertion saves and appears in View Mode
-
-#### 5.4: Staleness Detection
-1. **Check Staleness**
-   - Open an Embed that's up-to-date
-   - Expected: No "Update Available" banner
-   - Update the Source that the Embed uses
-   - Refresh the page
-   - Expected: "Update Available" banner appears
-
-#### 5.5: Data Recovery
-1. **Orphaned Data Recovery**
-   - If you have an Embed with missing data (orphaned)
-   - Expected: System attempts recovery automatically
-   - Data should be recovered if possible
-
-#### 5.6: Copy Embed Data
-1. **Copy from Another Embed**
-   - Use the "Copy from another Embed" feature (if available)
-   - Expected: All data (variables, toggles, insertions, notes) copies correctly
-
-### What to Check
-- ✅ All variable values load correctly
-- ✅ All toggle states load correctly
-- ✅ Custom insertions load correctly
-- ✅ Internal notes load correctly
-- ✅ Staleness detection works
-- ✅ Data saves correctly
-- ✅ No console errors
-- ✅ No data loss
-
-### Potential Issues
-- Variables don't load → Check if `result.data.variableValues` is being accessed
-- Toggles don't load → Check if `result.data.toggleStates` is being accessed
-- Data doesn't save → Check saveVariableValues resolver (not yet standardized)
-- Staleness detection broken → Check if `result.data.syncedContentHash` is being accessed
+### Test 3.4: Usage Tracking
+- [ ] Create a new Embed on a page
+- [ ] Check Admin → Usage Details for that Source
+- [ ] **Expected:** New usage appears in list
+- [ ] **Resolvers tested:** `trackExcerptUsage`, `getExcerptUsage`
 
 ---
 
-## Test 6: Integration Tests
+## Priority 4: MEDIUM - Redline System 🟡
 
-### Test Full Workflow
-1. **Create Source → Use in Embed → Edit Embed → Save**
-   - Create a new Source with variables
-   - Create an Embed using that Source
-   - Edit variable values in the Embed
-   - Save the Embed
-   - Expected: Everything works end-to-end
+**Why Fourth:** Used for review workflow, but not core functionality.
 
-2. **Edit Source → Check Staleness → Update Embed**
-   - Edit a Source that's being used by an Embed
-   - Open the Embed
-   - Expected: Staleness banner appears
-   - Click "Update Available"
-   - Expected: Embed updates with new Source content
+### Test 4.1: Redline Queue Load
+- [ ] Open Redline Queue in Admin
+- [ ] **Expected:** Queue loads with all Embeds
+- [ ] **Resolvers tested:** `getRedlineQueue`
+
+### Test 4.2: Status Update
+- [ ] Change redline status of an Embed (e.g., "approved")
+- [ ] **Expected:** Status updates, card moves to correct group
+- [ ] **Resolvers tested:** `setRedlineStatus`, `getRedlineQueue`
+
+### Test 4.3: User Avatars
+- [ ] View Redline Queue
+- [ ] **Expected:** User avatars display correctly
+- [ ] **Resolvers tested:** `getConfluenceUser`
+
+### Test 4.4: Redline Stats
+- [ ] View Redline Queue summary
+- [ ] **Expected:** Status counts display correctly
+- [ ] **Resolvers tested:** `getRedlineStats`
+
+### Test 4.5: Post Comment
+- [ ] Post an inline comment on an Embed
+- [ ] **Expected:** Comment posts successfully
+- [ ] **Resolvers tested:** `postRedlineComment`
+
+---
+
+## Priority 5: LOW - Version History & Recovery 🟢
+
+**Why Last:** Advanced features, less frequently used.
+
+### Test 5.1: View Version History
+- [ ] Open Version History for an Embed
+- [ ] **Expected:** Version list loads
+- [ ] **Resolvers tested:** `getVersionHistory`
+
+### Test 5.2: View Version Details
+- [ ] Click on a version in history
+- [ ] **Expected:** Version details display
+- [ ] **Resolvers tested:** `getVersionDetails`
+
+### Test 5.3: Restore from Version
+- [ ] Restore an Embed from a previous version
+- [ ] **Expected:** Embed restores, backup created
+- [ ] **Resolvers tested:** `restoreFromVersion`
+
+### Test 5.4: List Backups
+- [ ] View backup list (if applicable)
+- [ ] **Expected:** Backups list correctly
+- [ ] **Resolvers tested:** `listBackups`
+
+---
+
+## Quick Smoke Test (5 minutes)
+
+If you're short on time, test these **critical paths only**:
+
+1. ✅ **Embed loads** - Open a page with an Embed
+2. ✅ **Source edits** - Edit a Source name/category, save
+3. ✅ **Variable detection** - Add `{{var}}` to Source, check Variables tab
+4. ✅ **Admin loads** - Open Admin page, check Sources list
+
+If all 4 pass, the core functionality is working.
 
 ---
 
 ## Error Scenarios to Test
 
-### Test Error Handling
-1. **Invalid Data**
-   - Try to access a non-existent Source
-   - Expected: Error message displays, no crash
+### Test E.1: Missing Data
+- [ ] Try to load an Embed with invalid excerptId
+- [ ] **Expected:** Graceful error, no crash
 
-2. **Network Issues**
-   - Simulate network failure (if possible)
-   - Expected: Error handling works gracefully
+### Test E.2: Network Errors
+- [ ] Simulate slow network (if possible)
+- [ ] **Expected:** Loading states display, errors handled
 
-3. **Missing Data**
-   - Open an Embed with missing variable data
-   - Expected: System handles gracefully, attempts recovery
-
----
-
-## Console Checks
-
-### What to Look For
-- ✅ No errors related to `result.data` access
-- ✅ No errors about `undefined` properties
-- ✅ No errors about missing `success` property
-- ✅ No TypeErrors about accessing properties of undefined
-
-### Red Flags
-- ❌ `Cannot read property 'data' of undefined`
-- ❌ `result.data is undefined`
-- ❌ `result.excerpt is undefined` (should be `result.data.excerpt`)
-- ❌ `result.variableValues is undefined` (should be `result.data.variableValues`)
-
----
-
-## Quick Smoke Test Checklist
-
-Run through these quickly to verify basic functionality:
-
-- [ ] Admin page loads
-- [ ] Sources list displays
-- [ ] Can open Source for editing
-- [ ] Can create new Source
-- [ ] Categories work
-- [ ] Embed macro opens in Edit Mode
-- [ ] Variables load in Embed
-- [ ] Can edit and save variable values
-- [ ] Toggles work
-- [ ] Can save Embed
-- [ ] Embed renders in View Mode
-- [ ] Staleness detection works (if applicable)
-
----
-
-## If Something Breaks
-
-### Debugging Steps
-1. **Check Browser Console**
-   - Look for JavaScript errors
-   - Check which resolver is failing
-   - Note the exact error message
-
-2. **Check Network Tab**
-   - Look for failed API calls
-   - Check the response format
-   - Verify it matches `{ success: true, data: {...} }`
-
-3. **Check Code**
-   - Find the failing resolver in the code
-   - Verify it returns the standardized format
-   - Check frontend code that uses it
-   - Verify it accesses `result.data.*` correctly
-
-4. **Common Fixes**
-   - If `result.data` is undefined: Check if resolver returns `{ success: true, data: {...} }`
-   - If property is undefined: Check if frontend accesses `result.data.property`
-   - If success check fails: Verify resolver returns `success: true/false`
+### Test E.3: Invalid Input
+- [ ] Try to save Source with empty name
+- [ ] **Expected:** Validation error message displays
 
 ---
 
 ## Success Criteria
 
-✅ All tests pass
-✅ No console errors
-✅ All data loads correctly
-✅ All saves work correctly
-✅ No data loss
-✅ Error handling works gracefully
+✅ **All Priority 1 tests pass** - Core functionality works  
+✅ **All Priority 2 tests pass** - Content creation works  
+✅ **No console errors** - Clean error handling  
+✅ **Data persists** - Changes save correctly  
 
 ---
 
-## Next Steps After Testing
+## Notes
 
-If all tests pass:
-- Continue standardizing remaining resolvers
-- Move to next batch (saveExcerpt, getAllExcerpts, etc.)
+- **Focus on Priority 1 first** - If these fail, stop and debug
+- **Test incrementally** - Don't test everything at once
+- **Check browser console** - Look for errors or warnings
+- **Verify data persistence** - Refresh pages to ensure saves work
 
-If tests fail:
-- Document the failure
-- Fix the issue
-- Re-test
-- Continue only after all tests pass
+---
 
+## Rollback Plan
+
+If critical issues are found:
+1. The changes are in feature branch `feature/standardize-resolver-returns`
+2. Can merge to main only after all Priority 1 & 2 tests pass
+3. Keep main branch stable until verification complete
