@@ -43,11 +43,11 @@ export const useExcerptData = (excerptId, enabled) => {
 
       const result = await invoke('getExcerpt', { excerptId });
 
-      if (!result.success || !result.excerpt) {
+      if (!result.success || !result.data || !result.data.excerpt) {
         throw new Error('Failed to load excerpt');
       }
 
-      return result.excerpt;
+      return result.data.excerpt;
     },
     enabled: enabled && !!excerptId,
     staleTime: 0, // Always fetch fresh data (temporarily set to 0 to bust old cache without documentationLinks)
@@ -111,11 +111,11 @@ export const useAvailableExcerpts = (enabled) => {
     queryFn: async () => {
       const result = await invoke('getExcerpts');
 
-      if (!result.success) {
+      if (!result.success || !result.data) {
         throw new Error('Failed to load excerpts');
       }
 
-      return result.excerpts || [];
+      return result.data.excerpts || [];
     },
     enabled: enabled,
     staleTime: 1000 * 60 * 2, // 2 minutes - excerpt list doesn't change often
