@@ -56,11 +56,11 @@ const useExcerptQuery = (excerptId, enabled) => {
     queryFn: async () => {
       const result = await invoke('getExcerpt', { excerptId });
 
-      if (!result.success || !result.excerpt) {
+      if (!result.success || !result.data || !result.data.excerpt) {
         throw new Error('Failed to load excerpt');
       }
 
-      return result.excerpt;
+      return result.data.excerpt;
     },
     enabled: enabled && !!excerptId,
     staleTime: 1000 * 60 * 5, // 5 minutes

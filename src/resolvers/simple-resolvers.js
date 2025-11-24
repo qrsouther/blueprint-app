@@ -216,11 +216,11 @@ export async function getExcerpt(req) {
 
     const excerpt = await storage.get(`excerpt:${excerptId}`);
 
-    if (!excerpt || excerpt === null) {
-      logFailure('getExcerpt', 'Excerpt not found', new Error('Excerpt not found'), { excerptId });
+    if (excerpt === null || excerpt === undefined) {
+      logFailure('getExcerpt', 'Excerpt not found in storage', new Error('Excerpt not found'), { excerptId, storageKey: `excerpt:${excerptId}` });
       return {
         success: false,
-        error: 'Excerpt not found'
+        error: `Excerpt not found: ${excerptId}`
       };
     }
 
