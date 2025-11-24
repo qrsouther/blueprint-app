@@ -40,15 +40,16 @@ export async function listBackups() {
 
     return {
       success: true,
-      backups: sortedBackups,
-      count: sortedBackups.length
+      data: {
+        backups: sortedBackups,
+        count: sortedBackups.length
+      }
     };
   } catch (error) {
     logFailure('listBackups', 'Error listing backups', error);
     return {
       success: false,
-      error: error.message,
-      backups: []
+      error: error.message
     };
   }
 }
@@ -295,9 +296,11 @@ export async function restoreDeletedEmbed(req) {
 
     return {
       success: true,
-      localId,
-      restoredAt: new Date().toISOString(),
-      restoredFrom: 'soft-delete'
+      data: {
+        localId,
+        restoredAt: new Date().toISOString(),
+        restoredFrom: 'soft-delete'
+      }
     };
   } catch (error) {
     logFailure('restoreDeletedEmbed', 'Error restoring deleted embed', error, { localId: extractedLocalId });

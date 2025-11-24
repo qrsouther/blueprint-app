@@ -389,7 +389,8 @@ export async function saveVariableValues(req) {
     });
     
     return {
-      success: true
+      success: true,
+      data: {}
     };
   } catch (error) {
     const totalFunctionDuration = Date.now() - functionStartTime;

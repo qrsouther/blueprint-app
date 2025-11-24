@@ -95,9 +95,11 @@ export async function getVersionHistory(req) {
 
     return {
       success: true,
-      versions: sortedVersions,
-      totalCount: result.totalCount,
-      entityId
+      data: {
+        versions: sortedVersions,
+        totalCount: result.totalCount,
+        entityId
+      }
     };
 
   } catch (error) {
@@ -170,7 +172,9 @@ export async function getVersionDetails(req) {
 
     return {
       success: true,
-      version: enrichedVersion
+      data: {
+        version: enrichedVersion
+      }
     };
 
   } catch (error) {
@@ -237,10 +241,12 @@ export async function restoreFromVersion(req) {
 
     return {
       success: true,
-      storageKey: result.storageKey,
-      versionId: result.versionId,
-      backupVersionId: result.backupVersionId,
-      message: result.message
+      data: {
+        storageKey: result.storageKey,
+        versionId: result.versionId,
+        backupVersionId: result.backupVersionId,
+        message: result.message
+      }
     };
 
   } catch (error) {

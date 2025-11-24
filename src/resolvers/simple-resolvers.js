@@ -83,14 +83,15 @@ export async function detectVariablesFromContent(req) {
     const variables = detectVariables(contentToProcess);
     return {
       success: true,
-      variables
+      data: {
+        variables
+      }
     };
   } catch (error) {
     logFailure('detectVariablesFromContent', 'Error detecting variables', error);
     return {
       success: false,
-      error: error.message,
-      variables: []
+      error: error.message
     };
   }
 }
@@ -157,14 +158,15 @@ export async function detectTogglesFromContent(req) {
     const toggles = detectToggles(contentToProcess);
     return {
       success: true,
-      toggles
+      data: {
+        toggles
+      }
     };
   } catch (error) {
     logFailure('detectTogglesFromContent', 'Error detecting toggles', error);
     return {
       success: false,
-      error: error.message,
-      toggles: []
+      error: error.message
     };
   }
 }
@@ -505,10 +507,12 @@ export async function recoverOrphanedData(req) {
       
       return {
         success: true,
-        recovered: true,
-        data: orphanedEntry.data,
-        migratedFrom: orphanedEntry.localId,
-        candidateCount: candidates.length
+        data: {
+          recovered: true,
+          data: orphanedEntry.data,
+          migratedFrom: orphanedEntry.localId,
+          candidateCount: candidates.length
+        }
       };
     } else {
       logPhase('recoverOrphanedData', 'No candidates found', {
@@ -519,8 +523,10 @@ export async function recoverOrphanedData(req) {
       });
       return {
         success: true,
-        recovered: false,
-        reason: 'no_candidates'
+        data: {
+          recovered: false,
+          reason: 'no_candidates'
+        }
       };
     }
   } catch (error) {
@@ -728,7 +734,9 @@ export async function detectDeactivatedEmbeds(req) {
 
     return {
       success: true,
-      deactivatedEmbeds: deactivatedEmbeds
+      data: {
+        deactivatedEmbeds: deactivatedEmbeds
+      }
     };
   } catch (error) {
     logFailure('detectDeactivatedEmbeds', 'Error detecting deactivated Embeds', error, {
@@ -832,6 +840,10 @@ export async function copyDeactivatedEmbedData(req) {
 
 /**
  * Get cached rendered content for an Embed instance (view mode)
+ * 
+ * Standard return format:
+ * - Success: { success: true, data: { content: ADF, cachedAt: string } }
+ * - Error: { success: false, error: "error message" }
  */
 export async function getCachedContent(req) {
   try {
@@ -855,8 +867,10 @@ export async function getCachedContent(req) {
 
     return {
       success: true,
-      content: cached.content,
-      cachedAt: cached.cachedAt
+      data: {
+        content: cached.content,
+        cachedAt: cached.cachedAt
+      }
     };
   } catch (error) {
     logFailure('getCachedContent', 'Error loading cached content', error, { localId: req.payload?.localId });
@@ -896,6 +910,10 @@ export async function getCategories() {
 
 /**
  * Save categories to storage
+ * 
+ * Standard return format:
+ * - Success: { success: true, data: {} }
+ * - Error: { success: false, error: "error message" }
  */
 export async function saveCategories(req) {
   try {
@@ -911,7 +929,8 @@ export async function saveCategories(req) {
     await storage.set('categories', { categories });
 
     return {
-      success: true
+      success: true,
+      data: {}
     };
   } catch (error) {
     logFailure('saveCategories', 'Error saving categories', error);
@@ -1139,7 +1158,12 @@ export async function saveCachedContent(req) {
 
     await storage.set(varsKey, existingVars);
 
-    return { success: true, cachedAt: now };
+    return {
+      success: true,
+      data: {
+        cachedAt: now
+      }
+    };
   } catch (error) {
     logFailure('saveCachedContent', 'Error saving cached content', error);
     return { success: false, error: error.message };
@@ -1364,6 +1388,13 @@ export async function setAdminUrl(req) {
   }
 }
 
+/**
+ * Query Forge storage by key (debugging tool)
+ * 
+ * Standard return format:
+ * - Success: { success: true, data: { exists: boolean, key: string, data: any, dataType: string, dataSize: number, message?: string } }
+ * - Error: { success: false, error: "error message" }
+ */
 export async function queryStorage(req) {
   const { key } = req.payload || {};
   const extractedKey = key; // Extract for use in catch block
@@ -1382,20 +1413,26 @@ export async function queryStorage(req) {
     if (data === null || data === undefined) {
       return {
         success: true,
-        exists: false,
-        key,
-        data: null,
-        message: `No data found for key: ${key}`
+        data: {
+          exists: false,
+          key,
+          data: null,
+          dataType: 'null',
+          dataSize: 0,
+          message: `No data found for key: ${key}`
+        }
       };
     }
 
     return {
       success: true,
-      exists: true,
-      key,
-      data,
-      dataType: typeof data,
-      dataSize: JSON.stringify(data).length
+      data: {
+        exists: true,
+        key,
+        data,
+        dataType: typeof data,
+        dataSize: JSON.stringify(data).length
+      }
     };
   } catch (error) {
     logFailure('queryStorage', 'Error', error, { key: extractedKey });
@@ -1409,11 +1446,14 @@ export async function queryStorage(req) {
 /**
  * Query multiple storage keys by prefix with optional field filtering
  * 
+ * Standard return format:
+ * - Success: { success: true, data: { results: Array, count: number } }
+ * - Error: { success: false, error: "error message" }
+ * 
  * @param {Object} req.payload
  * @param {string} req.payload.prefix - Storage key prefix (e.g., 'excerpt:', 'macro-vars:')
  * @param {string} req.payload.filterField - Optional field path to filter by (e.g., 'name')
  * @param {string} req.payload.filterValue - Optional filter value (contains match, case-insensitive)
- * @returns {Object} { success: boolean, results: Array, count: number, error?: string }
  */
 export async function queryStorageMultiple(req) {
   const { prefix, filterField, filterValue } = req.payload || {};
@@ -1482,16 +1522,16 @@ export async function queryStorageMultiple(req) {
 
     return {
       success: true,
-      results,
-      count: results.length
+      data: {
+        results,
+        count: results.length
+      }
     };
   } catch (error) {
     logFailure('queryStorageMultiple', 'Error', error, { prefix: extractedPrefix, filterField: extractedFilterField, filterValue: extractedFilterValue });
     return {
       success: false,
-      error: error.message,
-      results: [],
-      count: 0
+      error: error.message
     };
   }
 }

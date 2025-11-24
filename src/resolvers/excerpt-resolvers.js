@@ -177,15 +177,18 @@ export async function saveExcerpt(req) {
   });
 
   // Return saved excerpt data
-  // NOTE: Return format will be standardized in Phase 4 (API Consistency)
+  // Standard return format: { success: true, data: { excerptId, excerptName, ... } }
   return {
-    excerptId: id,
-    excerptName: excerptName,
-    category: category,
-    content: content,
-    variables: variables,
-    toggles: toggles,
-    documentationLinks: excerpt.documentationLinks || []
+    success: true,
+    data: {
+      excerptId: id,
+      excerptName: excerptName,
+      category: category,
+      content: content,
+      variables: variables,
+      toggles: toggles,
+      documentationLinks: excerpt.documentationLinks || []
+    }
   };
 }
 
@@ -323,14 +326,15 @@ export async function getAllExcerpts() {
 
     return {
       success: true,
-      excerpts: excerpts.filter(e => e !== null)
+      data: {
+        excerpts: excerpts.filter(e => e !== null)
+      }
     };
   } catch (error) {
     logFailure('getAllExcerpts', 'Error getting all excerpts', error);
     return {
       success: false,
-      error: error.message,
-      excerpts: []
+      error: error.message
     };
   }
 }

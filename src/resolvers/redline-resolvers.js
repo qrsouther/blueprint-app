@@ -225,18 +225,28 @@ export async function getRedlineQueue(req) {
         groups[groupKey].push(embed);
       });
 
-      return { embeds: filteredEmbeds, groups };
+      return {
+        success: true,
+        data: {
+          embeds: filteredEmbeds,
+          groups
+        }
+      };
     }
 
-    return { embeds: filteredEmbeds, groups: null };
+    return {
+      success: true,
+      data: {
+        embeds: filteredEmbeds,
+        groups: null
+      }
+    };
 
   } catch (error) {
     logFailure('getRedlineQueue', 'Error loading redline queue', error);
     return {
       success: false,
-      error: `Failed to load redline queue: ${error.message}`,
-      embeds: [],
-      groups: null
+      error: `Failed to load redline queue: ${error.message}`
     };
   }
 }
@@ -367,10 +377,12 @@ export async function setRedlineStatus(req) {
 
     return {
       success: true,
-      localId,
-      newStatus: status,
-      previousStatus,
-      approvedContentHash
+      data: {
+        localId,
+        newStatus: status,
+        previousStatus,
+        approvedContentHash
+      }
     };
 
   } catch (error) {
@@ -645,13 +657,16 @@ export async function getConfluenceUser(req) {
     const userData = await response.json();
 
     return {
-      accountId: userData.accountId,
-      displayName: userData.displayName || userData.publicName,
-      publicName: userData.publicName,
-      email: userData.email,
-      profilePicture: userData.profilePicture || {
-        path: null,
-        isDefault: true
+      success: true,
+      data: {
+        accountId: userData.accountId,
+        displayName: userData.displayName || userData.publicName,
+        publicName: userData.publicName,
+        email: userData.email,
+        profilePicture: userData.profilePicture || {
+          path: null,
+          isDefault: true
+        }
       }
     };
 
@@ -659,14 +674,17 @@ export async function getConfluenceUser(req) {
     logFailure('getConfluenceUser', 'Error fetching Confluence user', error, { accountId });
     // Return fallback data instead of throwing
     return {
-      accountId,
-      displayName: 'Unknown User',
-      publicName: 'Unknown User',
-      profilePicture: {
-        path: null,
-        isDefault: true
-      },
-      error: error.message
+      success: true,
+      data: {
+        accountId,
+        displayName: 'Unknown User',
+        publicName: 'Unknown User',
+        profilePicture: {
+          path: null,
+          isDefault: true
+        },
+        error: error.message
+      }
     };
   }
 }
@@ -724,18 +742,16 @@ export async function getRedlineStats() {
       }
     }
 
-    return stats;
+    return {
+      success: true,
+      data: stats
+    };
 
   } catch (error) {
     logFailure('getRedlineStats', 'Error getting redline stats', error);
     return {
       success: false,
-      error: `Failed to get redline stats: ${error.message}`,
-      reviewable: 0,
-      preApproved: 0,
-      needsRevision: 0,
-      approved: 0,
-      total: 0
+      error: `Failed to get redline stats: ${error.message}`
     };
   }
 }
@@ -876,9 +892,11 @@ export async function postRedlineComment(req) {
 
     return {
       success: true,
-      commentId: commentData.id,
-      textSelection,
-      location: `match ${matchIndex + 1} of ${matchCount}`
+      data: {
+        commentId: commentData.id,
+        textSelection,
+        location: `match ${matchIndex + 1} of ${matchCount}`
+      }
     };
 
   } catch (error) {

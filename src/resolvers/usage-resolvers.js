@@ -131,11 +131,13 @@ export async function trackExcerptUsage(req) {
 
     return {
       success: true,
-      pageId,
-      pageTitle,
-      spaceKey,
-      headingAnchor,
-      toggleStates
+      data: {
+        pageId,
+        pageTitle,
+        spaceKey,
+        headingAnchor,
+        toggleStates
+      }
     };
   } catch (error) {
     logFailure('trackExcerptUsage', 'Error tracking excerpt usage', error, { excerptId: extractedExcerptId, localId: extractedLocalId });
@@ -188,7 +190,8 @@ export async function removeExcerptUsage(req) {
     }
 
     return {
-      success: true
+      success: true,
+      data: {}
     };
   } catch (error) {
     logFailure('removeExcerptUsage', 'Error removing excerpt usage', error, { excerptId: extractedExcerptId, localId: extractedLocalId });
@@ -233,14 +236,15 @@ export async function getExcerptUsage(req) {
 
     return {
       success: true,
-      usage: enrichedReferences
+      data: {
+        usage: enrichedReferences
+      }
     };
   } catch (error) {
     logFailure('getExcerptUsage', 'Error getting excerpt usage', error, { excerptId: extractedExcerptId });
     return {
       success: false,
-      error: error.message,
-      usage: []
+      error: error.message
     };
   }
 }
@@ -319,14 +323,15 @@ export async function getExcerptUsageForCSV(req) {
 
     return {
       success: true,
-      usage: enrichedReferences
+      data: {
+        usage: enrichedReferences
+      }
     };
   } catch (error) {
     logFailure('getExcerptUsageForCSV', 'Error getting excerpt usage for CSV', error, { excerptId: extractedExcerptId });
     return {
       success: false,
-      error: error.message,
-      usage: []
+      error: error.message
     };
   }
 }
@@ -392,14 +397,15 @@ export async function getAllUsageCounts() {
 
     return {
       success: true,
-      usageCounts
+      data: {
+        usageCounts
+      }
     };
   } catch (error) {
     logFailure('getAllUsageCounts', 'Error getting all usage counts', error);
     return {
       success: false,
-      error: error.message,
-      usageCounts: {}
+      error: error.message
     };
   }
 }
