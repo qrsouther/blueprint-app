@@ -255,6 +255,10 @@ export async function debugExcerpt(req) {
 
 /**
  * Get page title by content ID
+ * 
+ * Standard return format:
+ * - Success: { success: true, data: { title: string } }
+ * - Error: { success: false, error: "error message" }
  */
 export async function getPageTitle(req) {
   try {
@@ -274,7 +278,9 @@ export async function getPageTitle(req) {
 
     return {
       success: true,
-      title: data.title
+      data: {
+        title: data.title
+      }
     };
   } catch (error) {
     logFailure('getPageTitle', 'Error getting page title', error, { contentId: req.payload?.contentId });
@@ -287,6 +293,10 @@ export async function getPageTitle(req) {
 
 /**
  * Get variable values and toggle states for a specific macro instance
+ * 
+ * Standard return format:
+ * - Success: { success: true, data: { variableValues, toggleStates, customInsertions, ... } }
+ * - Error: { success: false, error: "error message" }
  */
 export async function getVariableValues(req) {
   try {
@@ -306,19 +316,21 @@ export async function getVariableValues(req) {
 
     return {
       success: true,
-      variableValues: data.variableValues || {},
-      toggleStates: data.toggleStates || {},
-      customInsertions: data.customInsertions || [],
-      internalNotes: data.internalNotes || [],
-      lastSynced: data.lastSynced,
-      excerptId: data.excerptId,
-      syncedContentHash: data.syncedContentHash,  // Hash for staleness detection
-      syncedContent: data.syncedContent,  // Old Source ADF for diff comparison
-      redlineStatus: data.redlineStatus || 'reviewable',  // Redline approval status
-      approvedBy: data.approvedBy,
-      approvedAt: data.approvedAt,
-      lastChangedBy: data.lastChangedBy,  // User who made the last status change
-      lastChangedAt: data.lastChangedAt
+      data: {
+        variableValues: data.variableValues || {},
+        toggleStates: data.toggleStates || {},
+        customInsertions: data.customInsertions || [],
+        internalNotes: data.internalNotes || [],
+        lastSynced: data.lastSynced,
+        excerptId: data.excerptId,
+        syncedContentHash: data.syncedContentHash,  // Hash for staleness detection
+        syncedContent: data.syncedContent,  // Old Source ADF for diff comparison
+        redlineStatus: data.redlineStatus || 'reviewable',  // Redline approval status
+        approvedBy: data.approvedBy,
+        approvedAt: data.approvedAt,
+        lastChangedBy: data.lastChangedBy,  // User who made the last status change
+        lastChangedAt: data.lastChangedAt
+      }
     };
   } catch (error) {
     logFailure('getVariableValues', 'Error getting variable values', error, { localId: req.payload?.localId });

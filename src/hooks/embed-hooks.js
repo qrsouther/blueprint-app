@@ -192,21 +192,22 @@ export const useCachedContent = (
       // No cached content - fetch fresh and process
 
       const excerptResult = await invoke('getExcerpt', { excerptId });
-      if (!excerptResult.success || !excerptResult.excerpt) {
+      if (!excerptResult.success || !excerptResult.data || !excerptResult.data.excerpt) {
         throw new Error('Failed to load excerpt');
       }
 
-      setExcerptForViewMode(excerptResult.excerpt);
+      setExcerptForViewMode(excerptResult.data.excerpt);
 
       // Load variable values and check for orphaned data
       let varsResult = await invoke('getVariableValues', { localId });
 
       // CRITICAL: Check if data is missing - attempt recovery from drag-to-move
-      const hasNoData = !varsResult.lastSynced &&
-                        Object.keys(varsResult.variableValues || {}).length === 0 &&
-                        Object.keys(varsResult.toggleStates || {}).length === 0 &&
-                        (varsResult.customInsertions || []).length === 0 &&
-                        (varsResult.internalNotes || []).length === 0;
+      const varsData = varsResult.success && varsResult.data ? varsResult.data : {};
+      const hasNoData = !varsData.lastSynced &&
+                        Object.keys(varsData.variableValues || {}).length === 0 &&
+                        Object.keys(varsData.toggleStates || {}).length === 0 &&
+                        (varsData.customInsertions || []).length === 0 &&
+                        (varsData.internalNotes || []).length === 0;
 
       if (varsResult.success && hasNoData && excerptId) {
         const pageId = context?.contentId || context?.extension?.content?.id;
@@ -223,10 +224,11 @@ export const useCachedContent = (
         }
       }
 
-      const loadedVariableValues = varsResult.success ? varsResult.variableValues : {};
-      const loadedToggleStates = varsResult.success ? varsResult.toggleStates : {};
-      const loadedCustomInsertions = varsResult.success ? varsResult.customInsertions : [];
-      const loadedInternalNotes = varsResult.success ? varsResult.internalNotes : [];
+      const finalVarsData = varsResult.success && varsResult.data ? varsResult.data : {};
+      const loadedVariableValues = finalVarsData.variableValues || {};
+      const loadedToggleStates = finalVarsData.toggleStates || {};
+      const loadedCustomInsertions = finalVarsData.customInsertions || [];
+      const loadedInternalNotes = finalVarsData.internalNotes || [];
 
       setVariableValues(loadedVariableValues);
       setToggleStates(loadedToggleStates);
@@ -234,7 +236,7 @@ export const useCachedContent = (
       setInternalNotes(loadedInternalNotes);
 
       // Generate and cache the content
-      let freshContent = excerptResult.excerpt.content;
+      let freshContent = excerptResult.data.excerpt.content;
       const isAdf = freshContent && typeof freshContent === 'object' && freshContent.type === 'doc';
 
       if (isAdf) {
