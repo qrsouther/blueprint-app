@@ -99,12 +99,17 @@ const useSaveExcerptMutation = () => {
           sourceLocalId
         });
 
-        // Backend returns excerpt data directly (no success wrapper)
-        if (!result || !result.excerptId) {
+        // Handle backend validation errors
+        if (!result || !result.success) {
+          throw new Error(result.error || 'Failed to save excerpt');
+        }
+
+        // Return data from standardized format
+        if (!result.data || !result.data.excerptId) {
           throw new Error('Failed to save excerpt - invalid response');
         }
 
-        return result;
+        return result.data;
       } catch (error) {
         logger.errors('Save error:', error);
         throw error;
