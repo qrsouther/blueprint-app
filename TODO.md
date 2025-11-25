@@ -6,6 +6,49 @@ This file tracks ongoing tasks, future enhancements, and technical debt for the 
 
 ## Current Sprint / Active Work
 
+### Test Priority 5: Version History & Recovery
+**Status:** 🔄 TODO
+**Priority:** High
+**Created:** 2025-11-21
+**Target Date:** 2025-11-22
+
+**Context:**
+After completing the API contract standardization refactor, we tested Priorities 1-4 (all passing). Priority 5 (Version History & Recovery) was deferred as lower priority but should be tested to ensure the standardized API contract works for all resolvers.
+
+**Test Cases to Complete:**
+1. **Test 5.1: View Version History**
+   - Open Version History for an Embed
+   - **Expected:** Version list loads
+   - **Resolvers tested:** `getVersionHistory`
+
+2. **Test 5.2: View Version Details**
+   - Click on a version in history
+   - **Expected:** Version details display
+   - **Resolvers tested:** `getVersionDetails`
+
+3. **Test 5.3: Restore from Version**
+   - Restore an Embed from a previous version
+   - **Expected:** Embed restores, backup created
+   - **Resolvers tested:** `restoreFromVersion`
+
+4. **Test 5.4: List Backups**
+   - View backup list (if applicable)
+   - **Expected:** Backups list correctly
+   - **Resolvers tested:** `listBackups`
+
+**Related Files:**
+- `TESTING_PLAN_STANDARDIZED_RESOLVERS.md` - Full test plan
+- `src/resolvers/version-resolvers.js` - Version history resolvers
+- `src/resolvers/restore-resolvers.js` - Restore resolvers
+
+**Success Criteria:**
+- All Priority 5 tests pass
+- All resolvers return standardized format: `{ success: true, data: {...} }` or `{ success: false, error: "..." }`
+- No console errors
+- Version history and restore functionality works as expected
+
+---
+
 ### Fix Approve Button Alignment in Redline Queue Card
 **Status:** 🔄 TODO
 **Priority:** Low
