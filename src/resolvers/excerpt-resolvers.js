@@ -89,8 +89,16 @@ export async function saveExcerpt(req) {
   // Generate or reuse excerpt ID
   const id = excerptId || generateUUID();
 
+  // Provide default empty ADF object if content is missing (for new Sources)
+  // This allows creating a Source with just name/category, content can be added later
+  const contentToProcess = content || {
+    type: 'doc',
+    version: 1,
+    content: []
+  };
+
   // Detect variables in content
-  const detectedVariables = detectVariables(content);
+  const detectedVariables = detectVariables(contentToProcess);
 
   // Merge detected variables with provided metadata
   const variables = detectedVariables.map(v => {
@@ -104,7 +112,7 @@ export async function saveExcerpt(req) {
   });
 
   // Detect toggles in content
-  const detectedToggles = detectToggles(content);
+  const detectedToggles = detectToggles(contentToProcess);
 
   // Merge detected toggles with provided metadata
   const toggles = detectedToggles.map(t => {
@@ -123,7 +131,7 @@ export async function saveExcerpt(req) {
     id: id,
     name: excerptName,
     category: category || 'General',
-    content: content,
+    content: contentToProcess,
     variables: variables,
     toggles: toggles,
     documentationLinks: documentationLinks || [],
