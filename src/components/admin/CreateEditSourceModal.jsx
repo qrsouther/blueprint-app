@@ -55,11 +55,11 @@ const useExcerptQuery = (excerptId, enabled) => {
     queryFn: async () => {
       const result = await invoke('getExcerpt', { excerptId });
 
-      if (!result.success || !result.excerpt) {
+      if (!result.success || !result.data || !result.data.excerpt) {
         throw new Error('Failed to load excerpt');
       }
 
-      return result.excerpt;
+      return result.data.excerpt;
     },
     enabled: enabled && !!excerptId,
     staleTime: 1000 * 60 * 5, // 5 minutes
@@ -105,18 +105,17 @@ const useSaveExcerptMutation = () => {
           sourceLocalId: virtualLocalId
         });
 
-        // Handle backend validation errors (new format)
-        if (result && result.success === false && result.error) {
-          throw new Error(result.error);
+        // Handle backend validation errors
+        if (!result || !result.success) {
+          throw new Error(result.error || 'Failed to save excerpt');
         }
 
-        // Backend returns excerpt data directly on success (no success wrapper)
-        // NOTE: Return format will be standardized in Phase 4 (API Consistency)
-        if (!result || !result.excerptId) {
+        // Return data from standardized format
+        if (!result.data || !result.data.excerptId) {
           throw new Error('Failed to save excerpt - invalid response');
         }
 
-        return result;
+        return result.data;
       } catch (error) {
         logger.errors('[REACT-QUERY-CREATE-EDIT] Save error:', error);
         throw error;
@@ -342,8 +341,8 @@ export function CreateEditSourceModal({
           });
 
           const result = await invoke('detectVariablesFromContent', { content: contentToDetect });
-          if (result.success) {
-            setDetectedVariables(result.variables);
+          if (result.success && result.data) {
+            setDetectedVariables(result.data.variables);
           } else {
             logger.errors('Failed to detect variables:', result.error);
             setDetectedVariables([]);
@@ -391,8 +390,8 @@ export function CreateEditSourceModal({
           }
 
           const result = await invoke('detectTogglesFromContent', { content: contentToDetect });
-          if (result.success) {
-            setDetectedToggles(result.toggles);
+          if (result.success && result.data) {
+            setDetectedToggles(result.data.toggles);
           } else {
             logger.errors('Failed to detect toggles:', result.error);
             setDetectedToggles([]);

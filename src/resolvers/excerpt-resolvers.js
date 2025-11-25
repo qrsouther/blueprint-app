@@ -87,10 +87,54 @@ export async function saveExcerpt(req) {
   const spaceKey = sourceSpaceKey || req.context?.extension?.space?.key;
 
   // Generate or reuse excerpt ID
-  const id = excerptId || generateUUID();
+  // If excerptId is missing, try to find existing Source by name + category + pageId to avoid duplicates
+  let id = excerptId;
+  if (!id && excerptName && pageId) {
+    try {
+      const index = await storage.get('excerpt-index') || { excerpts: [] };
+      // Look for existing Source with same name, category, and pageId
+      for (const indexEntry of index.excerpts) {
+        const existingExcerpt = await storage.get(`excerpt:${indexEntry.id}`);
+        if (existingExcerpt &&
+            existingExcerpt.name === excerptName &&
+            (existingExcerpt.category || 'General') === (category || 'General') &&
+            existingExcerpt.sourcePageId === pageId) {
+          id = existingExcerpt.id;
+          logPhase('saveExcerpt', 'Found existing Source by name/category/pageId, reusing excerptId', {
+            excerptId: id,
+            name: excerptName,
+            category: category || 'General',
+            pageId
+          });
+          break;
+        }
+      }
+    } catch (lookupError) {
+      logWarning('saveExcerpt', 'Error looking up existing Source, will create new one', lookupError);
+    }
+  }
+  
+  // Generate new UUID if still no ID found
+  if (!id) {
+    id = generateUUID();
+  }
+
+  // Provide default empty ADF object if content is missing (for new Sources)
+  // This allows creating a Source with just name/category, content can be added later
+  // Use a paragraph with empty text to satisfy ADF validation (empty content array is rejected)
+  const contentToProcess = content || {
+    type: 'doc',
+    version: 1,
+    content: [
+      {
+        type: 'paragraph',
+        content: []
+      }
+    ]
+  };
 
   // Detect variables in content
-  const detectedVariables = detectVariables(content);
+  const detectedVariables = detectVariables(contentToProcess);
 
   // Merge detected variables with provided metadata
   const variables = detectedVariables.map(v => {
@@ -104,7 +148,7 @@ export async function saveExcerpt(req) {
   });
 
   // Detect toggles in content
-  const detectedToggles = detectToggles(content);
+  const detectedToggles = detectToggles(contentToProcess);
 
   // Merge detected toggles with provided metadata
   const toggles = detectedToggles.map(t => {
@@ -116,14 +160,14 @@ export async function saveExcerpt(req) {
   });
 
   // Get existing excerpt to preserve createdAt and existing source page if not provided
-  const existingExcerpt = excerptId ? await storage.get(`excerpt:${id}`) : null;
+  const existingExcerpt = id ? await storage.get(`excerpt:${id}`) : null;
 
   // Create excerpt object (without hash first)
   const excerpt = {
     id: id,
     name: excerptName,
     category: category || 'General',
-    content: content,
+    content: contentToProcess,
     variables: variables,
     toggles: toggles,
     documentationLinks: documentationLinks || [],
@@ -177,15 +221,18 @@ export async function saveExcerpt(req) {
   });
 
   // Return saved excerpt data
-  // NOTE: Return format will be standardized in Phase 4 (API Consistency)
+  // Standard return format: { success: true, data: { excerptId, excerptName, ... } }
   return {
-    excerptId: id,
-    excerptName: excerptName,
-    category: category,
-    content: content,
-    variables: variables,
-    toggles: toggles,
-    documentationLinks: excerpt.documentationLinks || []
+    success: true,
+    data: {
+      excerptId: id,
+      excerptName: excerptName,
+      category: category,
+      content: content,
+      variables: variables,
+      toggles: toggles,
+      documentationLinks: excerpt.documentationLinks || []
+    }
   };
 }
 
@@ -323,14 +370,15 @@ export async function getAllExcerpts() {
 
     return {
       success: true,
-      excerpts: excerpts.filter(e => e !== null)
+      data: {
+        excerpts: excerpts.filter(e => e !== null)
+      }
     };
   } catch (error) {
     logFailure('getAllExcerpts', 'Error getting all excerpts', error);
     return {
       success: false,
-      error: error.message,
-      excerpts: []
+      error: error.message
     };
   }
 }

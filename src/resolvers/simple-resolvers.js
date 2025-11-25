@@ -83,14 +83,15 @@ export async function detectVariablesFromContent(req) {
     const variables = detectVariables(contentToProcess);
     return {
       success: true,
-      variables
+      data: {
+        variables
+      }
     };
   } catch (error) {
     logFailure('detectVariablesFromContent', 'Error detecting variables', error);
     return {
       success: false,
-      error: error.message,
-      variables: []
+      error: error.message
     };
   }
 }
@@ -157,40 +158,50 @@ export async function detectTogglesFromContent(req) {
     const toggles = detectToggles(contentToProcess);
     return {
       success: true,
-      toggles
+      data: {
+        toggles
+      }
     };
   } catch (error) {
     logFailure('detectTogglesFromContent', 'Error detecting toggles', error);
     return {
       success: false,
-      error: error.message,
-      toggles: []
+      error: error.message
     };
   }
 }
 
 /**
  * Get all excerpts from index
+ * 
+ * Standard return format:
+ * - Success: { success: true, data: { excerpts: [...] } }
+ * - Error: { success: false, error: "error message" }
  */
 export async function getExcerpts() {
   try {
     const index = await storage.get('excerpt-index') || { excerpts: [] };
     return {
       success: true,
-      excerpts: index.excerpts
+      data: {
+        excerpts: index.excerpts
+      }
     };
   } catch (error) {
     logFailure('getExcerpts', 'Error getting excerpts', error);
     return {
       success: false,
-      error: error.message,
-      excerpts: []
+      error: error.message
     };
   }
 }
 
 /**
  * Get specific excerpt by ID
+ * 
+ * Standard return format:
+ * - Success: { success: true, data: { excerpt: {...} } }
+ * - Error: { success: false, error: "error message" }
  */
 export async function getExcerpt(req) {
   try {
@@ -207,9 +218,19 @@ export async function getExcerpt(req) {
 
     const excerpt = await storage.get(`excerpt:${excerptId}`);
 
+    if (excerpt === null || excerpt === undefined) {
+      logFailure('getExcerpt', 'Excerpt not found in storage', new Error('Excerpt not found'), { excerptId, storageKey: `excerpt:${excerptId}` });
+      return {
+        success: false,
+        error: `Excerpt not found: ${excerptId}`
+      };
+    }
+
     return {
       success: true,
-      excerpt: excerpt
+      data: {
+        excerpt: excerpt
+      }
     };
   } catch (error) {
     logFailure('getExcerpt', 'Error getting excerpt', error, { excerptId: req.payload?.excerptId });
@@ -244,6 +265,10 @@ export async function debugExcerpt(req) {
 
 /**
  * Get page title by content ID
+ * 
+ * Standard return format:
+ * - Success: { success: true, data: { title: string } }
+ * - Error: { success: false, error: "error message" }
  */
 export async function getPageTitle(req) {
   try {
@@ -263,7 +288,9 @@ export async function getPageTitle(req) {
 
     return {
       success: true,
-      title: data.title
+      data: {
+        title: data.title
+      }
     };
   } catch (error) {
     logFailure('getPageTitle', 'Error getting page title', error, { contentId: req.payload?.contentId });
@@ -276,6 +303,10 @@ export async function getPageTitle(req) {
 
 /**
  * Get variable values and toggle states for a specific macro instance
+ * 
+ * Standard return format:
+ * - Success: { success: true, data: { variableValues, toggleStates, customInsertions, ... } }
+ * - Error: { success: false, error: "error message" }
  */
 export async function getVariableValues(req) {
   try {
@@ -295,19 +326,21 @@ export async function getVariableValues(req) {
 
     return {
       success: true,
-      variableValues: data.variableValues || {},
-      toggleStates: data.toggleStates || {},
-      customInsertions: data.customInsertions || [],
-      internalNotes: data.internalNotes || [],
-      lastSynced: data.lastSynced,
-      excerptId: data.excerptId,
-      syncedContentHash: data.syncedContentHash,  // Hash for staleness detection
-      syncedContent: data.syncedContent,  // Old Source ADF for diff comparison
-      redlineStatus: data.redlineStatus || 'reviewable',  // Redline approval status
-      approvedBy: data.approvedBy,
-      approvedAt: data.approvedAt,
-      lastChangedBy: data.lastChangedBy,  // User who made the last status change
-      lastChangedAt: data.lastChangedAt
+      data: {
+        variableValues: data.variableValues || {},
+        toggleStates: data.toggleStates || {},
+        customInsertions: data.customInsertions || [],
+        internalNotes: data.internalNotes || [],
+        lastSynced: data.lastSynced,
+        excerptId: data.excerptId,
+        syncedContentHash: data.syncedContentHash,  // Hash for staleness detection
+        syncedContent: data.syncedContent,  // Old Source ADF for diff comparison
+        redlineStatus: data.redlineStatus || 'reviewable',  // Redline approval status
+        approvedBy: data.approvedBy,
+        approvedAt: data.approvedAt,
+        lastChangedBy: data.lastChangedBy,  // User who made the last status change
+        lastChangedAt: data.lastChangedAt
+      }
     };
   } catch (error) {
     logFailure('getVariableValues', 'Error getting variable values', error, { localId: req.payload?.localId });
@@ -474,10 +507,12 @@ export async function recoverOrphanedData(req) {
       
       return {
         success: true,
-        recovered: true,
-        data: orphanedEntry.data,
-        migratedFrom: orphanedEntry.localId,
-        candidateCount: candidates.length
+        data: {
+          recovered: true,
+          data: orphanedEntry.data,
+          migratedFrom: orphanedEntry.localId,
+          candidateCount: candidates.length
+        }
       };
     } else {
       logPhase('recoverOrphanedData', 'No candidates found', {
@@ -488,8 +523,10 @@ export async function recoverOrphanedData(req) {
       });
       return {
         success: true,
-        recovered: false,
-        reason: 'no_candidates'
+        data: {
+          recovered: false,
+          reason: 'no_candidates'
+        }
       };
     }
   } catch (error) {
@@ -697,7 +734,9 @@ export async function detectDeactivatedEmbeds(req) {
 
     return {
       success: true,
-      deactivatedEmbeds: deactivatedEmbeds
+      data: {
+        deactivatedEmbeds: deactivatedEmbeds
+      }
     };
   } catch (error) {
     logFailure('detectDeactivatedEmbeds', 'Error detecting deactivated Embeds', error, {
@@ -761,6 +800,7 @@ export async function copyDeactivatedEmbedData(req) {
       syncedContentHash: sourceData.syncedContentHash || null,
       syncedContent: sourceData.syncedContent || null,
       pageId: sourceData.pageId || null,
+      pageTitle: sourceData.pageTitle || null, // Preserve pageTitle if available
       // Preserve redline fields if they exist
       redlineStatus: sourceData.redlineStatus || 'reviewable',
       approvedContentHash: sourceData.approvedContentHash || null,
@@ -801,6 +841,10 @@ export async function copyDeactivatedEmbedData(req) {
 
 /**
  * Get cached rendered content for an Embed instance (view mode)
+ * 
+ * Standard return format:
+ * - Success: { success: true, data: { content: ADF, cachedAt: string } }
+ * - Error: { success: false, error: "error message" }
  */
 export async function getCachedContent(req) {
   try {
@@ -824,8 +868,10 @@ export async function getCachedContent(req) {
 
     return {
       success: true,
-      content: cached.content,
-      cachedAt: cached.cachedAt
+      data: {
+        content: cached.content,
+        cachedAt: cached.cachedAt
+      }
     };
   } catch (error) {
     logFailure('getCachedContent', 'Error loading cached content', error, { localId: req.payload?.localId });
@@ -835,6 +881,10 @@ export async function getCachedContent(req) {
 
 /**
  * Get saved categories
+ * 
+ * Standard return format:
+ * - Success: { success: true, data: { categories: [...] } }
+ * - Error: { success: false, error: "error message" }
  */
 export async function getCategories() {
   try {
@@ -846,20 +896,25 @@ export async function getCategories() {
 
     return {
       success: true,
-      categories
+      data: {
+        categories
+      }
     };
   } catch (error) {
     logFailure('getCategories', 'Error getting categories', error);
     return {
       success: false,
-      error: error.message,
-      categories: ['General', 'Pricing', 'Technical', 'Legal', 'Marketing']
+      error: error.message
     };
   }
 }
 
 /**
  * Save categories to storage
+ * 
+ * Standard return format:
+ * - Success: { success: true, data: {} }
+ * - Error: { success: false, error: "error message" }
  */
 export async function saveCategories(req) {
   try {
@@ -875,7 +930,8 @@ export async function saveCategories(req) {
     await storage.set('categories', { categories });
 
     return {
-      success: true
+      success: true,
+      data: {}
     };
   } catch (error) {
     logFailure('saveCategories', 'Error saving categories', error);
@@ -964,7 +1020,9 @@ export async function getCheckProgress(req) {
 
     return {
       success: true,
-      progress
+      data: {
+        progress
+      }
     };
   } catch (error) {
     logFailure('getCheckProgress', 'Error getting progress', error, { progressId: req.payload?.progressId });
@@ -1103,7 +1161,12 @@ export async function saveCachedContent(req) {
 
     await storage.set(varsKey, existingVars);
 
-    return { success: true, cachedAt: now };
+    return {
+      success: true,
+      data: {
+        cachedAt: now
+      }
+    };
   } catch (error) {
     logFailure('saveCachedContent', 'Error saving cached content', error);
     return { success: false, error: error.message };
@@ -1141,14 +1204,15 @@ export async function getOrphanedUsage() {
 
     return {
       success: true,
-      orphanedUsage
+      data: {
+        orphanedUsage
+      }
     };
   } catch (error) {
     logFailure('getOrphanedUsage', 'Error getting orphaned usage', error);
     return {
       success: false,
-      error: error.message,
-      orphanedUsage: []
+      error: error.message
     };
   }
 }
@@ -1188,6 +1252,71 @@ export async function setLastVerificationTime(req) {
     };
   } catch (error) {
     logFailure('setLastVerificationTime', 'Error setting last verification time', error);
+    return {
+      success: false,
+      error: error.message
+    };
+  }
+}
+
+/**
+ * Get next scheduled check time
+ * Returns the timestamp when the next automatic "Check All Embeds" should run
+ * Used by Admin page to determine if check should run automatically
+ */
+export async function getNextScheduledCheckTime() {
+  try {
+    const nextScheduledTime = await storage.get('meta:next-scheduled-check-time');
+    return {
+      success: true,
+      data: {
+        nextScheduledTime: nextScheduledTime || null
+      }
+    };
+  } catch (error) {
+    logFailure('getNextScheduledCheckTime', 'Error getting next scheduled check time', error);
+    return {
+      success: false,
+      error: error.message
+    };
+  }
+}
+
+/**
+ * Set next scheduled check time
+ * Sets the timestamp when the next automatic "Check All Embeds" should run
+ * Typically set to 10 AM UTC tomorrow after a check completes
+ */
+export async function setNextScheduledCheckTime(req) {
+  const { timestamp } = req.payload || {};
+  
+  try {
+    // Input validation
+    if (!timestamp || typeof timestamp !== 'string' || timestamp.trim() === '') {
+      logFailure('setNextScheduledCheckTime', 'Validation failed: timestamp is required and must be a non-empty ISO string', new Error('Invalid timestamp'));
+      return {
+        success: false,
+        error: 'timestamp is required and must be a non-empty ISO string'
+      };
+    }
+
+    // Validate that timestamp is a valid ISO date string
+    const date = new Date(timestamp);
+    if (isNaN(date.getTime())) {
+      logFailure('setNextScheduledCheckTime', 'Validation failed: timestamp must be a valid ISO date string', new Error('Invalid date'));
+      return {
+        success: false,
+        error: 'timestamp must be a valid ISO date string'
+      };
+    }
+
+    await storage.set('meta:next-scheduled-check-time', timestamp);
+    return {
+      success: true,
+      data: {}
+    };
+  } catch (error) {
+    logFailure('setNextScheduledCheckTime', 'Error setting next scheduled check time', error);
     return {
       success: false,
       error: error.message
@@ -1274,20 +1403,25 @@ export async function getForgeEnvironment(req) {
 /**
  * Get the stored Admin page URL
  * Returns the URL stored when the admin page first loads
+ * 
+ * Standard return format:
+ * - Success: { success: true, data: { adminUrl: string | null } }
+ * - Error: { success: false, error: "error message" }
  */
 export async function getAdminUrl() {
   try {
     const adminUrl = await storage.get('app-config:adminUrl');
     return {
       success: true,
-      adminUrl: adminUrl || null
+      data: {
+        adminUrl: adminUrl || null
+      }
     };
   } catch (error) {
     logFailure('getAdminUrl', 'Error getting admin URL', error);
     return {
       success: false,
-      error: error.message,
-      adminUrl: null
+      error: error.message
     };
   }
 }
@@ -1295,6 +1429,10 @@ export async function getAdminUrl() {
 /**
  * Store the Admin page URL
  * Called by the admin page when it first loads to store its URL
+ * 
+ * Standard return format:
+ * - Success: { success: true, data: {} }
+ * - Error: { success: false, error: "error message" }
  */
 export async function setAdminUrl(req) {
   try {
@@ -1307,7 +1445,8 @@ export async function setAdminUrl(req) {
     }
     await storage.set('app-config:adminUrl', adminUrl);
     return {
-      success: true
+      success: true,
+      data: {}
     };
   } catch (error) {
     logFailure('setAdminUrl', 'Error setting admin URL', error);
@@ -1318,6 +1457,13 @@ export async function setAdminUrl(req) {
   }
 }
 
+/**
+ * Query Forge storage by key (debugging tool)
+ * 
+ * Standard return format:
+ * - Success: { success: true, data: { exists: boolean, key: string, data: any, dataType: string, dataSize: number, message?: string } }
+ * - Error: { success: false, error: "error message" }
+ */
 export async function queryStorage(req) {
   const { key } = req.payload || {};
   const extractedKey = key; // Extract for use in catch block
@@ -1336,20 +1482,26 @@ export async function queryStorage(req) {
     if (data === null || data === undefined) {
       return {
         success: true,
-        exists: false,
-        key,
-        data: null,
-        message: `No data found for key: ${key}`
+        data: {
+          exists: false,
+          key,
+          data: null,
+          dataType: 'null',
+          dataSize: 0,
+          message: `No data found for key: ${key}`
+        }
       };
     }
 
     return {
       success: true,
-      exists: true,
-      key,
-      data,
-      dataType: typeof data,
-      dataSize: JSON.stringify(data).length
+      data: {
+        exists: true,
+        key,
+        data,
+        dataType: typeof data,
+        dataSize: JSON.stringify(data).length
+      }
     };
   } catch (error) {
     logFailure('queryStorage', 'Error', error, { key: extractedKey });
@@ -1363,11 +1515,14 @@ export async function queryStorage(req) {
 /**
  * Query multiple storage keys by prefix with optional field filtering
  * 
+ * Standard return format:
+ * - Success: { success: true, data: { results: Array, count: number } }
+ * - Error: { success: false, error: "error message" }
+ * 
  * @param {Object} req.payload
  * @param {string} req.payload.prefix - Storage key prefix (e.g., 'excerpt:', 'macro-vars:')
  * @param {string} req.payload.filterField - Optional field path to filter by (e.g., 'name')
  * @param {string} req.payload.filterValue - Optional filter value (contains match, case-insensitive)
- * @returns {Object} { success: boolean, results: Array, count: number, error?: string }
  */
 export async function queryStorageMultiple(req) {
   const { prefix, filterField, filterValue } = req.payload || {};
@@ -1436,16 +1591,16 @@ export async function queryStorageMultiple(req) {
 
     return {
       success: true,
-      results,
-      count: results.length
+      data: {
+        results,
+        count: results.length
+      }
     };
   } catch (error) {
     logFailure('queryStorageMultiple', 'Error', error, { prefix: extractedPrefix, filterField: extractedFilterField, filterValue: extractedFilterValue });
     return {
       success: false,
-      error: error.message,
-      results: [],
-      count: 0
+      error: error.message
     };
   }
 }

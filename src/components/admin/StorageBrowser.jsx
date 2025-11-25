@@ -1226,7 +1226,7 @@ export function StorageBrowser() {
     <Box xcss={containerStyles}>
       <Stack space="space.200">
         <Inline space="space.100" alignBlock="center" spread="space-between">
-          <Heading size="medium">💾 Storage Browser</Heading>
+          <Heading size="medium">Storage Browser</Heading>
           <Button
             appearance={editMode ? "default" : "primary"}
             onClick={() => {

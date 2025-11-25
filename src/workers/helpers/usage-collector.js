@@ -44,9 +44,30 @@ export async function collectAllEmbedInstances(excerptIds) {
     allIncludes.push(...references);
   }
 
+  // IMPORTANT: Filter out embeds that don't have corresponding macro-vars:* entries
+  // This prevents issues when production data is imported into dev - usage tracking
+  // may reference embeds that don't actually exist in the current environment
+  const validIncludes = [];
+  for (const include of allIncludes) {
+    const macroVarsKey = `macro-vars:${include.localId}`;
+    const macroVars = await storage.get(macroVarsKey);
+    
+    // Only include if macro-vars entry exists and is not soft-deleted
+    if (macroVars) {
+      const deletedEntry = await storage.get(`macro-vars-deleted:${include.localId}`);
+      if (!deletedEntry) {
+        validIncludes.push(include);
+      } else {
+        logWarning('collectAllEmbedInstances', 'Skipping soft-deleted embed from usage tracking', { localId: include.localId });
+      }
+    } else {
+      logWarning('collectAllEmbedInstances', 'Skipping embed without macro-vars entry (likely from production import)', { localId: include.localId, excerptId: include.excerptId });
+    }
+  }
+
   // Deduplicate by localId (in case an Include references multiple excerpts)
   const uniqueIncludes = Array.from(
-    new Map(allIncludes.map(inc => [inc.localId, inc])).values()
+    new Map(validIncludes.map(inc => [inc.localId, inc])).values()
   );
 
   return {

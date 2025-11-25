@@ -48,11 +48,11 @@ const useExcerptQuery = (excerptId, enabled) => {
     queryFn: async () => {
       const result = await invoke('getExcerpt', { excerptId });
 
-      if (!result.success || !result.excerpt) {
-        throw new Error('Failed to load excerpt');
+      if (!result.success || !result.data?.excerpt) {
+        throw new Error(result.error || 'Failed to load excerpt');
       }
 
-      return result.excerpt;
+      return result.data.excerpt;
     },
     enabled: enabled && !!excerptId,
     staleTime: 0, // Always consider data stale - force refetch every time
@@ -68,8 +68,8 @@ const useAdminUrlQuery = () => {
     queryKey: ['adminUrl'],
     queryFn: async () => {
       const result = await invoke('getAdminUrl');
-      if (result.success && result.adminUrl) {
-        return result.adminUrl;
+      if (result.success && result.data && result.data.adminUrl) {
+        return result.data.adminUrl;
       }
       return null;
     },
@@ -99,12 +99,17 @@ const useSaveExcerptMutation = () => {
           sourceLocalId
         });
 
-        // Backend returns excerpt data directly (no success wrapper)
-        if (!result || !result.excerptId) {
+        // Handle backend validation errors
+        if (!result || !result.success) {
+          throw new Error(result.error || 'Failed to save excerpt');
+        }
+
+        // Return data from standardized format
+        if (!result.data || !result.data.excerptId) {
           throw new Error('Failed to save excerpt - invalid response');
         }
 
-        return result;
+        return result.data;
       } catch (error) {
         logger.errors('Save error:', error);
         throw error;
@@ -140,6 +145,7 @@ const App = () => {
   const [detectedToggles, setDetectedToggles] = useState([]);
   const [toggleMetadata, setToggleMetadata] = useState({});
   const [documentationLinks, setDocumentationLinks] = useState([]);
+  const [isSubmitting, setIsSubmitting] = useState(false); // Track when save is in progress until modal closes
 
   // Form state for adding new documentation links
   const [newLinkAnchor, setNewLinkAnchor] = useState('');
@@ -295,8 +301,8 @@ const App = () => {
     const detectVars = async () => {
       try {
         const result = await invoke('detectVariablesFromContent', { content: macroBody });
-        if (result.success) {
-          setDetectedVariables(result.variables);
+        if (result.success && result.data) {
+          setDetectedVariables(result.data.variables);
         }
       } catch (err) {
         logger.errors('Error detecting variables:', err);
@@ -317,8 +323,8 @@ const App = () => {
     const detectToggs = async () => {
       try {
         const result = await invoke('detectTogglesFromContent', { content: macroBody });
-        if (result.success) {
-          setDetectedToggles(result.toggles);
+        if (result.success && result.data) {
+          setDetectedToggles(result.data.toggles);
         }
       } catch (err) {
         logger.errors('Error detecting toggles:', err);
@@ -355,6 +361,7 @@ const App = () => {
     const sourceSpaceKey = context?.spaceKey || context?.extension?.space?.key;
 
     // Use React Query mutation to save
+    setIsSubmitting(true); // Set submitting state immediately
     return new Promise((resolve, reject) => {
       saveExcerptMutation({
         excerptName,
@@ -372,6 +379,7 @@ const App = () => {
         onSuccess: async (result) => {
           try {
             // Only submit the config fields (not the content, which is in the body)
+            // result is from saveExcerpt mutation which now returns result.data
             const configToSubmit = {
               excerptId: result.excerptId,
               excerptName: excerptName,
@@ -384,9 +392,11 @@ const App = () => {
             // Use a small delay to ensure the mutation completes before modal closes
             await new Promise(resolve => setTimeout(resolve, 100));
             await view.submit({ config: configToSubmit });
+            // Keep isSubmitting true - modal will close and component will unmount
             resolve();
           } catch (error) {
             logger.errors('Error submitting config:', error);
+            setIsSubmitting(false); // Reset on error so user can try again
             // Still resolve to allow modal to close even if submit fails
             // The data is already saved to storage, so this is just updating the macro config
             resolve();
@@ -394,6 +404,7 @@ const App = () => {
         },
         onError: (error) => {
           logger.errors('Failed to save excerpt:', error);
+          setIsSubmitting(false); // Reset on error so user can try again
           reject(error);
         }
       });
@@ -711,11 +722,17 @@ const App = () => {
             </Text>
           )}
           <Inline space="space.200">
-            <Button appearance="primary" type="submit">
-              Save
+            <Button 
+              appearance="primary" 
+              type="submit"
+              isDisabled={isSavingExcerpt || isSubmitting}
+              isLoading={isSavingExcerpt || isSubmitting}
+            >
+              {(isSavingExcerpt || isSubmitting) ? 'Saving...' : 'Save'}
             </Button>
             <Button
               appearance="link"
+              isDisabled={isSavingExcerpt}
               onClick={async () => {
                 try {
                   // Use dynamically fetched admin URL, or fallback to hardcoded URL

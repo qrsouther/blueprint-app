@@ -90,6 +90,16 @@ export async function saveVariableValues(req) {
     const key = `macro-vars:${localId}`;
     const now = new Date().toISOString();
 
+    // Check if this embed was soft-deleted - if so, don't recreate it
+    const deletedEntry = await storage.get(`macro-vars-deleted:${localId}`);
+    if (deletedEntry) {
+      logWarning('saveVariableValues', 'Attempted to save variables for soft-deleted embed', { localId, excerptId });
+      return {
+        success: false,
+        error: 'This embed has been soft-deleted and cannot be modified. Please recover it first if needed.'
+      };
+    }
+
     // OPTIMIZATION: Load excerpt and existing config in parallel (they're independent)
     const [excerpt, existingConfig] = await Promise.all([
       storage.get(`excerpt:${excerptId}`),
@@ -105,6 +115,9 @@ export async function saveVariableValues(req) {
     const approvedBy = existingConfig?.approvedBy || null;
     const approvedAt = existingConfig?.approvedAt || null;
     const statusHistory = existingConfig?.statusHistory || [];
+    
+    // Preserve existing pageTitle if available (will be updated async if page context is available)
+    const existingPageTitle = existingConfig?.pageTitle || null;
 
     // Build the new config object
     const newConfig = {
@@ -124,7 +137,8 @@ export async function saveVariableValues(req) {
       approvedBy,
       approvedAt,
       statusHistory,
-      pageId: explicitPageId || req.context?.extension?.content?.id  // Store for redline queue
+      pageId: explicitPageId || req.context?.extension?.content?.id,  // Store for redline queue
+      pageTitle: existingPageTitle  // Preserve existing, will be updated async if available
     };
 
     await storage.set(key, newConfig);
@@ -243,6 +257,29 @@ export async function saveVariableValues(req) {
 
           await storage.set(usageKey, usageData);
           logSuccess('saveVariableValues', `Usage tracking updated for ${localId} (async)`);
+          
+          // Also update pageTitle in embed config if it changed
+          // This ensures pageTitle is always current in the embed config
+          if (pageTitle && pageTitle !== 'Unknown Page') {
+            try {
+              const currentConfig = await storage.get(key);
+              if (currentConfig) {
+                // Only update if pageTitle changed (avoid unnecessary writes)
+                if (currentConfig.pageTitle !== pageTitle) {
+                  currentConfig.pageTitle = pageTitle;
+                  await storage.set(key, currentConfig);
+                  logPhase('saveVariableValues', 'Updated pageTitle in embed config', { localId, pageTitle });
+                }
+              }
+            } catch (configUpdateError) {
+              // Don't fail if config update fails - it's not critical
+              logWarning('saveVariableValues', 'Failed to update pageTitle in embed config (async)', { 
+                localId, 
+                pageTitle, 
+                error: configUpdateError.message 
+              });
+            }
+          }
         }
       } catch (trackingError) {
         // Don't fail the save if tracking fails
@@ -389,7 +426,8 @@ export async function saveVariableValues(req) {
     });
     
     return {
-      success: true
+      success: true,
+      data: {}
     };
   } catch (error) {
     const totalFunctionDuration = Date.now() - functionStartTime;

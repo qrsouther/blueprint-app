@@ -18,8 +18,8 @@ const App = () => {
   useEffect(async () => {
     const result = await invoke('getExcerpts');
 
-    if (result.success) {
-      setExcerpts(result.excerpts);
+    if (result.success && result.data) {
+      setExcerpts(result.data.excerpts);
     }
     setIsLoading(false);
   }, []);
@@ -38,12 +38,12 @@ const App = () => {
     // Load the full excerpt
     const result = await invoke('getExcerpt', { excerptId });
 
-    if (result.success) {
-      setSelectedExcerpt(result.excerpt);
+    if (result.success && result.data && result.data.excerpt) {
+      setSelectedExcerpt(result.data.excerpt);
       // Initialize variable values
       const initialValues = {};
-      if (result.excerpt.variables) {
-        result.excerpt.variables.forEach(v => {
+      if (result.data.excerpt.variables) {
+        result.data.excerpt.variables.forEach(v => {
           initialValues[v.name] = '';
         });
       }

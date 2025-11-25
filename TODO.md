@@ -6,6 +6,48 @@ This file tracks ongoing tasks, future enhancements, and technical debt for the 
 
 ## Current Sprint / Active Work
 
+### Fix Approve Button Alignment in Redline Queue Card
+**Status:** 🔄 TODO
+**Priority:** Low
+**Created:** 2025-11-21
+
+**Issue:**
+The "Approve" button in `RedlineQueueCard.jsx` uses a custom green `check-circle` icon (via `Icon` component with `color="color.icon.success"`) instead of the `iconBefore` prop. This causes the button content to be left-aligned while other buttons (using `iconBefore`) are center-aligned.
+
+**Location:**
+- File: `src/components/admin/RedlineQueueCard.jsx`
+- Lines: ~521-531
+
+**Current Implementation:**
+```jsx
+<Button
+  appearance="default"
+  onClick={() => setActiveCommentAction('approved')}
+  isDisabled={embedData.redlineStatus === 'approved' || setStatusMutation.isPending}
+  xcss={centeredButtonContentStyle}
+>
+  <Inline space="space.100" alignBlock="center">
+    <Icon glyph="check-circle" label="Approve" color="color.icon.success" />
+    Approve
+  </Inline>
+</Button>
+```
+
+**Problem:**
+The `Inline` component inside the button is left-aligned, while buttons using `iconBefore` are center-aligned by default. The `centeredButtonContentStyle` with `textAlign: 'center'` doesn't work because `Inline` is a flex container.
+
+**Potential Solutions:**
+1. Find a way to make `iconBefore` accept a custom colored icon
+2. Use xcss flexbox properties to center the `Inline` content (if supported)
+3. Wrap the content differently to achieve center alignment
+4. Use a different approach to color the icon while maintaining `iconBefore` behavior
+
+**Related:**
+- Other buttons in the same component use `iconBefore` successfully (lines 533-542)
+- Need to maintain the green success color for the approve icon
+
+---
+
 ### Fix Free Write Paragraph Insertion Position with Enabled Toggles (GitHub Issue #2)
 **Status:** ✅ COMPLETE - Fix Implemented and Tested
 **Priority:** Medium

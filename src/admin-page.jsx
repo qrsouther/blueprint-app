@@ -224,6 +224,7 @@ const App = () => {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [orphanedSources, setOrphanedSources] = useState([]);
   const [showContentPreview, setShowContentPreview] = useState(true);
+  const [isExportingCSV, setIsExportingCSV] = useState(false);
 
   // Lazy load full usage data using React Query when excerpt selected
   const { data: selectedExcerptUsage, isLoading: isLoadingUsage, error: usageError } = useExcerptUsageQuery(
@@ -331,41 +332,75 @@ const App = () => {
     }
   }, [excerpts]); // Only run when excerpts change
 
-  // Auto-verify usage data on mount if needed
+  // Auto-verify usage data on mount if scheduled time has passed
   useEffect(() => {
     const checkAndAutoVerify = async () => {
       try {
-        // Get last verification timestamp from backend
-        const result = await invoke('getLastVerificationTime');
+        // Get next scheduled check time from backend
+        const scheduledResult = await invoke('getNextScheduledCheckTime');
 
-        if (result.success && result.lastVerificationTime) {
-          setLastVerificationTime(result.lastVerificationTime);
-
-          // Check if verification is stale (older than 24 hours)
-          const lastVerified = new Date(result.lastVerificationTime);
+        if (scheduledResult.success && scheduledResult.data) {
+          const nextScheduledTime = scheduledResult.data.nextScheduledTime;
           const now = new Date();
-          const hoursSinceVerification = (now - lastVerified) / (1000 * 60 * 60);
 
-          // Auto-verify if older than 24 hours
-          if (hoursSinceVerification > 24) {
-            setIsAutoVerifying(true);
-            await handleCheckAllIncludes(true);
-            setIsAutoVerifying(false);
+          if (nextScheduledTime) {
+            const scheduledDate = new Date(nextScheduledTime);
+            
+            // Check if current time >= scheduled time
+            if (now >= scheduledDate) {
+              // Time to run the check
+              setIsAutoVerifying(true);
+              await handleCheckAllIncludes(true);
+              setIsAutoVerifying(false);
+
+              // Calculate and set next scheduled time to 10 AM UTC tomorrow
+              const nextCheck = calculateNextScheduledTime();
+              await invoke('setNextScheduledCheckTime', { timestamp: nextCheck });
+            }
+          } else {
+            // No scheduled time exists - initialize it to 10 AM UTC tomorrow
+            const nextCheck = calculateNextScheduledTime();
+            await invoke('setNextScheduledCheckTime', { timestamp: nextCheck });
+            
+            // Also run check now if no previous verification exists
+            const lastVerificationResult = await invoke('getLastVerificationTime');
+            if (!lastVerificationResult.success || !lastVerificationResult.lastVerificationTime) {
+              setIsAutoVerifying(true);
+              await handleCheckAllIncludes(true);
+              setIsAutoVerifying(false);
+            }
           }
-        } else {
-          // No previous verification, run it now
-          setIsAutoVerifying(true);
-          await handleCheckAllIncludes(true);
-          setIsAutoVerifying(false);
         }
       } catch (error) {
         // Error during auto-verification - silently fail
+        logger.errors('Error in auto-verification:', error);
         setIsAutoVerifying(false);
       }
     };
 
     checkAndAutoVerify();
   }, []); // Only run once on mount
+
+  // Helper function to calculate next scheduled time (10 AM UTC tomorrow)
+  const calculateNextScheduledTime = () => {
+    const now = new Date();
+    const nextCheck = new Date(Date.UTC(
+      now.getUTCFullYear(),
+      now.getUTCMonth(),
+      now.getUTCDate(),
+      10, // 10 AM UTC
+      0,  // 0 minutes
+      0,  // 0 seconds
+      0   // 0 milliseconds
+    ));
+
+    // If it's already past 10 AM UTC today, set to 10 AM UTC tomorrow
+    if (now >= nextCheck) {
+      nextCheck.setUTCDate(nextCheck.getUTCDate() + 1);
+    }
+
+    return nextCheck.toISOString();
+  };
 
   // Fetch storage usage on mount
   useEffect(() => {
@@ -374,8 +409,8 @@ const App = () => {
         setStorageUsageLoading(true);
         const result = await invoke('getStorageUsage');
 
-        if (result.success) {
-          setStorageUsage(result);
+        if (result.success && result.data) {
+          setStorageUsage(result.data);
           setStorageUsageError(null);
         } else {
           setStorageUsageError(result.error || 'Failed to calculate storage usage');
@@ -592,11 +627,11 @@ const App = () => {
     try {
       // Start async job
       const startResult = await invoke('startCheckAllSources');
-      if (!startResult.success) {
+      if (!startResult.success || !startResult.data) {
         throw new Error(startResult.error || 'Failed to start check');
       }
 
-      const { progressId } = startResult;
+      const { progressId } = startResult.data;
       setSourcesProgress({
         phase: 'queued',
         total: 0,
@@ -609,8 +644,8 @@ const App = () => {
       const pollInterval = setInterval(async () => {
         try {
           const progressResult = await invoke('getCheckProgress', { progressId });
-          if (progressResult.success && progressResult.progress) {
-            const progress = progressResult.progress;
+          if (progressResult.success && progressResult.data?.progress) {
+            const progress = progressResult.data.progress;
             setSourcesProgress(progress);
 
             // Check if complete
@@ -619,11 +654,11 @@ const App = () => {
 
               // Get final results
               const finalProgressResult = await invoke('getCheckProgress', { progressId });
-              if (!finalProgressResult.success || !finalProgressResult.progress.results) {
+              if (!finalProgressResult.success || !finalProgressResult.data?.progress?.results) {
                 throw new Error('Failed to retrieve final results');
               }
 
-              const results = finalProgressResult.progress.results;
+              const results = finalProgressResult.data.progress.results;
               setOrphanedSources(Array.isArray(results.orphanedSources) ? results.orphanedSources : []);
 
               // Build summary message
@@ -778,12 +813,12 @@ const App = () => {
       // Always start in dry-run mode (preview) first
       const triggerResult = await invoke('checkAllIncludes', { dryRun: true });
 
-      if (!triggerResult.success) {
+      if (!triggerResult.success || !triggerResult.data) {
         throw new Error(triggerResult.error || 'Failed to start check');
       }
 
-      progressId = triggerResult.progressId;
-      const jobId = triggerResult.jobId;
+      progressId = triggerResult.data.progressId;
+      const jobId = triggerResult.data.jobId;
 
       // Start polling for progress
       const pollForProgress = async () => {
@@ -793,8 +828,8 @@ const App = () => {
         while (!isComplete) {
           try {
             const progressResult = await invoke('getCheckProgress', { progressId });
-            if (progressResult.success && progressResult.progress) {
-              const progress = progressResult.progress;
+            if (progressResult.success && progressResult.data?.progress) {
+              const progress = progressResult.data.progress;
               // Preserve isAutoVerification flag from initial state
               setIncludesProgress({ ...progress, isAutoVerification: isAutoVerification });
 
@@ -824,11 +859,11 @@ const App = () => {
 
       // Fetch final results from progress data
       const finalProgressResult = await invoke('getCheckProgress', { progressId });
-      if (!finalProgressResult.success || !finalProgressResult.progress.results) {
+      if (!finalProgressResult.success || !finalProgressResult.data?.progress?.results) {
         throw new Error('Failed to retrieve final results');
       }
 
-      const results = finalProgressResult.progress.results;
+      const results = finalProgressResult.data.progress.results;
       const summary = results.summary;
 
       // Store results for potential CSV download
@@ -858,9 +893,13 @@ const App = () => {
       await invoke('setLastVerificationTime', { timestamp: now });
       setLastVerificationTime(now);
 
+      // Update next scheduled check time to 10 AM UTC tomorrow
+      const nextScheduledTime = calculateNextScheduledTime();
+      await invoke('setNextScheduledCheckTime', { timestamp: nextScheduledTime });
+
       // Keep progress visible in dry-run mode so user can see results and clean up button
       // Only clear in live mode after a delay
-      if (!finalProgressResult.progress.dryRun) {
+      if (!finalProgressResult.data?.progress?.dryRun) {
         await new Promise(resolve => setTimeout(resolve, 2000));
         setIncludesProgress(null);
       }
@@ -899,12 +938,12 @@ const App = () => {
       // Call async trigger with dryRun: false (LIVE MODE)
       const triggerResult = await invoke('checkAllIncludes', { dryRun: false });
 
-      if (!triggerResult.success) {
+      if (!triggerResult.success || !triggerResult.data) {
         throw new Error(triggerResult.error || 'Failed to start cleanup');
       }
 
-      progressId = triggerResult.progressId;
-      const jobId = triggerResult.jobId;
+      progressId = triggerResult.data.progressId;
+      const jobId = triggerResult.data.jobId;
 
       // Start polling for progress
       const pollForProgress = async () => {
@@ -914,8 +953,8 @@ const App = () => {
         while (!isComplete) {
           try {
             const progressResult = await invoke('getCheckProgress', { progressId });
-            if (progressResult.success && progressResult.progress) {
-              const progress = progressResult.progress;
+            if (progressResult.success && progressResult.data?.progress) {
+              const progress = progressResult.data.progress;
               setIncludesProgress(progress);
 
               // Check if complete
@@ -944,11 +983,11 @@ const App = () => {
 
       // Fetch final results from progress data
       const finalProgressResult = await invoke('getCheckProgress', { progressId });
-      if (!finalProgressResult.success || !finalProgressResult.progress.results) {
+      if (!finalProgressResult.success || !finalProgressResult.data?.progress?.results) {
         throw new Error('Failed to retrieve final cleanup results');
       }
 
-      const results = finalProgressResult.progress.results;
+      const results = finalProgressResult.data.progress.results;
       const summary = results.summary;
 
       // Store results for potential CSV download
@@ -958,6 +997,10 @@ const App = () => {
       const now = new Date().toISOString();
       await invoke('setLastVerificationTime', { timestamp: now });
       setLastVerificationTime(now);
+
+      // Update next scheduled check time to 10 AM UTC tomorrow
+      const nextScheduledTime = calculateNextScheduledTime();
+      await invoke('setNextScheduledCheckTime', { timestamp: nextScheduledTime });
 
       // Invalidate React Query cache to refresh orphaned usage data
       queryClient.invalidateQueries({ queryKey: ['excerpts', 'list'] });
@@ -1047,10 +1090,10 @@ const App = () => {
       if (result.success) {
 
         // Fetch final progress state
-        if (result.progressId) {
-          const progressResult = await invoke('getMultiExcerptScanProgress', { progressId: result.progressId });
-          if (progressResult.success && progressResult.progress) {
-            setMultiExcerptProgress(progressResult.progress);
+        if (result.data?.progressId) {
+          const progressResult = await invoke('getMultiExcerptScanProgress', { progressId: result.data.progressId });
+          if (progressResult.success && progressResult.data?.progress) {
+            setMultiExcerptProgress(progressResult.data.progress);
             // Give user time to see 100% completion
             await new Promise(resolve => setTimeout(resolve, 800));
           }
@@ -1174,8 +1217,8 @@ const App = () => {
 
         // Reload excerpts to show newly imported ones
         const reloadResult = await invoke('getAllExcerpts');
-        if (reloadResult.success) {
-          const sanitized = (reloadResult.excerpts || []).map(excerpt => ({
+        if (reloadResult.success && reloadResult.data) {
+          const sanitized = (reloadResult.data.excerpts || []).map(excerpt => ({
             ...excerpt,
             variables: Array.isArray(excerpt.variables) ? excerpt.variables.filter(v => v && typeof v === 'object' && v.name) : [],
             toggles: Array.isArray(excerpt.toggles) ? excerpt.toggles.filter(t => t && typeof t === 'object' && t.name) : [],
@@ -1469,13 +1512,22 @@ const App = () => {
               <Inline alignInline="space-between" alignBlock="center">
                   <TabList>
                     <Tab>
-                      <Heading size='small'>📦 Sources</Heading>
+                      <Inline space="space.100" alignBlock="center">
+                        <Icon glyph="library" label="Sources" />
+                        <Heading size='small'>Sources</Heading>
+                      </Inline>
                     </Tab>
                     <Tab>
-                      <Heading size='small'>🧑🏻‍🏫 Redlines</Heading>
+                      <Inline space="space.100" alignBlock="center">
+                        <Icon glyph="list-checklist" label="Redlines" />
+                        <Heading size='small'>Redlines</Heading>
+                      </Inline>
                     </Tab>
                     <Tab>
-                      <Heading size='small'>💾 Storage</Heading>
+                      <Inline space="space.100" alignBlock="center">
+                        <Icon glyph="database" label="Storage" />
+                        <Heading size='small'>Storage</Heading>
+                      </Inline>
                     </Tab>
                   </TabList>
                   <AdminToolbar
@@ -1763,22 +1815,28 @@ const App = () => {
                         )}
                         <Button
                           appearance="default"
+                          isLoading={isExportingCSV}
+                          isDisabled={isExportingCSV}
                           onClick={async () => {
                             try {
+                              setIsExportingCSV(true);
+                              
                               // Fetch full usage data with customInsertions and renderedContent
                               const result = await invoke('getExcerptUsageForCSV', { 
                                 excerptId: selectedExcerptForDetails.id 
                               });
 
-                              if (!result || !result.success || !result.usage || result.usage.length === 0) {
+                              if (!result || !result.success || !result.data?.usage || result.data.usage.length === 0) {
                                 alert('No usage data to export');
+                                setIsExportingCSV(false);
                                 return;
                               }
 
                               // Use the same CSV export function as "Check All Embeds"
-                              const csv = generateIncludesCSV(result.usage);
+                              const csv = generateIncludesCSV(result.data.usage);
                               if (!csv) {
                                 alert('No data to export');
+                                setIsExportingCSV(false);
                                 return;
                               }
 
@@ -1793,14 +1851,18 @@ const App = () => {
                               link.click();
                               document.body.removeChild(link);
                               URL.revokeObjectURL(url);
+                              
+                              // Reset loading state after download is triggered
+                              setIsExportingCSV(false);
                             } catch (err) {
                               logger.errors('Error exporting CSV:', err);
                               alert('Error exporting CSV: ' + err.message);
+                              setIsExportingCSV(false);
                             }
                           }}
                           iconBefore={() => <Icon glyph="download" label="Export" />}
                         >
-                          Export Usage Details (CSV)
+                          {isExportingCSV ? 'Exporting...' : 'Export Usage Details (CSV)'}
                         </Button>
                         <Button
                           appearance="danger"

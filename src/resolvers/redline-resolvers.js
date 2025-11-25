@@ -33,6 +33,7 @@ import { storage, startsWith } from '@forge/api';
 import api, { route } from '@forge/api';
 import { listVersions } from '../utils/version-manager.js';
 import { logPhase, logSuccess, logFailure, logWarning } from '../utils/forge-logger.js';
+import { fetchPageContent, checkMacroExistsInADF } from '../workers/helpers/page-scanner.js';
 
 /**
  * Get redline queue with filtering, sorting, and grouping
@@ -95,30 +96,221 @@ export async function getRedlineQueue(req) {
 
     logPhase('getRedlineQueue', 'Fetched Embed configs', { count: allKeys.length });
 
-    // Load all Embed configs
-    const embedConfigs = await Promise.all(
+    // First pass: Check for soft-deleted embeds, fetch excerpt data, and lookup page titles from usage tracking
+    // Usage tracking stores pageTitle, which is much faster than API calls
+    const embedConfigsWithMetadata = await Promise.all(
       allKeys.map(async (item) => {
         const localId = item.key.replace('macro-vars:', '');
         const config = item.value;
 
-        // Fetch excerpt details for display
+        // Check if soft-deleted
+        const deletedEntry = await storage.get(`macro-vars-deleted:${localId}`);
+        if (deletedEntry) {
+          return null; // Will be filtered out
+        }
+
+        // SANITY CHECK: Verify the config actually has required fields
+        // This helps catch cases where production data was imported but is invalid in dev
+        if (!config || typeof config !== 'object') {
+          logWarning('getRedlineQueue', 'Invalid config data found, skipping', { localId, configType: typeof config });
+          return null; // Will be filtered out
+        }
+
+        // Fetch excerpt details (storage-only, fast)
         let excerptData = null;
         if (config.excerptId) {
           const excerptKey = `excerpt:${config.excerptId}`;
           excerptData = await storage.get(excerptKey);
         }
 
-        // Fetch page details via Confluence API (v2)
-        let pageData = null;
+        // OPTIMIZATION: Prioritize pageTitle from embed config (most reliable, always up-to-date)
+        // Fallback to usage tracking for older embeds that don't have pageTitle in config yet
+        let pageTitleFromUsage = null;
+        let pageIdFromUsage = null;
+        
+        // First, check if pageTitle is already in config (preferred source)
+        const pageTitleFromConfig = config.pageTitle;
+        
+        // If not in config, try usage tracking as fallback (for older embeds)
+        if (!pageTitleFromConfig && config.excerptId) {
+          try {
+            const usageKey = `usage:${config.excerptId}`;
+            const usageData = await storage.get(usageKey);
+            if (usageData?.references) {
+              // Try to find by localId and pageId (if pageId exists in config)
+              let ref = null;
         if (config.pageId) {
+                ref = usageData.references.find(r => r.localId === localId && r.pageId === config.pageId);
+              } else {
+                // If pageId is missing from config, try to find by localId only (take first match)
+                ref = usageData.references.find(r => r.localId === localId);
+                if (ref?.pageId) {
+                  pageIdFromUsage = ref.pageId;
+                  logPhase('getRedlineQueue', 'Found pageId from usage tracking (missing from config)', { localId, pageId: pageIdFromUsage });
+                }
+              }
+              if (ref?.pageTitle) {
+                pageTitleFromUsage = ref.pageTitle;
+              }
+            }
+          } catch (error) {
+            // Silently fail - we'll fall back to API or fallback title
+          }
+        }
+        
+        // Use pageId from usage tracking if missing from config
+        const effectivePageId = config.pageId || pageIdFromUsage;
+
+        return { localId, config, excerptData, pageTitleFromConfig, pageTitleFromUsage, effectivePageId };
+      })
+    );
+
+    // Filter out deleted embeds
+    let validEmbeds = embedConfigsWithMetadata.filter(item => item !== null);
+
+    // OPTIMIZATION: Apply all filters that don't require API data FIRST
+    // This dramatically reduces the number of API calls needed
+    
+    // Status filter (if not "all")
+    if (filters.status && filters.status.length > 0 && filters.status[0] !== 'all') {
+      validEmbeds = validEmbeds.filter(({ config }) =>
+        filters.status.includes(config.redlineStatus || 'reviewable')
+      );
+      logPhase('getRedlineQueue', 'Applied status filter', { 
+        status: filters.status, 
+        remaining: validEmbeds.length 
+      });
+    }
+
+    // PageIds filter (we have pageId in config)
+    if (filters.pageIds && filters.pageIds.length > 0) {
+      validEmbeds = validEmbeds.filter(({ config }) =>
+        filters.pageIds.includes(config.pageId)
+      );
+      logPhase('getRedlineQueue', 'Applied pageIds filter', { 
+        pageIds: filters.pageIds.length, 
+        remaining: validEmbeds.length 
+      });
+    }
+
+    // ExcerptIds filter (we have excerptId in config)
+    if (filters.excerptIds && filters.excerptIds.length > 0) {
+      validEmbeds = validEmbeds.filter(({ config }) =>
+        filters.excerptIds.includes(config.excerptId)
+      );
+      logPhase('getRedlineQueue', 'Applied excerptIds filter', { 
+        excerptIds: filters.excerptIds.length, 
+        remaining: validEmbeds.length 
+      });
+    }
+
+    // OPTIMIZATION: Sort by storage fields if possible (before expensive API calls)
+    // This enables FIFO for reviewable embeds and improves perceived performance
+    if (sortBy === 'status' && filters.status?.length === 1 && filters.status[0] === 'reviewable') {
+      // FIFO for reviewable: sort by lastChangedAt ASC (oldest first)
+      validEmbeds.sort((a, b) => {
+        const aTime = a.config.lastChangedAt || a.config.updatedAt || a.config.lastSynced || '0';
+        const bTime = b.config.lastChangedAt || b.config.updatedAt || b.config.lastSynced || '0';
+        return new Date(aTime) - new Date(bTime); // ASC = oldest first (FIFO)
+      });
+      logPhase('getRedlineQueue', 'Sorted by lastChangedAt ASC (FIFO)', { 
+        count: validEmbeds.length 
+      });
+    } else if (sortBy === 'source') {
+      // Can sort by sourceName from excerptData (already fetched from storage)
+      validEmbeds.sort((a, b) => {
+        const aName = a.excerptData?.name || 'Unknown Source';
+        const bName = b.excerptData?.name || 'Unknown Source';
+        return aName.localeCompare(bName);
+      });
+      logPhase('getRedlineQueue', 'Sorted by sourceName', { 
+        count: validEmbeds.length 
+      });
+    } else if (sortBy === 'updated') {
+      // Sort by updatedAt (storage field)
+      validEmbeds.sort((a, b) => {
+        const aTime = a.config.updatedAt || a.config.lastSynced || '0';
+        const bTime = b.config.updatedAt || b.config.lastSynced || '0';
+        return new Date(bTime) - new Date(aTime); // DESC = newest first
+      });
+      logPhase('getRedlineQueue', 'Sorted by updatedAt DESC', { 
+        count: validEmbeds.length 
+      });
+    }
+
+    // OPTIMIZATION: Build embed configs with storage data first (optimistic rendering)
+    // Prioritize pageTitle from embed config (most reliable), fallback to usage tracking, then API
+    const embedConfigsWithStorageData = validEmbeds.map(({ localId, config, excerptData, pageTitleFromConfig, pageTitleFromUsage, effectivePageId }) => ({
+      localId,
+      excerptId: config.excerptId,
+      sourceName: excerptData?.name || 'Unknown Source',
+      sourceCategory: excerptData?.category || 'Uncategorized',
+      pageId: effectivePageId || config.pageId, // Use effectivePageId (from usage tracking if config.pageId is missing)
+      // Priority: 1) pageTitle from config, 2) pageTitle from usage tracking, 3) fallback
+      pageTitle: pageTitleFromConfig || pageTitleFromUsage || (effectivePageId || config.pageId ? `Page ${effectivePageId || config.pageId}` : 'Unknown Page'),
+      spaceKey: 'Unknown', // Will be updated from API if needed
+      variableValues: config.variableValues || {},
+      toggleStates: config.toggleStates || {},
+      customInsertions: config.customInsertions || [],
+      internalNotes: config.internalNotes || [],
+      cachedContent: config.cachedContent,
+      syncedContent: config.syncedContent,
+      redlineStatus: config.redlineStatus || 'reviewable',
+      approvedContentHash: config.approvedContentHash,
+      approvedBy: config.approvedBy,
+      approvedAt: config.approvedAt,
+      lastSynced: config.lastSynced,
+      updatedAt: config.updatedAt,
+      lastChangedAt: config.lastChangedAt, // Include for FIFO sorting
+      lastChangedBy: config.lastChangedBy // Include for showing who changed status
+    }));
+
+    // OPTIMIZATION: Only fetch page data if needed for:
+    // - Search filter (needs pageTitle)
+    // - Sorting by "page" (needs pageTitle)
+    // - Grouping by "page" (needs pageTitle)
+    // - Any embed missing pageTitle (to avoid showing "Page {pageId}" or "Unknown Page")
+    // Otherwise, we can skip API calls entirely for faster response
+    // NOTE: With pageTitle now stored in embed config, most embeds won't need API calls
+    const needsPageData = 
+      (filters.searchTerm && filters.searchTerm.trim()) ||
+      sortBy === 'page' ||
+      groupBy === 'page' ||
+      embedConfigsWithStorageData.some(embed => !embed.pageTitle || embed.pageTitle.startsWith('Page ') || embed.pageTitle === 'Unknown Page');
+
+    let embedConfigs = embedConfigsWithStorageData;
+
+    if (needsPageData) {
+      // Fetch page data in batches to respect Forge's 100 network requests per invocation limit
+      // Forge allows up to 100 network requests per runtime minute (default 25s timeout = 100 requests)
+      const BATCH_SIZE = 90; // Leave some headroom below the 100 request limit
+      embedConfigs = [];
+
+      for (let i = 0; i < validEmbeds.length; i += BATCH_SIZE) {
+        const batch = validEmbeds.slice(i, i + BATCH_SIZE);
+        
+        // Fetch page data for this batch in parallel
+        const batchResults = await Promise.all(
+          batch.map(async ({ localId, config, excerptData, pageTitleFromConfig, pageTitleFromUsage, effectivePageId }) => {
+            // Priority: 1) pageTitle from config, 2) pageTitle from usage tracking, 3) fetch from API
+            let pageData = null;
+            let pageTitle = pageTitleFromConfig || pageTitleFromUsage; // Start with config or usage tracking title
+            const pageIdToUse = effectivePageId || config.pageId; // Use effectivePageId (from usage tracking if config.pageId is missing)
+            
+            // Only fetch from API if we don't have a real title (not from config or usage tracking)
+            if (pageIdToUse && (!pageTitle || pageTitle.startsWith('Page ') || pageTitle === 'Unknown Page')) {
           try {
             const pageResponse = await api.asApp().requestConfluence(
-              route`/wiki/api/v2/pages/${config.pageId}`
+                  route`/wiki/api/v2/pages/${pageIdToUse}`
             );
             pageData = await pageResponse.json();
+                pageTitle = pageData?.title || (pageIdToUse ? `Page ${pageIdToUse}` : 'Unknown Page');
           } catch (error) {
-            logWarning('getRedlineQueue', 'Failed to fetch page', { pageId: config.pageId, error: error.message });
+                logWarning('getRedlineQueue', 'Failed to fetch page', { localId, pageId: pageIdToUse, error: error.message });
+                pageTitle = pageTitle || (pageIdToUse ? `Page ${pageIdToUse}` : 'Unknown Page');
           }
+            } else if (!pageTitle) {
+              pageTitle = pageIdToUse ? `Page ${pageIdToUse}` : 'Unknown Page';
         }
 
         return {
@@ -126,8 +318,8 @@ export async function getRedlineQueue(req) {
           excerptId: config.excerptId,
           sourceName: excerptData?.name || 'Unknown Source',
           sourceCategory: excerptData?.category || 'Uncategorized',
-          pageId: config.pageId,
-          pageTitle: pageData?.title || (config.pageId ? `Page ${config.pageId}` : 'Unknown Page'),
+              pageId: pageIdToUse, // Use effectivePageId (from usage tracking if config.pageId is missing)
+              pageTitle: pageTitle,
           spaceKey: pageData?.spaceId || 'Unknown',
           variableValues: config.variableValues || {},
           toggleStates: config.toggleStates || {},
@@ -135,17 +327,27 @@ export async function getRedlineQueue(req) {
           internalNotes: config.internalNotes || [],
           cachedContent: config.cachedContent,
           syncedContent: config.syncedContent,
-          redlineStatus: config.redlineStatus || 'reviewable', // Default to reviewable
+              redlineStatus: config.redlineStatus || 'reviewable',
           approvedContentHash: config.approvedContentHash,
           approvedBy: config.approvedBy,
           approvedAt: config.approvedAt,
           lastSynced: config.lastSynced,
-          updatedAt: config.updatedAt
+              updatedAt: config.updatedAt,
+              lastChangedAt: config.lastChangedAt
         };
       })
     );
 
-    // Apply filters
+        embedConfigs.push(...batchResults);
+      }
+    } else {
+      logPhase('getRedlineQueue', 'Skipping page data fetch (not needed)', { 
+        reason: 'No search/sort/group by page',
+        embeds: embedConfigs.length 
+      });
+    }
+
+    // Apply filters that require API data
     let filteredEmbeds = embedConfigs;
 
     if (filters.status && filters.status.length > 0 && filters.status[0] !== 'all') {
@@ -166,7 +368,7 @@ export async function getRedlineQueue(req) {
       );
     }
 
-    // Search filter - matches Page Title or Embed UUID
+    // Search filter - matches Page Title or Embed UUID (requires pageTitle from API)
     if (filters.searchTerm && filters.searchTerm.trim()) {
       const searchLower = filters.searchTerm.toLowerCase().trim();
       filteredEmbeds = filteredEmbeds.filter(embed => {
@@ -174,30 +376,45 @@ export async function getRedlineQueue(req) {
         const uuidMatch = embed.localId?.toLowerCase().includes(searchLower);
         return pageTitleMatch || uuidMatch;
       });
+      logPhase('getRedlineQueue', 'Applied search filter', { 
+        searchTerm: filters.searchTerm, 
+        remaining: filteredEmbeds.length 
+      });
     }
 
-    // Sort
-    filteredEmbeds.sort((a, b) => {
-      switch (sortBy) {
-        case 'status': {
-          // Reviewable is highest priority (appears first)
+    // Final sorting (only if not already sorted by storage fields)
+    // Note: If we already sorted by storage fields above, this will maintain that order
+    // unless sortBy requires API data (like 'page')
+    if (sortBy === 'page') {
+      // Sort by pageTitle (requires API data)
+      filteredEmbeds.sort((a, b) => a.pageTitle.localeCompare(b.pageTitle));
+      logPhase('getRedlineQueue', 'Sorted by pageTitle', { 
+        count: filteredEmbeds.length 
+      });
+    } else if (sortBy === 'status' && (!filters.status || filters.status[0] === 'all' || filters.status.length > 1)) {
+      // Sort by status priority (only if not already sorted by lastChangedAt)
           const statusOrder = { 'reviewable': 0, 'needs-revision': 1, 'pre-approved': 2, 'approved': 3 };
-          return statusOrder[a.redlineStatus] - statusOrder[b.redlineStatus];
-        }
-
-        case 'page':
-          return a.pageTitle.localeCompare(b.pageTitle);
-
-        case 'source':
-          return a.sourceName.localeCompare(b.sourceName);
-
-        case 'updated':
-          return new Date(b.updatedAt || 0) - new Date(a.updatedAt || 0);
-
-        default:
-          return 0;
-      }
-    });
+      filteredEmbeds.sort((a, b) => statusOrder[a.redlineStatus] - statusOrder[b.redlineStatus]);
+      logPhase('getRedlineQueue', 'Sorted by status priority', { 
+        count: filteredEmbeds.length 
+      });
+    } else if (sortBy === 'source' && !filters.status?.length) {
+      // Sort by sourceName (only if not already sorted above)
+      filteredEmbeds.sort((a, b) => a.sourceName.localeCompare(b.sourceName));
+      logPhase('getRedlineQueue', 'Sorted by sourceName', { 
+        count: filteredEmbeds.length 
+      });
+    } else if (sortBy === 'updated' && !filters.status?.length) {
+      // Sort by updatedAt (only if not already sorted above)
+      filteredEmbeds.sort((a, b) => {
+        const aTime = a.updatedAt || a.lastSynced || '0';
+        const bTime = b.updatedAt || b.lastSynced || '0';
+        return new Date(bTime) - new Date(aTime); // DESC = newest first
+      });
+      logPhase('getRedlineQueue', 'Sorted by updatedAt DESC', { 
+        count: filteredEmbeds.length 
+      });
+    }
 
     // Group if requested
     if (groupBy) {
@@ -225,14 +442,166 @@ export async function getRedlineQueue(req) {
         groups[groupKey].push(embed);
       });
 
-      return { embeds: filteredEmbeds, groups };
+      return {
+        success: true,
+        data: {
+          embeds: filteredEmbeds,
+          groups
+        }
+      };
     }
 
-    return { embeds: filteredEmbeds, groups: null };
+    return {
+      success: true,
+      data: {
+        embeds: filteredEmbeds,
+        groups: null
+      }
+    };
 
   } catch (error) {
     logFailure('getRedlineQueue', 'Error loading redline queue', error);
-    throw new Error(`Failed to load redline queue: ${error.message}`);
+    return {
+      success: false,
+      error: `Failed to load redline queue: ${error.message}`
+    };
+  }
+}
+
+/**
+ * Manually soft-delete a specific embed
+ * Useful for immediately removing known-deleted embeds from the Redline Queue
+ * without waiting for "Check All Embeds" to complete
+ *
+ * @param {Object} req.payload
+ * @param {string} req.payload.localId - Embed instance localId
+ * @param {string} req.payload.reason - Optional reason for deletion (defaults to "Manually deleted")
+ * @returns {Object} { success: true, data: { localId, deleted: boolean } } or { success: false, error: "..." }
+ */
+export async function manuallySoftDeleteEmbed(req) {
+  const FUNCTION_NAME = 'manuallySoftDeleteEmbed';
+  const { localId, reason = 'Manually deleted from Redline Queue' } = req.payload || {};
+
+  // Input validation
+  if (!localId || typeof localId !== 'string' || localId.trim() === '') {
+    logFailure(FUNCTION_NAME, 'Validation failed: localId is required and must be a non-empty string', new Error('Invalid localId'));
+    return {
+      success: false,
+      error: 'localId is required and must be a non-empty string'
+    };
+  }
+
+  try {
+    // Import soft-delete function
+    const { softDeleteMacroVars } = await import('../workers/helpers/orphan-detector.js');
+
+    // Check if embed exists in storage
+    const config = await storage.get(`macro-vars:${localId}`);
+    if (!config) {
+      // Check if already soft-deleted
+      const deletedEntry = await storage.get(`macro-vars-deleted:${localId}`);
+      if (deletedEntry) {
+        return {
+          success: true,
+          data: {
+            localId,
+            deleted: false,
+            message: 'Embed already soft-deleted'
+          }
+        };
+      }
+
+      return {
+        success: false,
+        error: `Embed not found: ${localId}`
+      };
+    }
+
+    // Soft-delete the embed (dryRun: false to actually delete)
+    await softDeleteMacroVars(localId, reason, {}, false);
+
+    logSuccess(FUNCTION_NAME, 'Embed soft-deleted', { localId, reason });
+
+    return {
+      success: true,
+      data: {
+        localId,
+        deleted: true,
+        message: 'Embed successfully soft-deleted'
+      }
+    };
+  } catch (error) {
+    logFailure(FUNCTION_NAME, 'Error soft-deleting embed', error, { localId });
+    return {
+      success: false,
+      error: error.message
+    };
+  }
+}
+
+/**
+ * Check if an Embed still exists on its page
+ * Lightweight existence check for individual embeds
+ * Used by Redline Queue to verify embeds as they come into view
+ *
+ * @param {Object} req.payload
+ * @param {string} req.payload.localId - Embed instance localId
+ * @param {string} req.payload.pageId - Confluence page ID
+ * @returns {Object} { success: true, data: { exists: boolean, pageTitle?: string } } or { success: false, error: "..." }
+ */
+export async function checkEmbedExists(req) {
+  const { localId, pageId } = req.payload || {};
+
+  try {
+    // Input validation
+    if (!localId || typeof localId !== 'string' || localId.trim() === '') {
+      logFailure('checkEmbedExists', 'Validation failed: localId is required and must be a non-empty string', new Error('Invalid localId'));
+      return {
+        success: false,
+        error: 'localId is required and must be a non-empty string'
+      };
+    }
+
+    if (!pageId || typeof pageId !== 'string' || pageId.trim() === '') {
+      logFailure('checkEmbedExists', 'Validation failed: pageId is required and must be a non-empty string', new Error('Invalid pageId'));
+      return {
+        success: false,
+        error: 'pageId is required and must be a non-empty string'
+      };
+    }
+
+    // Fetch page content
+    const pageResult = await fetchPageContent(pageId);
+
+    if (!pageResult.success) {
+      // Page not found, permission denied, or other error
+      return {
+        success: true,
+        data: {
+          exists: false,
+          pageTitle: null
+        }
+      };
+    }
+
+    // Check if macro exists in ADF content
+    const { adfContent } = pageResult;
+    const exists = checkMacroExistsInADF(adfContent, localId);
+    const pageTitle = pageResult.pageData?.title || null;
+
+    return {
+      success: true,
+      data: {
+        exists,
+        pageTitle
+      }
+    };
+  } catch (error) {
+    logFailure('checkEmbedExists', 'Error checking embed existence', error, { localId, pageId });
+    return {
+      success: false,
+      error: error.message
+    };
   }
 }
 
@@ -362,10 +731,12 @@ export async function setRedlineStatus(req) {
 
     return {
       success: true,
+      data: {
       localId,
       newStatus: status,
       previousStatus,
       approvedContentHash
+      }
     };
 
   } catch (error) {
@@ -477,7 +848,7 @@ export async function bulkSetRedlineStatus(req) {
         payload: { localId, status, userId, reason }
       });
       if (result.success) {
-        results.updated++;
+      results.updated++;
       } else {
         results.failed++;
         results.errors.push({
@@ -536,10 +907,13 @@ export async function checkRedlineStale(req) {
     // If not approved, can't be stale
     if (config.redlineStatus !== 'approved' || !config.approvedContentHash) {
       return {
+        success: true,
+        data: {
         isStale: false,
         reason: 'Not approved yet',
         currentHash: null,
         approvedHash: null
+        }
       };
     }
 
@@ -549,10 +923,13 @@ export async function checkRedlineStale(req) {
     if (!versionsResult.success || versionsResult.versions.length === 0) {
       logWarning('checkRedlineStale', 'No version history found for Embed', { localId });
       return {
+        success: true,
+        data: {
         isStale: false,
         reason: 'No version history available',
         currentHash: null,
         approvedHash: config.approvedContentHash
+        }
       };
     }
 
@@ -563,10 +940,13 @@ export async function checkRedlineStale(req) {
     const isStale = currentHash !== config.approvedContentHash;
 
     return {
+      success: true,
+      data: {
       isStale,
       currentHash,
       approvedHash: config.approvedContentHash,
       reason: isStale ? 'Content modified after approval' : 'Content unchanged'
+      }
     };
 
   } catch (error) {
@@ -622,12 +1002,26 @@ export async function getConfluenceUser(req) {
     );
 
     if (!response.ok) {
-      throw new Error(`Confluence API returned ${response.status}: ${response.statusText}`);
+      const error = new Error(`Confluence API returned ${response.status}: ${response.statusText}`);
+      logFailure('getConfluenceUser', 'Confluence API error', error, { accountId, status: response.status });
+      // Return fallback data instead of throwing
+      return {
+        accountId,
+        displayName: 'Unknown User',
+        publicName: 'Unknown User',
+        profilePicture: {
+          path: null,
+          isDefault: true
+        },
+        error: error.message
+      };
     }
 
     const userData = await response.json();
 
     return {
+      success: true,
+      data: {
       accountId: userData.accountId,
       displayName: userData.displayName || userData.publicName,
       publicName: userData.publicName,
@@ -635,6 +1029,7 @@ export async function getConfluenceUser(req) {
       profilePicture: userData.profilePicture || {
         path: null,
         isDefault: true
+        }
       }
     };
 
@@ -642,6 +1037,8 @@ export async function getConfluenceUser(req) {
     logFailure('getConfluenceUser', 'Error fetching Confluence user', error, { accountId });
     // Return fallback data instead of throwing
     return {
+      success: true,
+      data: {
       accountId,
       displayName: 'Unknown User',
       publicName: 'Unknown User',
@@ -650,6 +1047,7 @@ export async function getConfluenceUser(req) {
         isDefault: true
       },
       error: error.message
+      }
     };
   }
 }
@@ -707,11 +1105,17 @@ export async function getRedlineStats() {
       }
     }
 
-    return stats;
+    return {
+      success: true,
+      data: stats
+    };
 
   } catch (error) {
     logFailure('getRedlineStats', 'Error getting redline stats', error);
-    throw new Error(`Failed to get redline stats: ${error.message}`);
+    return {
+      success: false,
+      error: `Failed to get redline stats: ${error.message}`
+    };
   }
 }
 
@@ -726,18 +1130,31 @@ export async function getRedlineStats() {
  * @returns {Object} { success: true, commentId, location }
  */
 export async function postRedlineComment(req) {
-  const { localId, pageId, commentText } = req.payload;
+  const { localId, pageId, commentText } = req.payload || {};
 
-  if (!localId) {
-    throw new Error('localId is required');
+  // Input validation
+  if (!localId || typeof localId !== 'string' || localId.trim() === '') {
+    logFailure('postRedlineComment', 'Validation failed: localId is required and must be a non-empty string', new Error('Invalid localId'));
+    return {
+      success: false,
+      error: 'localId is required and must be a non-empty string'
+    };
   }
 
-  if (!pageId) {
-    throw new Error('pageId is required');
+  if (!pageId || typeof pageId !== 'string' || pageId.trim() === '') {
+    logFailure('postRedlineComment', 'Validation failed: pageId is required and must be a non-empty string', new Error('Invalid pageId'));
+    return {
+      success: false,
+      error: 'pageId is required and must be a non-empty string'
+    };
   }
 
-  if (!commentText || !commentText.trim()) {
-    throw new Error('commentText is required');
+  if (!commentText || typeof commentText !== 'string' || !commentText.trim()) {
+    logFailure('postRedlineComment', 'Validation failed: commentText is required and must be a non-empty string', new Error('Invalid commentText'));
+    return {
+      success: false,
+      error: 'commentText is required and must be a non-empty string'
+    };
   }
 
   try {
@@ -749,7 +1166,12 @@ export async function postRedlineComment(req) {
     );
 
     if (!pageResponse.ok) {
-      throw new Error(`Failed to fetch page: ${pageResponse.status} ${pageResponse.statusText}`);
+      const error = new Error(`Failed to fetch page: ${pageResponse.status} ${pageResponse.statusText}`);
+      logFailure('postRedlineComment', 'Failed to fetch page', error, { pageId, status: pageResponse.status });
+      return {
+        success: false,
+        error: error.message
+      };
     }
 
     const pageData = await pageResponse.json();
@@ -758,14 +1180,22 @@ export async function postRedlineComment(req) {
     const adfString = pageData.body?.atlas_doc_format?.value;
 
     if (!adfString) {
-      throw new Error('Page ADF content not found in API response');
+      logFailure('postRedlineComment', 'Page ADF content not found in API response', new Error('Missing ADF content'), { pageId });
+      return {
+        success: false,
+        error: 'Page ADF content not found in API response'
+      };
     }
 
     let adfContent;
     try {
       adfContent = JSON.parse(adfString);
     } catch (parseError) {
-      throw new Error(`Failed to parse ADF content: ${parseError.message}`);
+      logFailure('postRedlineComment', 'Failed to parse ADF content', parseError, { pageId });
+      return {
+        success: false,
+        error: `Failed to parse ADF content: ${parseError.message}`
+      };
     }
 
     logPhase('postRedlineComment', 'Fetched and parsed page ADF', { pageTitle: pageData.title, nodeCount: adfContent?.content?.length || 0 });
@@ -774,7 +1204,11 @@ export async function postRedlineComment(req) {
     const { textSelection, matchCount, matchIndex } = findTextNearEmbed(adfContent, localId);
 
     if (!textSelection) {
-      throw new Error(`Could not find suitable text near Embed ${localId} for inline comment`);
+      logFailure('postRedlineComment', 'Could not find suitable text near Embed', new Error('No text selection found'), { localId, pageId });
+      return {
+        success: false,
+        error: `Could not find suitable text near Embed ${localId} for inline comment`
+      };
     }
 
     logPhase('postRedlineComment', 'Found text selection for inline comment', { textSelection, matchIndex: matchIndex + 1, matchCount });
@@ -807,7 +1241,12 @@ export async function postRedlineComment(req) {
 
     if (!commentResponse.ok) {
       const errorText = await commentResponse.text();
-      throw new Error(`Failed to post comment: ${commentResponse.status} ${commentResponse.statusText} - ${errorText}`);
+      const error = new Error(`Failed to post comment: ${commentResponse.status} ${commentResponse.statusText} - ${errorText}`);
+      logFailure('postRedlineComment', 'Failed to post comment', error, { pageId, localId, status: commentResponse.status });
+      return {
+        success: false,
+        error: error.message
+      };
     }
 
     const commentData = await commentResponse.json();
@@ -816,14 +1255,19 @@ export async function postRedlineComment(req) {
 
     return {
       success: true,
+      data: {
       commentId: commentData.id,
       textSelection,
       location: `match ${matchIndex + 1} of ${matchCount}`
+      }
     };
 
   } catch (error) {
     logFailure('postRedlineComment', 'Error posting inline comment', error, { pageId, localId });
-    throw new Error(`Failed to post inline comment: ${error.message}`);
+    return {
+      success: false,
+      error: `Failed to post inline comment: ${error.message}`
+    };
   }
 }
 

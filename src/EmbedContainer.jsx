@@ -473,12 +473,13 @@ const App = () => {
       try {
         const varsResult = await invoke('getVariableValues', { localId: effectiveLocalId });
         
-        const hasNoData = !varsResult.lastSynced &&
-                          !varsResult.excerptId &&
-                          Object.keys(varsResult.variableValues || {}).length === 0 &&
-                          Object.keys(varsResult.toggleStates || {}).length === 0 &&
-                          (varsResult.customInsertions || []).length === 0 &&
-                          (varsResult.internalNotes || []).length === 0;
+        const varsData = varsResult.success && varsResult.data ? varsResult.data : {};
+        const hasNoData = !varsData.lastSynced &&
+                          !varsData.excerptId &&
+                          Object.keys(varsData.variableValues || {}).length === 0 &&
+                          Object.keys(varsData.toggleStates || {}).length === 0 &&
+                          (varsData.customInsertions || []).length === 0 &&
+                          (varsData.internalNotes || []).length === 0;
 
         if (varsResult.success && hasNoData) {
           const pageId = context?.contentId || context?.extension?.content?.id;
@@ -490,8 +491,8 @@ const App = () => {
               currentLocalId: context.localId
             });
 
-            if (detectionResult.success && detectionResult.deactivatedEmbeds && detectionResult.deactivatedEmbeds.length > 0) {
-              setDeactivatedEmbeds(detectionResult.deactivatedEmbeds);
+            if (detectionResult.success && detectionResult.data?.deactivatedEmbeds && detectionResult.data.deactivatedEmbeds.length > 0) {
+              setDeactivatedEmbeds(detectionResult.data.deactivatedEmbeds);
               setShowDeactivatedSelector(true);
             } else {
               setDeactivatedEmbeds([]);
@@ -555,15 +556,17 @@ const App = () => {
 
         // CRITICAL: Check if data is missing - if so, attempt recovery from drag-to-move scenario
         // When a macro is dragged in Confluence, it may get a new localId, orphaning the data
-        // Handle both React Query format (direct object) and invoke format (with success flag)
+        // Handle both React Query format (direct object) and invoke format (with success/data wrapper)
         const isSuccess = varsResultForLoading.success !== undefined 
           ? varsResultForLoading.success 
           : true; // React Query data is always "successful" if it exists
-        const hasNoData = !varsResultForLoading.lastSynced &&
-                          Object.keys(varsResultForLoading.variableValues || {}).length === 0 &&
-                          Object.keys(varsResultForLoading.toggleStates || {}).length === 0 &&
-                          (varsResultForLoading.customInsertions || []).length === 0 &&
-                          (varsResultForLoading.internalNotes || []).length === 0;
+        // Extract data - React Query returns direct object, invoke returns { success, data }
+        const varsDataForLoading = varsResultForLoading.data || varsResultForLoading;
+        const hasNoData = !varsDataForLoading.lastSynced &&
+                          Object.keys(varsDataForLoading.variableValues || {}).length === 0 &&
+                          Object.keys(varsDataForLoading.toggleStates || {}).length === 0 &&
+                          (varsDataForLoading.customInsertions || []).length === 0 &&
+                          (varsDataForLoading.internalNotes || []).length === 0;
 
         // CRITICAL: Attempt recovery even if excerptId is missing
         // When a macro is dragged, excerptId may be lost, but we can still recover by pageId
@@ -578,30 +581,23 @@ const App = () => {
             currentLocalId: context.localId
           });
 
-          if (recoveryResult.success && recoveryResult.recovered) {
+          if (recoveryResult.success && recoveryResult.data?.recovered) {
             // Reload the data now that it's been migrated
             varsResultForLoading = await invoke('getVariableValues', { localId: effectiveLocalId });
             
             // CRITICAL: If excerptId was missing, set it from recovered data
-            if (!selectedExcerptId && recoveryResult.data?.excerptId) {
-              setSelectedExcerptId(recoveryResult.data.excerptId);
+            if (!selectedExcerptId && recoveryResult.data.data?.excerptId) {
+              setSelectedExcerptId(recoveryResult.data.data.excerptId);
             }
           }
         }
 
-        // Extract data - handle both React Query format (direct object) and invoke format (with success flag)
-        const loadedVariableValues = varsResultForLoading.success !== undefined 
-          ? (varsResultForLoading.success ? varsResultForLoading.variableValues : {})
-          : (varsResultForLoading.variableValues || {});
-        const loadedToggleStates = varsResultForLoading.success !== undefined
-          ? (varsResultForLoading.success ? varsResultForLoading.toggleStates : {})
-          : (varsResultForLoading.toggleStates || {});
-        const loadedCustomInsertions = varsResultForLoading.success !== undefined
-          ? (varsResultForLoading.success ? varsResultForLoading.customInsertions : [])
-          : (varsResultForLoading.customInsertions || []);
-        const loadedInternalNotes = varsResultForLoading.success !== undefined
-          ? (varsResultForLoading.success ? varsResultForLoading.internalNotes : [])
-          : (varsResultForLoading.internalNotes || []);
+        // Extract data - handle both React Query format (direct object) and invoke format (with success/data wrapper)
+        const finalVarsData = varsResultForLoading.data || varsResultForLoading;
+        const loadedVariableValues = finalVarsData.variableValues || {};
+        const loadedToggleStates = finalVarsData.toggleStates || {};
+        const loadedCustomInsertions = finalVarsData.customInsertions || [];
+        const loadedInternalNotes = finalVarsData.internalNotes || [];
 
         // Auto-infer "client" variable from page title if it follows "Blueprint: [Client Name]" pattern
         let pageTitle = '';
@@ -610,8 +606,8 @@ const App = () => {
         if (contentId) {
           try {
             const titleResult = await invoke('getPageTitle', { contentId });
-            if (titleResult.success) {
-              pageTitle = titleResult.title;
+            if (titleResult.success && titleResult.data) {
+              pageTitle = titleResult.data.title;
             }
           } catch (err) {
             logger.errors('[EmbedContainer] Error fetching page title:', err);
@@ -810,20 +806,22 @@ const App = () => {
       try {
         // Get excerpt metadata to check contentHash
         const excerptResult = await invoke('getExcerpt', { excerptId: selectedExcerptId });
-        if (!excerptResult.success || !excerptResult.excerpt) {
+        if (!excerptResult.success || !excerptResult.data || !excerptResult.data.excerpt) {
           setIsCheckingStaleness(false);
           return;
         }
 
         // Get variable values to check syncedContentHash
         const varsResult = await invoke('getVariableValues', { localId: effectiveLocalId });
-        if (!varsResult.success) {
+        if (!varsResult.success || !varsResult.data) {
           setIsCheckingStaleness(false);
           return;
         }
 
-        const sourceContentHash = excerptResult.excerpt.contentHash;
-        const syncedContentHash = varsResult.syncedContentHash;
+        const excerpt = excerptResult.data.excerpt;
+        const varsData = varsResult.data;
+        const sourceContentHash = excerpt.contentHash;
+        const syncedContentHash = varsData.syncedContentHash;
 
         // Hash-based staleness detection (primary method)
         let stale = false;
@@ -833,8 +831,8 @@ const App = () => {
         } else {
           // Fallback to timestamp comparison for backward compatibility
           // (for Include instances created before hash implementation)
-          const sourceUpdatedAt = excerptResult.excerpt.updatedAt;
-          const lastSynced = varsResult.lastSynced;
+          const sourceUpdatedAt = excerpt.updatedAt;
+          const lastSynced = varsData.lastSynced;
 
           if (sourceUpdatedAt && lastSynced) {
             const sourceDate = new Date(sourceUpdatedAt);
@@ -844,18 +842,18 @@ const App = () => {
         }
 
         setIsStale(stale);
-        setSourceLastModified(excerptResult.excerpt.updatedAt);
-        setIncludeLastSynced(varsResult.lastSynced);
+        setSourceLastModified(excerpt.updatedAt);
+        setIncludeLastSynced(varsData.lastSynced);
 
         // If stale, store both old and new content for enhanced diff view
         if (stale) {
-          setLatestRenderedContent(excerptResult.excerpt.content); // New Source content
-          setSyncedContent(varsResult.syncedContent || null); // Old Source content from last sync
+          setLatestRenderedContent(excerpt.content); // New Source content
+          setSyncedContent(varsData.syncedContent || null); // Old Source content from last sync
 
           // Load variable values and toggle states for diff view rendering
           // (We already have varsResult from staleness check, so reuse it)
-          setVariableValues(varsResult.variableValues || {});
-          setToggleStates(varsResult.toggleStates || {});
+          setVariableValues(varsData.variableValues || {});
+          setToggleStates(varsData.toggleStates || {});
         }
 
         setIsCheckingStaleness(false); // Check complete
@@ -1080,23 +1078,24 @@ const App = () => {
         // Get the copied data directly to update component state immediately
         const varsResult = await invoke('getVariableValues', { localId: effectiveLocalId });
         
-        if (varsResult.success) {
+        if (varsResult.success && varsResult.data) {
+          const varsData = varsResult.data;
           // Update component state directly with copied data
           // This ensures UI updates immediately without waiting for React Query
-          if (varsResult.excerptId) {
-            setSelectedExcerptId(varsResult.excerptId);
+          if (varsData.excerptId) {
+            setSelectedExcerptId(varsData.excerptId);
           }
-          if (varsResult.variableValues && Object.keys(varsResult.variableValues).length > 0) {
-            setVariableValues(varsResult.variableValues);
+          if (varsData.variableValues && Object.keys(varsData.variableValues).length > 0) {
+            setVariableValues(varsData.variableValues);
           }
-          if (varsResult.toggleStates && Object.keys(varsResult.toggleStates).length > 0) {
-            setToggleStates(varsResult.toggleStates);
+          if (varsData.toggleStates && Object.keys(varsData.toggleStates).length > 0) {
+            setToggleStates(varsData.toggleStates);
           }
-          if (varsResult.customInsertions && Array.isArray(varsResult.customInsertions) && varsResult.customInsertions.length > 0) {
-            setCustomInsertions(varsResult.customInsertions);
+          if (varsData.customInsertions && Array.isArray(varsData.customInsertions) && varsData.customInsertions.length > 0) {
+            setCustomInsertions(varsData.customInsertions);
           }
-          if (varsResult.internalNotes && Array.isArray(varsResult.internalNotes) && varsResult.internalNotes.length > 0) {
-            setInternalNotes(varsResult.internalNotes);
+          if (varsData.internalNotes && Array.isArray(varsData.internalNotes) && varsData.internalNotes.length > 0) {
+            setInternalNotes(varsData.internalNotes);
           }
 
           // Reset the sync guard to allow future syncs if needed
@@ -1144,20 +1143,21 @@ const App = () => {
     try {
       // Fetch fresh excerpt
       const excerptResult = await invoke('getExcerpt', { excerptId: selectedExcerptId });
-      if (!excerptResult.success || !excerptResult.excerpt) {
+      if (!excerptResult.success || !excerptResult.data || !excerptResult.data.excerpt) {
         alert('Failed to fetch latest Blueprint Standard content');
         return;
       }
 
       // Update the excerpt state so the new data (including documentationLinks) is available
-      setExcerptForViewMode(excerptResult.excerpt);
+      setExcerptForViewMode(excerptResult.data.excerpt);
 
       // Get current variable values, toggle states, custom insertions, and internal notes
       const varsResult = await invoke('getVariableValues', { localId: effectiveLocalId });
-      const currentVariableValues = varsResult.success ? varsResult.variableValues : {};
-      const currentToggleStates = varsResult.success ? varsResult.toggleStates : {};
-      const currentCustomInsertions = varsResult.success ? varsResult.customInsertions : [];
-      const currentInternalNotes = varsResult.success ? varsResult.internalNotes : [];
+      const varsData = varsResult.success && varsResult.data ? varsResult.data : {};
+      const currentVariableValues = varsData.variableValues || {};
+      const currentToggleStates = varsData.toggleStates || {};
+      const currentCustomInsertions = varsData.customInsertions || [];
+      const currentInternalNotes = varsData.internalNotes || [];
 
       // Generate fresh content with current settings
       let freshContent = excerptResult.excerpt.content;

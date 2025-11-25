@@ -218,8 +218,11 @@ export function RedlineFilterBar({
 
           {/* Refresh Queue Button */}
           {onManualRefresh && (
-            <Button appearance="default" onClick={onManualRefresh}>
-              🔄 Refresh Queue
+            <Button 
+            appearance="default" 
+            iconBefore='refresh'
+            onClick={onManualRefresh}>
+              Refresh
             </Button>
           )}
         </Inline>

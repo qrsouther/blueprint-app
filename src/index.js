@@ -31,6 +31,8 @@ import {
   getOrphanedUsage as getOrphanedUsageResolver,
   getLastVerificationTime as getLastVerificationTimeResolver,
   setLastVerificationTime as setLastVerificationTimeResolver,
+  getNextScheduledCheckTime as getNextScheduledCheckTimeResolver,
+  setNextScheduledCheckTime as setNextScheduledCheckTimeResolver,
   getCurrentUser as getCurrentUserResolver,
   queryStorage as queryStorageResolver,
   queryStorageMultiple as queryStorageMultipleResolver,
@@ -53,7 +55,6 @@ import {
 
 // Import verification resolver functions (Phase 5 modularization)
 import {
-  sourceHeartbeat as sourceHeartbeatResolver,
   checkAllSources as checkAllSourcesResolver,
   startCheckAllSources as startCheckAllSourcesResolver,
   checkAllIncludes as checkAllIncludesResolver,
@@ -114,7 +115,9 @@ import {
   checkRedlineStale as checkRedlineStaleResolver,
   getConfluenceUser as getConfluenceUserResolver,
   getRedlineStats as getRedlineStatsResolver,
-  postRedlineComment as postRedlineCommentResolver
+  postRedlineComment as postRedlineCommentResolver,
+  checkEmbedExists as checkEmbedExistsResolver,
+  manuallySoftDeleteEmbed as manuallySoftDeleteEmbedResolver
 } from './resolvers/redline-resolvers.js';
 
 // Import storage export/import resolver functions
@@ -250,9 +253,6 @@ resolver.define('getExcerptUsageForCSV', getExcerptUsageForCSVResolver);
 // Get usage counts for all excerpts (lightweight for sorting in admin page)
 resolver.define('getAllUsageCounts', getAllUsageCountsResolver);
 
-// Source heartbeat: Update lastSeenAt timestamp when Source macro is rendered
-resolver.define('sourceHeartbeat', sourceHeartbeatResolver);
-
 // Get orphaned Sources (Sources that haven't checked in recently or were deleted)
 // Active check: Verify each Source still exists on its page
 resolver.define('checkAllSources', checkAllSourcesResolver);
@@ -322,6 +322,10 @@ resolver.define('getRedlineStats', getRedlineStatsResolver);
 
 // Post inline comment to Confluence page near Embed
 resolver.define('postRedlineComment', postRedlineCommentResolver);
+
+// Check if Embed still exists on its page (lightweight existence check)
+resolver.define('checkEmbedExists', checkEmbedExistsResolver);
+resolver.define('manuallySoftDeleteEmbed', manuallySoftDeleteEmbedResolver);
 
 // Backfill redline fields for existing Embeds (one-time migration)
 resolver.define('backfillRedlineFields', backfillRedlineFieldsResolver);
@@ -899,6 +903,12 @@ resolver.define('getLastVerificationTime', getLastVerificationTimeResolver);
 
 // Set last verification timestamp (called after Check All Includes completes)
 resolver.define('setLastVerificationTime', setLastVerificationTimeResolver);
+
+// Get next scheduled check time (for automatic daily checks at 10 AM UTC)
+resolver.define('getNextScheduledCheckTime', getNextScheduledCheckTimeResolver);
+
+// Set next scheduled check time (called after check completes to schedule next run)
+resolver.define('setNextScheduledCheckTime', setNextScheduledCheckTimeResolver);
 
 // Get current user context (accountId for redline actions)
 resolver.define('getCurrentUser', getCurrentUserResolver);

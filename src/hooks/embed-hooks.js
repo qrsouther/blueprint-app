@@ -43,11 +43,11 @@ export const useExcerptData = (excerptId, enabled) => {
 
       const result = await invoke('getExcerpt', { excerptId });
 
-      if (!result.success || !result.excerpt) {
+      if (!result.success || !result.data || !result.data.excerpt) {
         throw new Error('Failed to load excerpt');
       }
 
-      return result.excerpt;
+      return result.data.excerpt;
     },
     enabled: enabled && !!excerptId,
     staleTime: 0, // Always fetch fresh data (temporarily set to 0 to bust old cache without documentationLinks)
@@ -111,11 +111,11 @@ export const useAvailableExcerpts = (enabled) => {
     queryFn: async () => {
       const result = await invoke('getExcerpts');
 
-      if (!result.success) {
+      if (!result.success || !result.data) {
         throw new Error('Failed to load excerpts');
       }
 
-      return result.excerpts || [];
+      return result.data.excerpts || [];
     },
     enabled: enabled,
     staleTime: 1000 * 60 * 2, // 2 minutes - excerpt list doesn't change often
@@ -139,11 +139,13 @@ export const useVariableValues = (localId, enabled) => {
     queryFn: async () => {
       const result = await invoke('getVariableValues', { localId });
 
-      if (!result.success) {
+      if (!result.success || !result.data) {
         throw new Error('Failed to load variable values');
       }
 
-      return result;
+      // Return the data object directly (not the wrapper) for backward compatibility
+      // React Query caches this, and EmbedContainer expects direct access to properties
+      return result.data;
     },
     enabled: enabled && !!localId,
     staleTime: 1000 * 30, // 30 seconds - this changes frequently during editing
@@ -185,28 +187,29 @@ export const useCachedContent = (
       // First, try to get cached content
       const cachedResult = await invoke('getCachedContent', { localId });
 
-      if (cachedResult && cachedResult.content) {
-        return { content: cachedResult.content, fromCache: true };
+      if (cachedResult.success && cachedResult.data?.content) {
+        return { content: cachedResult.data.content, fromCache: true };
       }
 
       // No cached content - fetch fresh and process
 
       const excerptResult = await invoke('getExcerpt', { excerptId });
-      if (!excerptResult.success || !excerptResult.excerpt) {
+      if (!excerptResult.success || !excerptResult.data || !excerptResult.data.excerpt) {
         throw new Error('Failed to load excerpt');
       }
 
-      setExcerptForViewMode(excerptResult.excerpt);
+      setExcerptForViewMode(excerptResult.data.excerpt);
 
       // Load variable values and check for orphaned data
       let varsResult = await invoke('getVariableValues', { localId });
 
       // CRITICAL: Check if data is missing - attempt recovery from drag-to-move
-      const hasNoData = !varsResult.lastSynced &&
-                        Object.keys(varsResult.variableValues || {}).length === 0 &&
-                        Object.keys(varsResult.toggleStates || {}).length === 0 &&
-                        (varsResult.customInsertions || []).length === 0 &&
-                        (varsResult.internalNotes || []).length === 0;
+      const varsData = varsResult.success && varsResult.data ? varsResult.data : {};
+      const hasNoData = !varsData.lastSynced &&
+                        Object.keys(varsData.variableValues || {}).length === 0 &&
+                        Object.keys(varsData.toggleStates || {}).length === 0 &&
+                        (varsData.customInsertions || []).length === 0 &&
+                        (varsData.internalNotes || []).length === 0;
 
       if (varsResult.success && hasNoData && excerptId) {
         const pageId = context?.contentId || context?.extension?.content?.id;
@@ -217,16 +220,17 @@ export const useCachedContent = (
           currentLocalId: context.localId
         });
 
-        if (recoveryResult.success && recoveryResult.recovered) {
+        if (recoveryResult.success && recoveryResult.data?.recovered) {
           // Reload the data
           varsResult = await invoke('getVariableValues', { localId });
         }
       }
 
-      const loadedVariableValues = varsResult.success ? varsResult.variableValues : {};
-      const loadedToggleStates = varsResult.success ? varsResult.toggleStates : {};
-      const loadedCustomInsertions = varsResult.success ? varsResult.customInsertions : [];
-      const loadedInternalNotes = varsResult.success ? varsResult.internalNotes : [];
+      const finalVarsData = varsResult.success && varsResult.data ? varsResult.data : {};
+      const loadedVariableValues = finalVarsData.variableValues || {};
+      const loadedToggleStates = finalVarsData.toggleStates || {};
+      const loadedCustomInsertions = finalVarsData.customInsertions || [];
+      const loadedInternalNotes = finalVarsData.internalNotes || [];
 
       setVariableValues(loadedVariableValues);
       setToggleStates(loadedToggleStates);
@@ -234,7 +238,7 @@ export const useCachedContent = (
       setInternalNotes(loadedInternalNotes);
 
       // Generate and cache the content
-      let freshContent = excerptResult.excerpt.content;
+      let freshContent = excerptResult.data.excerpt.content;
       const isAdf = freshContent && typeof freshContent === 'object' && freshContent.type === 'doc';
 
       if (isAdf) {

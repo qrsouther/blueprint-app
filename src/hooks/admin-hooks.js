@@ -58,12 +58,12 @@ export const useExcerptsQuery = () => {
     queryFn: async () => {
       const result = await invoke('getAllExcerpts');
 
-      if (!result || !result.success) {
-        throw new Error('Failed to load excerpts');
+      if (!result || !result.success || !result.data) {
+        throw new Error(result.error || 'Failed to load excerpts');
       }
 
       // Sanitize excerpts
-      const sanitized = (result.excerpts || []).map(excerpt => {
+      const sanitized = (result.data.excerpts || []).map(excerpt => {
         const cleanVariables = Array.isArray(excerpt.variables)
           ? excerpt.variables.filter(v => v && typeof v === 'object' && v.name)
           : [];
@@ -84,8 +84,8 @@ export const useExcerptsQuery = () => {
       let orphanedUsage = [];
       try {
         const orphanedResult = await invoke('getOrphanedUsage');
-        if (orphanedResult && orphanedResult.success) {
-          orphanedUsage = orphanedResult.orphanedUsage;
+        if (orphanedResult && orphanedResult.success && orphanedResult.data) {
+          orphanedUsage = orphanedResult.data.orphanedUsage || [];
         }
       } catch (err) {
         logger.errors('Failed to load orphaned usage:', err);
@@ -111,10 +111,10 @@ export const useCategoriesQuery = () => {
     queryKey: ['categories'],
     queryFn: async () => {
       const result = await invoke('getCategories');
-      if (result.success && result.categories) {
-        return result.categories;
+      if (result.success && result.data && result.data.categories) {
+        return result.data.categories;
       }
-      // Default categories if none stored
+      // Default categories if none stored or on error
       return ['General', 'Pricing', 'Technical', 'Legal', 'Marketing'];
     },
     staleTime: 1000 * 60 * 10, // 10 minutes - categories change rarely
@@ -187,10 +187,10 @@ export const useExcerptUsageQuery = (excerptId, enabled = true) => {
     queryKey: ['excerpt', excerptId, 'usage'],
     queryFn: async () => {
       const result = await invoke('getExcerptUsage', { excerptId });
-      if (result && result.success) {
-        return result.usage || [];
+      if (result && result.success && result.data) {
+        return result.data.usage || [];
       }
-      throw new Error('Failed to load usage data');
+      throw new Error(result.error || 'Failed to load usage data');
     },
     enabled: enabled && !!excerptId,
     staleTime: 1000 * 60 * 2, // 2 minutes for usage data
@@ -376,11 +376,11 @@ export const useAllUsageCountsQuery = () => {
     queryKey: ['usageCounts', 'all'],
     queryFn: async () => {
       const result = await invoke('getAllUsageCounts');
-      if (result && result.success) {
+      if (result && result.success && result.data) {
         // Returns object like { excerptId1: 5, excerptId2: 12, ... }
-        return result.usageCounts || {};
+        return result.data.usageCounts || {};
       }
-      throw new Error('Failed to load usage counts');
+      throw new Error(result.error || 'Failed to load usage counts');
     },
     staleTime: 1000 * 60 * 2, // 2 minutes
     gcTime: 1000 * 60 * 10, // 10 minutes

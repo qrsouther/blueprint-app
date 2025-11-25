@@ -41,10 +41,11 @@ import {
   Icon,
   xcss,
   Pressable,
-  TextArea
+  TextArea,
+  User
 } from '@forge/react';
 import { router } from '@forge/bridge';
-import { useConfluenceUserQuery, useSetRedlineStatusMutation, usePostRedlineCommentMutation } from '../../hooks/redline-hooks';
+import { useSetRedlineStatusMutation, usePostRedlineCommentMutation } from '../../hooks/redline-hooks';
 import { EmbedViewMode } from '../embed/EmbedViewMode';
 import { logger } from '../../utils/logger.js';
 import {
@@ -112,6 +113,12 @@ const middleSideStyles = xcss({
 const rightSideStyles = xcss({
   width: '17%',
   paddingLeft: 'space.200'
+});
+
+// Centered button content style
+const centeredButtonContentStyle = xcss({
+  textAlign: 'center',
+  width: '100%'
 });
 
 // Preview placeholder when no content
@@ -219,8 +226,7 @@ function RedlineQueueCardComponent({ embedData, currentUserId, onStatusChange })
   // Ref to access TextArea DOM element directly to read current value
   const commentTextAreaRef = React.useRef(null);
 
-  // Fetch approver user data if this Embed is approved
-  const { data: approver } = useConfluenceUserQuery(embedData.approvedBy);
+  // Note: User component handles avatar/name display directly from accountId
 
   // Reset comment text, posted comment ID, and error when action changes
   useEffect(() => {
@@ -236,6 +242,14 @@ function RedlineQueueCardComponent({ embedData, currentUserId, onStatusChange })
 
   const handleStatusChange = async (newStatus, reason) => {
     try {
+      // CRITICAL: Notify parent of status change IMMEDIATELY (before mutation)
+      // This ensures the card is added to transitioning state before it gets filtered out
+      // Note: This is called from handleSubmitWithComment which already calls onStatusChange,
+      // but we also call it here in case handleStatusChange is called directly
+      if (onStatusChange) {
+        onStatusChange(embedData.localId, newStatus);
+      }
+
       await setStatusMutation.mutateAsync({
         localId: embedData.localId,
         status: newStatus,
@@ -243,13 +257,11 @@ function RedlineQueueCardComponent({ embedData, currentUserId, onStatusChange })
         reason
       });
 
-      // Call optional callback
-      if (onStatusChange) {
-        onStatusChange(embedData.localId, newStatus);
-      }
+      // Note: onStatusChange is already called above, so we don't need to call it again
     } catch (error) {
       logger.errors('[RedlineQueueCard] Failed to set status:', error);
       // Error handling is done by the mutation hook
+      // Note: Card will still fade out even if mutation fails (already in transitioning state)
     }
   };
 
@@ -262,6 +274,12 @@ function RedlineQueueCardComponent({ embedData, currentUserId, onStatusChange })
       // This ensures we get the actual current value, not stale state
       const currentCommentText = commentTextAreaRef.current?.value || commentText || '';
       const trimmedCommentText = currentCommentText.trim();
+
+      // CRITICAL: Notify parent of status change IMMEDIATELY (before mutation)
+      // This ensures the card is added to transitioning state before it gets filtered out
+      if (onStatusChange) {
+        onStatusChange(embedData.localId, status);
+      }
 
       // Post inline comment if comment text provided
       if (trimmedCommentText) {
@@ -293,6 +311,10 @@ function RedlineQueueCardComponent({ embedData, currentUserId, onStatusChange })
 
           // Don't proceed with status change if comment was required but failed
           // User can see the error and try again
+          // Remove from transitioning state since it failed
+          if (onStatusChange) {
+            // Could add a cleanup callback, but for now just let it fade out naturally
+          }
           return;
         }
       }
@@ -407,9 +429,11 @@ function RedlineQueueCardComponent({ embedData, currentUserId, onStatusChange })
     );
   };
 
+  const cardStyle = getCardStyles(embedData.redlineStatus);
+
   return (
     <>
-      <Box xcss={getCardStyles(embedData.redlineStatus)}>
+      <Box xcss={cardStyle}>
         <Inline space="space.0" alignBlock="start" shouldWrap={false}>
           {/* Left side: Metadata only (25%) */}
           <Box xcss={leftSideStyles}>
@@ -417,7 +441,9 @@ function RedlineQueueCardComponent({ embedData, currentUserId, onStatusChange })
               <Stack space="space.100">
                 {/* Status Badge */}
                 <Box>
-                  <RedlineStatusBadge space="space.100" status={embedData.redlineStatus} />
+                  <Inline space="space.100" alignBlock="center">
+                    <RedlineStatusBadge space="space.100" status={embedData.redlineStatus} />
+                  </Inline>
                 </Box>
 
                 {/* Page Title link in small heading */}
@@ -438,16 +464,36 @@ function RedlineQueueCardComponent({ embedData, currentUserId, onStatusChange })
                   Updated: {embedData.lastSynced ? formatDate(embedData.lastSynced) : 'Never'}
                 </Text>
 
-                {/* Approval Info (if approved) */}
-                {embedData.approvedBy && (
+                {/* Status Info with Icon + User */}
+                {embedData.redlineStatus === 'approved' && embedData.approvedBy && (
                   <Box backgroundColor="color.background.success.subtle" padding="space.100">
                     <Stack space="space.050">
-                      <Text size="small" weight="semibold">
-                        ✅ Approved
-                      </Text>
-                      <Text size="small">
-                        {approver ? `By ${approver.displayName}` : `By user ${embedData.approvedBy}`} on {formatDate(embedData.approvedAt)}
-                      </Text>
+                      <Inline space="space.100" alignBlock="center">
+                        <Icon glyph="check-circle" label="Approved" color="color.icon.success" />
+                        <User accountId={embedData.approvedBy} />
+                      </Inline>
+                    </Stack>
+                  </Box>
+                )}
+
+                {embedData.redlineStatus === 'pre-approved' && embedData.lastChangedBy && (
+                  <Box backgroundColor="color.background.information.subtle" padding="space.100">
+                    <Stack space="space.050">
+                      <Inline space="space.100" alignBlock="center">
+                        <Icon glyph="check-circle" label="Pre-Approved" color="color.icon.information" />
+                        <User accountId={embedData.lastChangedBy} />
+                      </Inline>
+                    </Stack>
+                  </Box>
+                )}
+
+                {embedData.redlineStatus === 'needs-revision' && embedData.lastChangedBy && (
+                  <Box backgroundColor="color.background.danger.subtle" padding="space.100">
+                    <Stack space="space.050">
+                      <Inline space="space.100" alignBlock="center">
+                        <Icon glyph="cross-circle" label="Needs Revision" color="color.icon.danger" />
+                        <User accountId={embedData.lastChangedBy} />
+                      </Inline>
                     </Stack>
                   </Box>
                 )}
@@ -471,29 +517,35 @@ function RedlineQueueCardComponent({ embedData, currentUserId, onStatusChange })
           <Box xcss={rightSideStyles}>
             {!activeCommentAction ? (
               // Show all action buttons when no comment form is active
-              <Stack space="space.100">
+              <Stack space="space.100" alignBlock="stretch">
                 <Button
-                  appearance="primary"
+                  appearance="default"
                   onClick={() => setActiveCommentAction('approved')}
                   isDisabled={embedData.redlineStatus === 'approved' || setStatusMutation.isPending}
+                  xcss={centeredButtonContentStyle}
                 >
-                  👍 Approve
+                  <Inline space="space.100" alignBlock="center">
+                    <Icon glyph="check-circle" label="Approve" color="color.icon.success" />
+                    Approve
+                  </Inline>
                 </Button>
 
                 <Button
-                  appearance="default"
+                  appearance="subtle"
+                  iconBefore='theme'
                   onClick={() => setActiveCommentAction('pre-approved')}
                   isDisabled={embedData.redlineStatus === 'pre-approved' || setStatusMutation.isPending}
                 >
-                  👌 Pre-Approved
+                  Pre-Approve
                 </Button>
 
                 <Button
                   appearance="danger"
+                  iconBefore='cross-circle'
                   onClick={() => setActiveCommentAction('needs-revision')}
-                  isDisabled={setStatusMutation.isPending}
+                  isDisabled={embedData.redlineStatus === 'needs-revision' || setStatusMutation.isPending}
                 >
-                  👎 Needs Revision
+                  Needs Revision
                 </Button>
               </Stack>
             ) : (
@@ -540,13 +592,18 @@ function RedlineQueueCardComponent({ embedData, currentUserId, onStatusChange })
                          activeCommentAction === 'pre-approved' ? 'default' :
                          'danger'
                        }
+                       iconBefore={
+                         activeCommentAction === 'approved' ? 'check-circle' :
+                         activeCommentAction === 'pre-approved' ? 'theme' :
+                         'cross-circle'
+                       }
                        onClick={() => handleSubmitWithComment(activeCommentAction)}
                        isDisabled={setStatusMutation.isPending || postCommentMutation.isPending}
                      >
                        {postCommentMutation.isPending ? 'Posting...' :
-                        activeCommentAction === 'approved' ? '👍 Approve' :
-                        activeCommentAction === 'pre-approved' ? '👌 Pre-Approved' :
-                        '👎 Needs Revision'}
+                        activeCommentAction === 'approved' ? 'Approve' :
+                        activeCommentAction === 'pre-approved' ? 'Pre-Approve' :
+                        'Request Revision'}
                      </Button>
                     <Button
                       appearance="subtle"
