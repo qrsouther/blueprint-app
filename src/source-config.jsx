@@ -145,6 +145,7 @@ const App = () => {
   const [detectedToggles, setDetectedToggles] = useState([]);
   const [toggleMetadata, setToggleMetadata] = useState({});
   const [documentationLinks, setDocumentationLinks] = useState([]);
+  const [isSubmitting, setIsSubmitting] = useState(false); // Track when save is in progress until modal closes
 
   // Form state for adding new documentation links
   const [newLinkAnchor, setNewLinkAnchor] = useState('');
@@ -360,6 +361,7 @@ const App = () => {
     const sourceSpaceKey = context?.spaceKey || context?.extension?.space?.key;
 
     // Use React Query mutation to save
+    setIsSubmitting(true); // Set submitting state immediately
     return new Promise((resolve, reject) => {
       saveExcerptMutation({
         excerptName,
@@ -390,9 +392,11 @@ const App = () => {
             // Use a small delay to ensure the mutation completes before modal closes
             await new Promise(resolve => setTimeout(resolve, 100));
             await view.submit({ config: configToSubmit });
+            // Keep isSubmitting true - modal will close and component will unmount
             resolve();
           } catch (error) {
             logger.errors('Error submitting config:', error);
+            setIsSubmitting(false); // Reset on error so user can try again
             // Still resolve to allow modal to close even if submit fails
             // The data is already saved to storage, so this is just updating the macro config
             resolve();
@@ -400,6 +404,7 @@ const App = () => {
         },
         onError: (error) => {
           logger.errors('Failed to save excerpt:', error);
+          setIsSubmitting(false); // Reset on error so user can try again
           reject(error);
         }
       });
@@ -720,10 +725,10 @@ const App = () => {
             <Button 
               appearance="primary" 
               type="submit"
-              isDisabled={isSavingExcerpt}
-              isLoading={isSavingExcerpt}
+              isDisabled={isSavingExcerpt || isSubmitting}
+              isLoading={isSavingExcerpt || isSubmitting}
             >
-              {isSavingExcerpt ? 'Saving...' : 'Save'}
+              {(isSavingExcerpt || isSubmitting) ? 'Saving...' : 'Save'}
             </Button>
             <Button
               appearance="link"
