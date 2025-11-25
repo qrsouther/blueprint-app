@@ -84,8 +84,8 @@ export const useExcerptsQuery = () => {
       let orphanedUsage = [];
       try {
         const orphanedResult = await invoke('getOrphanedUsage');
-        if (orphanedResult && orphanedResult.success) {
-          orphanedUsage = orphanedResult.orphanedUsage;
+        if (orphanedResult && orphanedResult.success && orphanedResult.data) {
+          orphanedUsage = orphanedResult.data.orphanedUsage || [];
         }
       } catch (err) {
         logger.errors('Failed to load orphaned usage:', err);

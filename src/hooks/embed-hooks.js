@@ -220,7 +220,7 @@ export const useCachedContent = (
           currentLocalId: context.localId
         });
 
-        if (recoveryResult.success && recoveryResult.recovered) {
+        if (recoveryResult.success && recoveryResult.data?.recovered) {
           // Reload the data
           varsResult = await invoke('getVariableValues', { localId });
         }

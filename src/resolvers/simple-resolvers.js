@@ -1201,14 +1201,15 @@ export async function getOrphanedUsage() {
 
     return {
       success: true,
-      orphanedUsage
+      data: {
+        orphanedUsage
+      }
     };
   } catch (error) {
     logFailure('getOrphanedUsage', 'Error getting orphaned usage', error);
     return {
       success: false,
-      error: error.message,
-      orphanedUsage: []
+      error: error.message
     };
   }
 }
