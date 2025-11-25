@@ -21,7 +21,7 @@
 
 import { storage, startsWith } from '@forge/api';
 import { updateProgress, calculatePhaseProgress } from './helpers/progress-tracker.js';
-import { logFunction, logPhase, logSuccess, logFailure, logWarning, logStorageOp } from '../utils/forge-logger.js';
+import { logFunction, logPhase, logSuccess, logFailure, logStorageOp } from '../utils/forge-logger.js';
 import { parseVersionId } from '../utils/version-manager.js';
 
 /**
@@ -33,7 +33,7 @@ export async function handler(event) {
   const payload = event.payload || event.body || event;
   const { progressId, onlySourceVersions = false, sourceRetentionMinutes = 2, maxVersions = 1000 } = payload;
 
-  const functionStartTime = Date.now();
+  // const functionStartTime = Date.now(); // Reserved for future performance tracking
   logFunction('pruneVersionsWorker', 'Starting version pruning', { progressId, onlySourceVersions, sourceRetentionMinutes });
 
   try {

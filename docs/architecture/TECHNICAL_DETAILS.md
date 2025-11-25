@@ -64,9 +64,9 @@ This branch contains a major refactoring effort to modularize the monolithic `in
 
 #### **Phase 5: Create Verification Resolvers Module** ✅
 - Extracted all health-check and verification operations to `src/resolvers/verification-resolvers.js`:
-  - `sourceHeartbeat` - Track Source macro activity
   - `checkAllSources` - Verify all Source macros + clean stale entries
   - `checkAllIncludes` - Production "Check All Embeds" feature with progress tracking (~353 lines)
+  - `getStorageUsage` - Calculate storage usage statistics
 - **Result:** `index.js` reduced from 1,103 → 570 lines (48% reduction!)
 
 #### **Phase 6: Create Usage Resolvers Module** ✅

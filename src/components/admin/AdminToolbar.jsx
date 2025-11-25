@@ -31,6 +31,7 @@ import {
   Button,
   ButtonGroup,
   Tooltip,
+  Icon,
   xcss
 } from '@forge/react';
 
@@ -86,60 +87,66 @@ export function AdminToolbar({
 
       <Button
         appearance="default"
+        iconBefore='shapes'
         onClick={onOpenCategoryModal}
         xcss={buttonStyles}
       >
-        🗂️ Manage Categories
+        Manage Categories
       </Button>
 
       <Tooltip content={verificationTooltip}>
         <Button
           appearance="default"
+          iconBefore='data-flow'
           onClick={onCheckAllSources}
           isDisabled={isCheckingAllSources}
           xcss={buttonStyles}
         >
-          {isCheckingAllSources ? 'Checking...' : '🔎 Check All Sources'}
+          {isCheckingAllSources ? 'Checking...' : 'Check All Sources'}
         </Button>
       </Tooltip>
 
       <Tooltip content={`${verificationTooltip}\n\nVerifies all Embed macros: checks if they exist on their pages, references valid standards, and have up-to-date content. Automatically cleans up orphaned entries and generates a complete CSV-exportable report with usage data, variable values, and rendered content.`}>
         <Button
           appearance="default"
+          iconBefore='eye-open'
           onClick={onCheckAllIncludes}
           isDisabled={isCheckingIncludes}
           xcss={buttonStyles}
         >
-          {isCheckingIncludes ? 'Checking...' : '🔍 Check All Embeds'}
+          {isCheckingIncludes ? 'Checking...' : 'Check All Embeds'}
         </Button>
       </Tooltip>
 
       <Tooltip content="View and restore soft-deleted Embeds from the recovery namespace. Use this if data was accidentally removed by Check All Embeds or other operations.">
         <Button
+          iconBefore='pulse'
           onClick={onOpenEmergencyRecovery}
           xcss={buttonStyles}
         >
-          ⤴️ Restore Version
+          Restore Version
         </Button>
       </Tooltip>
 
       <Tooltip content="Export all storage data from this environment (production) to a JSON file for import into development.">
         <Button
+          iconBefore='download'
           appearance="default"
           onClick={onOpenStorageExport}
           xcss={buttonStyles}
         >
-          📤 Export Data
+          Export Data
         </Button>
       </Tooltip>
 
       <Tooltip content="Import storage data from a production export file. This will overwrite ALL existing data in this environment (development).">
         <Button
           appearance="default"
+          iconBefore='upload'
           onClick={onOpenStorageImport}
           xcss={buttonStyles}
         >
-          📥 Import Data
+          Import Data
         </Button>
       </Tooltip>
 

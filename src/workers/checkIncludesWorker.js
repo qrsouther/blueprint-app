@@ -23,7 +23,7 @@
 import { storage } from '@forge/api';
 import { updateProgress, calculatePhaseProgress, buildCompletionMessage } from './helpers/progress-tracker.js';
 import { fetchPageContent, checkMacroExistsInADF, groupIncludesByPage } from './helpers/page-scanner.js';
-import { handlePageNotFound, handleOrphanedMacro } from './helpers/orphan-detector.js';
+import { handleOrphanedMacro, softDeleteMacroVars } from './helpers/orphan-detector.js';
 import { attemptReferenceRepair, checkExcerptExists, buildRepairedRecord, buildBrokenRecord } from './helpers/reference-repairer.js';
 import { createBackupSnapshot } from './helpers/backup-manager.js';
 import { collectAllEmbedInstances, buildActiveIncludeRecord } from './helpers/usage-collector.js';
@@ -254,9 +254,19 @@ export async function handler(event) {
               const macroExists = checkMacroExistsInADF(adfContent, include.localId);
 
               if (!macroExists) {
-                const orphaned = await handleOrphanedMacro(include, pageData, dryRun);
+                const orphaned = await handleOrphanedMacro(include);
                 orphanedIncludes.push(orphaned);
-                orphanedEntriesRemoved.push(include.localId);
+                
+                // Actually soft-delete if not in dry-run mode
+                if (!dryRun) {
+                  await softDeleteMacroVars(
+                    include.localId,
+                    'Macro not found in page content',
+                    { pageId: include.pageId, pageTitle: pageData?.title },
+                    false // dryRun: false - actually delete
+                  );
+                  orphanedEntriesRemoved.push(include.localId);
+                }
               } else {
                 // Macro exists - check if referenced excerpt exists
                 // Wrap in try/catch to prevent processing errors from marking as orphaned

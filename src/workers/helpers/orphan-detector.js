@@ -12,7 +12,7 @@
 
 import { storage } from '@forge/api';
 import { saveVersion } from '../../utils/version-manager.js';
-import { logSuccess, logWarning } from '../../utils/forge-logger.js';
+import { logPhase, logSuccess, logWarning } from '../../utils/forge-logger.js';
 
 // SAFETY: Dry-run mode configuration
 // Default is true (preview mode) - must be explicitly set to false for cleanup
@@ -71,15 +71,36 @@ export async function softDeleteMacroVars(localId, reason, metadata = {}, dryRun
         logWarning('softDeleteMacroVars', 'Failed to move to deleted namespace', { error: setError.message, localId, reason });
         // Continue - try to delete from active namespace anyway
       }
-    }
 
-    // Remove from active namespace
-    if (!dryRun) {
-      try {
-        await storage.delete(`macro-vars:${localId}`);
-      } catch (deleteError) {
-        logWarning('softDeleteMacroVars', 'Failed to delete from active namespace', { error: deleteError.message, localId });
-        // Log but don't throw - deletion may have partially succeeded
+      // Remove from active namespace
+      if (!dryRun) {
+        try {
+          await storage.delete(`macro-vars:${localId}`);
+          logSuccess('softDeleteMacroVars', 'Deleted from active namespace', { localId, reason });
+        } catch (deleteError) {
+          logWarning('softDeleteMacroVars', 'Failed to delete from active namespace', { error: deleteError.message, localId, reason });
+          // Log but don't throw - deletion may have partially succeeded
+        }
+      } else {
+        logPhase('softDeleteMacroVars', 'DRY-RUN: Would delete from active namespace', { localId, reason });
+      }
+    } else {
+      // Entry doesn't exist - might already be deleted, but still mark as deleted for safety
+      logWarning('softDeleteMacroVars', 'macro-vars entry not found, but marking as deleted anyway', { localId, reason });
+      if (!dryRun) {
+        try {
+          // Still create deleted entry even if active entry doesn't exist (for consistency)
+          await storage.set(`macro-vars-deleted:${localId}`, {
+            deletedAt: new Date().toISOString(),
+            deletedBy: 'checkAllIncludes',
+            deletionReason: reason || 'Entry not found in active namespace',
+            canRecover: false,
+            ...metadata
+          });
+          logSuccess('softDeleteMacroVars', 'Marked as deleted (entry was already missing)', { localId, reason });
+        } catch (setError) {
+          logWarning('softDeleteMacroVars', 'Failed to mark as deleted', { error: setError.message, localId, reason });
+        }
       }
     }
   } catch (error) {

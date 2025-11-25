@@ -800,6 +800,7 @@ export async function copyDeactivatedEmbedData(req) {
       syncedContentHash: sourceData.syncedContentHash || null,
       syncedContent: sourceData.syncedContent || null,
       pageId: sourceData.pageId || null,
+      pageTitle: sourceData.pageTitle || null, // Preserve pageTitle if available
       // Preserve redline fields if they exist
       redlineStatus: sourceData.redlineStatus || 'reviewable',
       approvedContentHash: sourceData.approvedContentHash || null,
@@ -1019,7 +1020,9 @@ export async function getCheckProgress(req) {
 
     return {
       success: true,
-      progress
+      data: {
+        progress
+      }
     };
   } catch (error) {
     logFailure('getCheckProgress', 'Error getting progress', error, { progressId: req.payload?.progressId });
@@ -1249,6 +1252,71 @@ export async function setLastVerificationTime(req) {
     };
   } catch (error) {
     logFailure('setLastVerificationTime', 'Error setting last verification time', error);
+    return {
+      success: false,
+      error: error.message
+    };
+  }
+}
+
+/**
+ * Get next scheduled check time
+ * Returns the timestamp when the next automatic "Check All Embeds" should run
+ * Used by Admin page to determine if check should run automatically
+ */
+export async function getNextScheduledCheckTime() {
+  try {
+    const nextScheduledTime = await storage.get('meta:next-scheduled-check-time');
+    return {
+      success: true,
+      data: {
+        nextScheduledTime: nextScheduledTime || null
+      }
+    };
+  } catch (error) {
+    logFailure('getNextScheduledCheckTime', 'Error getting next scheduled check time', error);
+    return {
+      success: false,
+      error: error.message
+    };
+  }
+}
+
+/**
+ * Set next scheduled check time
+ * Sets the timestamp when the next automatic "Check All Embeds" should run
+ * Typically set to 10 AM UTC tomorrow after a check completes
+ */
+export async function setNextScheduledCheckTime(req) {
+  const { timestamp } = req.payload || {};
+  
+  try {
+    // Input validation
+    if (!timestamp || typeof timestamp !== 'string' || timestamp.trim() === '') {
+      logFailure('setNextScheduledCheckTime', 'Validation failed: timestamp is required and must be a non-empty ISO string', new Error('Invalid timestamp'));
+      return {
+        success: false,
+        error: 'timestamp is required and must be a non-empty ISO string'
+      };
+    }
+
+    // Validate that timestamp is a valid ISO date string
+    const date = new Date(timestamp);
+    if (isNaN(date.getTime())) {
+      logFailure('setNextScheduledCheckTime', 'Validation failed: timestamp must be a valid ISO date string', new Error('Invalid date'));
+      return {
+        success: false,
+        error: 'timestamp must be a valid ISO date string'
+      };
+    }
+
+    await storage.set('meta:next-scheduled-check-time', timestamp);
+    return {
+      success: true,
+      data: {}
+    };
+  } catch (error) {
+    logFailure('setNextScheduledCheckTime', 'Error setting next scheduled check time', error);
     return {
       success: false,
       error: error.message

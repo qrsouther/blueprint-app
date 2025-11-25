@@ -282,7 +282,9 @@ export async function getExcerptUsageForCSV(req) {
     const usageData = await storage.get(usageKey) || { references: [] };
 
     // Enrich usage data with all fields needed for CSV export
-    const enrichedReferences = await Promise.all(usageData.references.map(async (ref) => {
+    // Filter out deleted embeds (where macro-vars doesn't exist)
+    const enrichedReferences = [];
+    for (const ref of usageData.references) {
       const varsKey = `macro-vars:${ref.localId}`;
       const cacheKey = `macro-cache:${ref.localId}`;
       
@@ -290,6 +292,11 @@ export async function getExcerptUsageForCSV(req) {
         storage.get(varsKey),
         storage.get(cacheKey)
       ]);
+
+      // Skip if macro-vars doesn't exist (Embed was deleted)
+      if (!macroVars) {
+        continue;
+      }
 
       // Build page URL
       const pageUrl = `/wiki/pages/viewpage.action?pageId=${ref.pageId}${ref.headingAnchor ? `#${ref.headingAnchor}` : ''}`;
@@ -300,7 +307,7 @@ export async function getExcerptUsageForCSV(req) {
       const isStale = lastSynced ? new Date(excerptUpdated) > new Date(lastSynced) : false;
       const status = isStale ? 'Stale (update available)' : 'Active';
 
-      return {
+      enrichedReferences.push({
         localId: ref.localId,
         pageId: ref.pageId,
         pageTitle: ref.pageTitle || 'Unknown Page',
@@ -312,19 +319,41 @@ export async function getExcerptUsageForCSV(req) {
         status: status,
         lastSynced: lastSynced || '',
         excerptLastModified: excerpt.updatedAt,
+        updatedAt: macroVars?.lastSynced || ref.updatedAt || null, // For deduplication
         variables: excerpt.variables || [],
         toggles: excerpt.toggles || [],
         variableValues: macroVars?.variableValues || {},
         toggleStates: macroVars?.toggleStates || {},
         customInsertions: macroVars?.customInsertions || [],
         renderedContent: cacheData?.content || null
-      };
-    }));
+      });
+    }
+
+    // Deduplicate by pageId (keep most recent by updatedAt/lastSynced)
+    // This matches the frontend deduplication logic
+    const uniqueReferences = [];
+    const seenPages = new Map();
+    for (const ref of enrichedReferences) {
+      const pageId = String(ref.pageId);
+      if (!seenPages.has(pageId)) {
+        seenPages.set(pageId, ref);
+        uniqueReferences.push(ref);
+      } else {
+        const existing = seenPages.get(pageId);
+        const refUpdatedAt = ref.updatedAt ? new Date(ref.updatedAt) : new Date(0);
+        const existingUpdatedAt = existing.updatedAt ? new Date(existing.updatedAt) : new Date(0);
+        if (refUpdatedAt > existingUpdatedAt) {
+          const idx = uniqueReferences.findIndex(u => String(u.pageId) === pageId);
+          uniqueReferences[idx] = ref;
+          seenPages.set(pageId, ref);
+        }
+      }
+    }
 
     return {
       success: true,
       data: {
-        usage: enrichedReferences
+        usage: uniqueReferences
       }
     };
   } catch (error) {

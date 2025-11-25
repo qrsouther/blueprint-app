@@ -8,42 +8,15 @@
  * Extracted during Phase 5 of index.js modularization.
  *
  * Functions:
- * - sourceHeartbeat: Update Source macro last-seen timestamp
  * - checkAllSources: Verify all Source macros exist on their pages
  * - checkAllIncludes: Comprehensive Include verification with progress tracking
+ * - getStorageUsage: Calculate storage usage statistics
  */
 
 import { storage, startsWith } from '@forge/api';
-import api, { route } from '@forge/api';
 import { Queue } from '@forge/events';
 import { generateUUID } from '../utils.js';
-import { validateExcerptData } from '../utils/storage-validator.js';
-import { extractVariablesFromAdf } from '../utils/adf-utils.js';
 import { logFunction, logPhase, logSuccess, logFailure, logWarning } from '../utils/forge-logger.js';
-
-/**
- * Source macro heartbeat - tracks when a Source macro was last seen/active
- */
-export async function sourceHeartbeat(req) {
-  try {
-    const { excerptId } = req.payload;
-
-    // Load the excerpt
-    const excerpt = await storage.get(`excerpt:${excerptId}`);
-    if (!excerpt) {
-      return { success: false, error: 'Excerpt not found' };
-    }
-
-    // Update lastSeenAt timestamp
-    excerpt.lastSeenAt = new Date().toISOString();
-    await storage.set(`excerpt:${excerptId}`, excerpt);
-
-    return { success: true };
-  } catch (error) {
-    logFailure('sourceHeartbeat', 'Error in sourceHeartbeat', error);
-    return { success: false, error: error.message };
-  }
-}
 
 /**
  * Start Check All Sources - Trigger resolver for async processing
@@ -62,7 +35,7 @@ export async function sourceHeartbeat(req) {
  * - jobId: string (for Async Events API job tracking)
  * - progressId: string (for progress polling via getCheckProgress)
  */
-export async function startCheckAllSources(req) {
+export async function startCheckAllSources(_req) {
   try {
     logFunction('startCheckAllSources', 'Starting Check All Sources async operation');
 
@@ -172,9 +145,11 @@ export async function startCheckAllSources(req) {
     // Return immediately - consumer will process in background
     return {
       success: true,
-      jobId,
-      progressId,
-      message: 'Check All Sources job queued successfully'
+      data: {
+        jobId,
+        progressId,
+        message: 'Check All Sources job queued successfully'
+      }
     };
 
   } catch (error) {
@@ -637,10 +612,12 @@ export async function startCheckAllIncludes(req) {
     // Return immediately - consumer will process in background
     return {
       success: true,
-      jobId,
-      progressId,
-      dryRun,
-      message: `Check All Includes job queued successfully (${dryRun ? 'dry-run' : 'live'} mode)`
+      data: {
+        jobId,
+        progressId,
+        dryRun,
+        message: `Check All Includes job queued successfully (${dryRun ? 'dry-run' : 'live'} mode)`
+      }
     };
 
   } catch (error) {
@@ -694,7 +671,7 @@ async function getAllKeysWithPrefix(prefix, maxPages = 50) {
  * Forge storage limit: 250MB per app
  * Returns usage in bytes, MB, and percentage of limit
  */
-export async function getStorageUsage() {
+export async function getStorageUsage(_req) {
   try {
     logFunction('getStorageUsage', 'Calculating storage usage');
 
@@ -809,18 +786,20 @@ export async function getStorageUsage() {
 
     return {
       success: true,
-      totalBytes,
-      totalMB: parseFloat(totalMB.toFixed(2)),
-      limitMB,
-      warningThresholdMB,
-      percentUsed: parseFloat(percentUsed.toFixed(1)),
-      exceedsWarningThreshold,
-      keyCount: allKeys.length,
-      sourcesCount,
-      embedsCount,
-      breakdown: {
-        bytes: breakdown,
-        mb: breakdownMB
+      data: {
+        totalBytes,
+        totalMB: parseFloat(totalMB.toFixed(2)),
+        limitMB,
+        warningThresholdMB,
+        percentUsed: parseFloat(percentUsed.toFixed(1)),
+        exceedsWarningThreshold,
+        keyCount: allKeys.length,
+        sourcesCount,
+        embedsCount,
+        breakdown: {
+          bytes: breakdown,
+          mb: breakdownMB
+        }
       }
     };
 

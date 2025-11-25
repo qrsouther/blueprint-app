@@ -3,6 +3,19 @@
 ## Overview
 All resolvers now return `{ success: true, data: {...} }` or `{ success: false, error: "..." }`. This plan prioritizes testing by risk and frequency of use.
 
+## Testing Status Summary
+
+**Last Updated:** 2025-11-21
+
+### ✅ Completed Priorities
+- **Priority 1:** Core Embed Functionality - ✅ ALL TESTS PASSED
+- **Priority 2:** Source Management - ✅ ALL TESTS PASSED (with fixes applied)
+- **Priority 3:** Admin UI & Usage Tracking - ✅ ALL TESTS PASSED
+- **Priority 4:** Redline System - ✅ ALL TESTS PASSED
+
+### ⏳ Remaining Priorities
+- **Priority 5:** Version History & Recovery - Not yet tested
+
 ---
 
 ## Priority 1: CRITICAL - Core Embed Functionality ⚠️
@@ -90,8 +103,10 @@ All resolvers now return `{ success: true, data: {...} }` or `{ success: false, 
 
 ### Test 3.1: Admin Page Load
 - [ ] Open Admin page
-- [ ] **Expected:** Sources list loads, usage counts display
-- [ ] **Resolvers tested:** `getAllExcerpts`, `getAllUsageCounts`
+- [ ] **Expected:** Sources list loads in sidebar
+- [ ] Click on a Source → View Usage Details tab
+- [ ] **Expected:** Usage count displays correctly in Usage Details UI
+- [ ] **Resolvers tested:** `getAllExcerpts`, `getAllUsageCounts`, `getExcerptUsage`
 
 ### Test 3.2: Usage Details
 - [ ] Click on a Source in Admin
@@ -117,29 +132,34 @@ All resolvers now return `{ success: true, data: {...} }` or `{ success: false, 
 **Why Fourth:** Used for review workflow, but not core functionality.
 
 ### Test 4.1: Redline Queue Load
-- [ ] Open Redline Queue in Admin
-- [ ] **Expected:** Queue loads with all Embeds
-- [ ] **Resolvers tested:** `getRedlineQueue`
+- [x] Open Redline Queue in Admin
+- [x] **Expected:** Queue loads with all Embeds
+- [x] **Resolvers tested:** `getRedlineQueue`
+- **Status:** ✅ PASSED
 
 ### Test 4.2: Status Update
-- [ ] Change redline status of an Embed (e.g., "approved")
-- [ ] **Expected:** Status updates, card moves to correct group
-- [ ] **Resolvers tested:** `setRedlineStatus`, `getRedlineQueue`
+- [x] Change redline status of an Embed (e.g., "approved")
+- [x] **Expected:** Status updates, card moves to correct group
+- [x] **Resolvers tested:** `setRedlineStatus`, `getRedlineQueue`
+- **Status:** ✅ PASSED
 
 ### Test 4.3: User Avatars
-- [ ] View Redline Queue
-- [ ] **Expected:** User avatars display correctly
-- [ ] **Resolvers tested:** `getConfluenceUser`
+- [x] View Redline Queue
+- [x] **Expected:** User avatars display correctly
+- [x] **Resolvers tested:** `getConfluenceUser`
+- **Status:** ✅ PASSED
 
 ### Test 4.4: Redline Stats
-- [ ] View Redline Queue summary
-- [ ] **Expected:** Status counts display correctly
-- [ ] **Resolvers tested:** `getRedlineStats`
+- [x] View Redline Queue summary
+- [x] **Expected:** Status counts display correctly
+- [x] **Resolvers tested:** `getRedlineStats`
+- **Status:** ✅ PASSED
 
 ### Test 4.5: Post Comment
-- [ ] Post an inline comment on an Embed
-- [ ] **Expected:** Comment posts successfully
-- [ ] **Resolvers tested:** `postRedlineComment`
+- [x] Post an inline comment on an Embed
+- [x] **Expected:** Comment posts successfully
+- [x] **Resolvers tested:** `postRedlineComment`
+- **Status:** ✅ PASSED
 
 ---
 
