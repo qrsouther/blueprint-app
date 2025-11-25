@@ -87,7 +87,37 @@ export async function saveExcerpt(req) {
   const spaceKey = sourceSpaceKey || req.context?.extension?.space?.key;
 
   // Generate or reuse excerpt ID
-  const id = excerptId || generateUUID();
+  // If excerptId is missing, try to find existing Source by name + category + pageId to avoid duplicates
+  let id = excerptId;
+  if (!id && excerptName && pageId) {
+    try {
+      const index = await storage.get('excerpt-index') || { excerpts: [] };
+      // Look for existing Source with same name, category, and pageId
+      for (const indexEntry of index.excerpts) {
+        const existingExcerpt = await storage.get(`excerpt:${indexEntry.id}`);
+        if (existingExcerpt &&
+            existingExcerpt.name === excerptName &&
+            (existingExcerpt.category || 'General') === (category || 'General') &&
+            existingExcerpt.sourcePageId === pageId) {
+          id = existingExcerpt.id;
+          logPhase('saveExcerpt', 'Found existing Source by name/category/pageId, reusing excerptId', {
+            excerptId: id,
+            name: excerptName,
+            category: category || 'General',
+            pageId
+          });
+          break;
+        }
+      }
+    } catch (lookupError) {
+      logWarning('saveExcerpt', 'Error looking up existing Source, will create new one', lookupError);
+    }
+  }
+  
+  // Generate new UUID if still no ID found
+  if (!id) {
+    id = generateUUID();
+  }
 
   // Provide default empty ADF object if content is missing (for new Sources)
   // This allows creating a Source with just name/category, content can be added later
