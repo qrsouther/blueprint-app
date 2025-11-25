@@ -553,10 +553,13 @@ export async function checkRedlineStale(req) {
     // If not approved, can't be stale
     if (config.redlineStatus !== 'approved' || !config.approvedContentHash) {
       return {
-        isStale: false,
-        reason: 'Not approved yet',
-        currentHash: null,
-        approvedHash: null
+        success: true,
+        data: {
+          isStale: false,
+          reason: 'Not approved yet',
+          currentHash: null,
+          approvedHash: null
+        }
       };
     }
 
@@ -566,10 +569,13 @@ export async function checkRedlineStale(req) {
     if (!versionsResult.success || versionsResult.versions.length === 0) {
       logWarning('checkRedlineStale', 'No version history found for Embed', { localId });
       return {
-        isStale: false,
-        reason: 'No version history available',
-        currentHash: null,
-        approvedHash: config.approvedContentHash
+        success: true,
+        data: {
+          isStale: false,
+          reason: 'No version history available',
+          currentHash: null,
+          approvedHash: config.approvedContentHash
+        }
       };
     }
 
@@ -580,10 +586,13 @@ export async function checkRedlineStale(req) {
     const isStale = currentHash !== config.approvedContentHash;
 
     return {
-      isStale,
-      currentHash,
-      approvedHash: config.approvedContentHash,
-      reason: isStale ? 'Content modified after approval' : 'Content unchanged'
+      success: true,
+      data: {
+        isStale,
+        currentHash,
+        approvedHash: config.approvedContentHash,
+        reason: isStale ? 'Content modified after approval' : 'Content unchanged'
+      }
     };
 
   } catch (error) {

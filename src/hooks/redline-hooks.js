@@ -296,17 +296,17 @@ export const useCheckRedlineStaleQuery = (localId, enabled = true) => {
 
       const result = await invoke('checkRedlineStale', { localId });
 
-      if (!result) {
-        throw new Error('Failed to check redline staleness');
+      if (!result || !result.success || !result.data) {
+        throw new Error(result.error || 'Failed to check redline staleness');
       }
 
       logger.queries('Staleness check:', {
         localId,
-        isStale: result.isStale,
-        reason: result.reason
+        isStale: result.data.isStale,
+        reason: result.data.reason
       });
 
-      return result;
+      return result.data;
     },
     enabled: enabled && !!localId,
     staleTime: 1000 * 60 * 2, // 2 minutes - staleness can change as content is edited
