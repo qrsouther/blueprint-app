@@ -717,11 +717,17 @@ const App = () => {
             </Text>
           )}
           <Inline space="space.200">
-            <Button appearance="primary" type="submit">
-              Save
+            <Button 
+              appearance="primary" 
+              type="submit"
+              isDisabled={isSavingExcerpt}
+              isLoading={isSavingExcerpt}
+            >
+              {isSavingExcerpt ? 'Saving...' : 'Save'}
             </Button>
             <Button
               appearance="link"
+              isDisabled={isSavingExcerpt}
               onClick={async () => {
                 try {
                   // Use dynamically fetched admin URL, or fallback to hardcoded URL
