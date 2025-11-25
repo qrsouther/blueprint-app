@@ -160,7 +160,7 @@ export async function saveExcerpt(req) {
   });
 
   // Get existing excerpt to preserve createdAt and existing source page if not provided
-  const existingExcerpt = excerptId ? await storage.get(`excerpt:${id}`) : null;
+  const existingExcerpt = id ? await storage.get(`excerpt:${id}`) : null;
 
   // Create excerpt object (without hash first)
   const excerpt = {
