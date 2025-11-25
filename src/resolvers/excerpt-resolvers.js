@@ -91,10 +91,16 @@ export async function saveExcerpt(req) {
 
   // Provide default empty ADF object if content is missing (for new Sources)
   // This allows creating a Source with just name/category, content can be added later
+  // Use a paragraph with empty text to satisfy ADF validation (empty content array is rejected)
   const contentToProcess = content || {
     type: 'doc',
     version: 1,
-    content: []
+    content: [
+      {
+        type: 'paragraph',
+        content: []
+      }
+    ]
   };
 
   // Detect variables in content
