@@ -9,10 +9,17 @@
  * - Warning icons for missing required fields
  * - Tooltips for variable descriptions
  * - Visual status indicators (filled/empty/required)
- * - Auto-saving via parent component
+ * - Auto-saving via parent React Hook Form
+ *
+ * MIGRATED TO REACT HOOK FORM (v8.0.0):
+ * - Uses parent form control from EmbedContainer
+ * - Eliminates race conditions with debounce/auto-save
+ * - Status checkmarks update immediately using useWatch()
+ * - No manual state sync needed
  */
 
 import React from 'react';
+import { useWatch } from 'react-hook-form';
 import {
   Text,
   Strong,
@@ -64,11 +71,17 @@ const textfieldWrapperStyle = xcss({
  *
  * @param {Object} props
  * @param {Object} props.excerpt - The Blueprint Standard/excerpt object containing variables
- * @param {Object} props.variableValues - Current values for all variables (map of name -> value)
- * @param {Function} props.setVariableValues - Function to update variable values
+ * @param {Object} props.control - React Hook Form control from parent form
+ * @param {Function} props.setValue - React Hook Form setValue function
  * @returns {JSX.Element}
  */
-export const VariableConfigPanel = ({ excerpt, variableValues, setVariableValues }) => {
+export const VariableConfigPanel = ({ excerpt, control, setValue }) => {
+  // Watch variable values from parent form for status checkmarks
+  const watchedValues = useWatch({
+    control,
+    name: 'variableValues'
+  }) || {};
+
   // Handle null excerpt (template context where user hasn't selected a source yet)
   if (!excerpt) {
     return <Text>Please select a Source first to configure variables.</Text>;
@@ -103,72 +116,84 @@ export const VariableConfigPanel = ({ excerpt, variableValues, setVariableValues
             ]
           }}
           rows={excerpt.variables.map(variable => {
-          const isRequired = variable.required || false;
-          const isEmpty = !variableValues[variable.name] || variableValues[variable.name].trim() === '';
-          const showWarning = isRequired && isEmpty;
+            const isRequired = variable.required || false;
+            
+            // Get current value from watched form state (updates immediately)
+            const currentValue = watchedValues[variable.name] || '';
+            
+            // Robust empty check - handle null, undefined, empty string, and whitespace-only values
+            const isEmpty = currentValue === null || 
+                           currentValue === undefined || 
+                           currentValue === '' || 
+                           (typeof currentValue === 'string' && currentValue.trim() === '');
+            const showWarning = isRequired && isEmpty;
 
-          return {
-            key: variable.name,
-            cells: [
-              {
-                key: 'variable',
-                content: (
-                  <Inline space="space.050" alignBlock="center">
-                    {isRequired && <Text><Strong>*</Strong></Text>}
-                    <Text><Code>{variable.name}</Code></Text>
-                    {variable.description && (
-                      <Tooltip content={variable.description} position="right">
-                        <Icon glyph="question-circle" size="small" label="" />
-                      </Tooltip>
-                    )}
-                    {showWarning && (
-                      <Tooltip content="This field is required. Please provide a value." position="right">
-                        <Icon glyph="warning" size="small" label="Required field" color="color.icon.warning" />
-                      </Tooltip>
-                    )}
-                  </Inline>
-                )
-              },
-              {
-                key: 'value',
-                content: (
-                  <Box xcss={showWarning ? requiredFieldStyle : undefined}>
-                    <Box xcss={textfieldWrapperStyle}>
-                      <StableTextfield
-                        appearance="standard"
-                        id={`var-value-${variable.name}`}
-                        stableKey={`var-value-${variable.name}`}
-                        placeholder={variable.example ? `e.g., ${variable.example}` : `Enter value for ${variable.name}`}
-                        value={variableValues[variable.name] || ''}
-                        onChange={(e) => {
-                          setVariableValues({
-                            ...variableValues,
-                            [variable.name]: e.target.value
-                          });
-                        }}
-                      />
-                    </Box>
-                  </Box>
-                )
-              },
-              {
-                key: 'status',
-                content: (
-                  isEmpty ? (
-                    isRequired ? (
-                      <Icon glyph="checkbox-unchecked" label="Required - Empty" color="color.icon.danger" />
-                    ) : (
-                      <Icon glyph="checkbox-unchecked" label="Optional - Empty" color="color.icon.subtle" />
-                    )
-                  ) : (
-                    <Icon glyph="check-circle" label="Filled" color="color.icon.success" />
+            // Field name for React Hook Form
+            const fieldName = `variableValues.${variable.name}`;
+
+            return {
+              key: variable.name,
+              cells: [
+                {
+                  key: 'variable',
+                  content: (
+                    <Inline space="space.050" alignBlock="center">
+                      {isRequired && <Text><Strong>*</Strong></Text>}
+                      <Text><Code>{variable.name}</Code></Text>
+                      {variable.description && (
+                        <Tooltip content={variable.description} position="right">
+                          <Icon glyph="question-circle" size="small" label="" />
+                        </Tooltip>
+                      )}
+                      {showWarning && (
+                        <Tooltip content="This field is required. Please provide a value." position="right">
+                          <Icon glyph="warning" size="small" label="Required field" color="color.icon.warning" />
+                        </Tooltip>
+                      )}
+                    </Inline>
                   )
-                )
-              }
-            ]
-          };
-        })}
-      />
+                },
+                {
+                  key: 'value',
+                  content: (
+                    <Box xcss={showWarning ? requiredFieldStyle : undefined}>
+                      <Box xcss={textfieldWrapperStyle}>
+                        <StableTextfield
+                          appearance="standard"
+                          id={`var-value-${variable.name}`}
+                          stableKey={`var-value-${variable.name}`}
+                          placeholder={variable.example ? `e.g., ${variable.example}` : `Enter value for ${variable.name}`}
+                          value={currentValue}
+                          onChange={(e) => {
+                            const newValue = e.target.value;
+                            // Normalize empty values to empty string
+                            const normalizedValue = newValue === '' ? '' : newValue;
+                            // Update form value (triggers watch() update immediately)
+                            setValue(fieldName, normalizedValue, { shouldDirty: true });
+                          }}
+                        />
+                      </Box>
+                    </Box>
+                  )
+                },
+                {
+                  key: 'status',
+                  content: (
+                    isEmpty ? (
+                      isRequired ? (
+                        <Icon glyph="checkbox-unchecked" label="Required - Empty" color="color.icon.danger" />
+                      ) : (
+                        <Icon glyph="checkbox-unchecked" label="Optional - Empty" color="color.icon.subtle" />
+                      )
+                    ) : (
+                      <Icon glyph="check-circle" label="Filled" color="color.icon.success" />
+                    )
+                  )
+                }
+              ]
+            };
+          })}
+        />
       </Box>
     </Box>
   );

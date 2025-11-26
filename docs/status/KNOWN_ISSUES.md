@@ -50,5 +50,7 @@ None available. Users must rely on keyboard position and careful editing.
 
 ---
 
-### Recently Resolved
+## Recently Resolved
+
+- ~~Embed View Mode Not Re-rendering After Version Restore~~ - **RESOLVED 2025-11-25**: Fixed by correcting argument mismatch in `useCachedContent` hook call. The hook was receiving `setExcerptForViewMode` in the wrong parameter position, causing it to be `undefined` and preventing View Mode from rendering. Fixed in `src/EmbedContainer.jsx` by adding `null` as the 5th argument (for `reset` parameter, not used in view mode).
 - ~~Asymmetric Padding in Update Available Banner~~ - **RESOLVED 2025-11-06**: Fixed by adding `marginRight: 'space.300'` to EnhancedDiffView's containerStyle to balance SectionMessage's 24px icon column.

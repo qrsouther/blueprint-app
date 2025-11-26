@@ -48,6 +48,8 @@
  */
 
 import React, { Fragment, useState, useEffect, useRef } from 'react';
+import { useForm, useWatch } from 'react-hook-form';
+import { normalizeVariableValues } from './schemas/form-schemas';
 import ForgeReconciler, {
   Text,
   Strong,
@@ -123,6 +125,7 @@ import {
 
 // Import logger for structured error logging
 import { logger } from './utils/logger';
+import ErrorBoundary from './components/common/ErrorBoundary.jsx';
 
 // ============================================================================
 // STYLES - Imported from ./styles/embed-styles.js
@@ -190,14 +193,38 @@ const App = () => {
   
   // Track if a save operation is currently in progress to prevent overlapping saves
   const isSavingRef = useRef(false);
+  
+  // Track when we just completed a save to prevent sync effect from overwriting user edits
+  // This prevents the sync effect from running immediately after auto-save completes
+  const justCompletedSaveRef = useRef(false);
 
   const [content, setContent] = useState(null);
   // excerpt state removed - now managed by React Query
   const [excerptForViewMode, setExcerptForViewMode] = useState(null);
-  const [variableValues, setVariableValues] = useState(config?.variableValues || {});
-  const [toggleStates, setToggleStates] = useState(config?.toggleStates || {});
-  const [customInsertions, setCustomInsertions] = useState(config?.customInsertions || []);
-  const [internalNotes, setInternalNotes] = useState(config?.internalNotes || []);
+  
+  // React Hook Form for embed configuration (replaces individual useState hooks)
+  const {
+    control,
+    watch,
+    setValue,
+    reset,
+    formState: { isDirty }
+  } = useForm({
+    defaultValues: {
+      variableValues: normalizeVariableValues(config?.variableValues || {}),
+      toggleStates: config?.toggleStates || {},
+      customInsertions: config?.customInsertions || [],
+      internalNotes: config?.internalNotes || []
+    },
+    mode: 'onChange'
+  });
+
+  // Watch form values for auto-save and component usage
+  // These replace the old useState values
+  const variableValues = useWatch({ control, name: 'variableValues' }) || {};
+  const toggleStates = useWatch({ control, name: 'toggleStates' }) || {};
+  const customInsertions = useWatch({ control, name: 'customInsertions' }) || [];
+  const internalNotes = useWatch({ control, name: 'internalNotes' }) || [];
   const [insertionType, setInsertionType] = useState('body'); // 'body' or 'note'
   const [selectedPosition, setSelectedPosition] = useState(null);
   const [customText, setCustomText] = useState('');
@@ -233,6 +260,7 @@ const App = () => {
   // Use React Query mutation for saving variable values
   const {
     mutate: saveVariableValuesMutation,
+    mutateAsync: saveVariableValuesMutationAsync,
     isPending: isSavingVariables,
     isSuccess: isSaveSuccess,
     isError: isSaveError
@@ -262,10 +290,7 @@ const App = () => {
     selectedExcerptId,
     !isEditing, // Only fetch in view mode
     context,
-    setVariableValues,
-    setToggleStates,
-    setCustomInsertions,
-    setInternalNotes,
+    null, // reset - not used in view mode (React Hook Form is only for edit mode)
     setExcerptForViewMode
   );
 
@@ -362,6 +387,14 @@ const App = () => {
       return;
     }
 
+    // GUARD: Skip sync if we just completed a save
+    // This prevents the sync effect from overwriting user edits immediately after auto-save
+    // The save operation already updated the form values, so we don't need to sync from React Query
+    if (justCompletedSaveRef.current) {
+      logger.saves('[EmbedContainer] Skipping sync - save just completed', { localId: effectiveLocalId });
+      return;
+    }
+
     // GUARD: Only sync on initial load to avoid overwriting user edits
     // After first sync, this effect will return early even if React Query refetches
     if (hasLoadedInitialDataRef.current) {
@@ -372,15 +405,28 @@ const App = () => {
     hasLoadedInitialDataRef.current = true;
 
     // Sync React Query data to component state
-    // Only set if the data exists AND is different from current state (prevent unnecessary updates)
-    // Deep equality check prevents infinite loops when object references change but values don't
-    if (variableValuesData.variableValues && Object.keys(variableValuesData.variableValues).length > 0) {
+    // CRITICAL: Always set the complete variableValues object to ensure all variables are included
+    // This prevents the last variable from being dropped due to partial updates
+    // CRITICAL: Only sync if values are actually different to avoid overwriting user edits
+    if (variableValuesData.variableValues) {
+      // Check if values actually differ before syncing
       const currentKeys = Object.keys(variableValues);
       const newKeys = Object.keys(variableValuesData.variableValues);
-      const valuesChanged = currentKeys.length !== newKeys.length ||
-        currentKeys.some(key => variableValues[key] !== variableValuesData.variableValues[key]);
-      if (valuesChanged) {
-        setVariableValues(variableValuesData.variableValues);
+      const valuesDiffer = currentKeys.length !== newKeys.length ||
+        currentKeys.some(key => {
+          const currentVal = variableValues[key];
+          const newVal = variableValuesData.variableValues[key];
+          // Normalize for comparison: null, undefined, and empty string are all "empty"
+          const currentEmpty = !currentVal || (typeof currentVal === 'string' && currentVal.trim() === '');
+          const newEmpty = !newVal || (typeof newVal === 'string' && newVal.trim() === '');
+          return currentEmpty !== newEmpty || currentVal !== newVal;
+        }) ||
+        newKeys.some(key => !(key in variableValues));
+      
+      // Only sync if values actually differ (prevents overwriting user edits with stale data)
+      if (valuesDiffer) {
+        const normalizedValues = normalizeVariableValues(variableValuesData.variableValues);
+        setValue('variableValues', normalizedValues, { shouldDirty: false });
       }
     }
     if (variableValuesData.toggleStates && Object.keys(variableValuesData.toggleStates).length > 0) {
@@ -389,19 +435,19 @@ const App = () => {
       const statesChanged = currentKeys.length !== newKeys.length ||
         currentKeys.some(key => toggleStates[key] !== variableValuesData.toggleStates[key]);
       if (statesChanged) {
-        setToggleStates(variableValuesData.toggleStates);
+        setValue('toggleStates', variableValuesData.toggleStates, { shouldDirty: false });
       }
     }
     if (variableValuesData.customInsertions && Array.isArray(variableValuesData.customInsertions) && variableValuesData.customInsertions.length > 0) {
       const insertionsChanged = JSON.stringify(customInsertions) !== JSON.stringify(variableValuesData.customInsertions);
       if (insertionsChanged) {
-        setCustomInsertions(variableValuesData.customInsertions);
+        setValue('customInsertions', variableValuesData.customInsertions, { shouldDirty: false });
       }
     }
     if (variableValuesData.internalNotes && Array.isArray(variableValuesData.internalNotes) && variableValuesData.internalNotes.length > 0) {
       const notesChanged = JSON.stringify(internalNotes) !== JSON.stringify(variableValuesData.internalNotes);
       if (notesChanged) {
-        setInternalNotes(variableValuesData.internalNotes);
+        setValue('internalNotes', variableValuesData.internalNotes, { shouldDirty: false });
       }
     }
   }, [variableValuesData, isEditing, isLoadingVariableValues, effectiveLocalId]);
@@ -412,6 +458,28 @@ const App = () => {
   useEffect(() => {
     hasLoadedInitialDataRef.current = false;
   }, [effectiveLocalId, selectedExcerptId]);
+
+  // CRITICAL: Reset sync guard when variableValuesData changes significantly after initial load
+  // This allows restored data to sync to state after a version restore
+  // We detect a "significant change" by comparing the data structure
+  useEffect(() => {
+    if (!variableValuesData || !effectiveLocalId || !hasLoadedInitialDataRef.current) {
+      return;
+    }
+
+    // Check if the data structure has changed significantly (indicates restore)
+    const currentVarKeys = Object.keys(variableValues).sort();
+    const newVarKeys = Object.keys(variableValuesData.variableValues || {}).sort();
+    const keysChanged = JSON.stringify(currentVarKeys) !== JSON.stringify(newVarKeys);
+    
+    // Also check if variable count changed
+    const countChanged = currentVarKeys.length !== newVarKeys.length;
+
+    // If structure changed, reset guard to allow state sync
+    if (keysChanged || countChanged) {
+      hasLoadedInitialDataRef.current = false;
+    }
+  }, [variableValuesData, effectiveLocalId, variableValues]);
 
   // Force refetch excerpt when excerptId changes (e.g., when Source is updated)
   // This ensures we get the latest excerpt data even if React Query cache is stale
@@ -627,10 +695,15 @@ const App = () => {
           }
         }
 
-        setVariableValues(loadedVariableValues);
-        setToggleStates(loadedToggleStates);
-        setCustomInsertions(loadedCustomInsertions || []);
-        setInternalNotes(loadedInternalNotes || []);
+        reset({
+          variableValues: normalizeVariableValues(loadedVariableValues),
+          toggleStates: loadedToggleStates,
+          customInsertions: loadedCustomInsertions || [],
+          internalNotes: loadedInternalNotes || []
+        }, { keepDefaultValues: false });
+
+        // Reset last saved values ref to allow next user edit to trigger save
+        lastSavedValuesRef.current = null;
 
         // NOW: Generate the fresh rendered content with loaded settings
         let freshContent = excerptFromQuery.content;
@@ -686,24 +759,66 @@ const App = () => {
   }, [excerptFromQuery, effectiveLocalId, isEditing, isFetchingExcerpt]);
 
   // ============================================================================
-  // AUTO-SAVE EFFECT: Component State → Storage (WRITE operation)
+  // AUTO-SAVE EFFECT: React Hook Form → Storage (WRITE operation)
   // ============================================================================
   // Purpose: Automatically save user edits to storage with debouncing.
-  // This is an ONGOING operation that runs whenever user configuration changes.
+  // This is an ONGOING operation that runs whenever form values change.
   //
   // Flow:
-  // 1. User edits: variableValues, toggleStates, customInsertions, or internalNotes
-  // 2. Effect triggers: Detects state change
-  // 3. Debounce: Waits 500ms for user to finish typing/editing
-  // 4. Save: Uses React Query mutation to save to storage
-  // 5. Cache: Also caches rendered content for view mode
-  // 6. Invalidate: Marks React Query cache as stale (triggers refetch)
+  // 1. User edits: Form values change via React Hook Form
+  // 2. useWatch() detects change: Individual form fields are watched
+  // 3. Effect triggers: Detects form change via isDirty flag
+  // 4. Debounce: Waits 500ms for user to finish typing/editing
+  // 5. Save: Uses React Query mutation to save to storage
+  // 6. Cache: Also caches rendered content for view mode
+  // 7. Invalidate: Marks React Query cache as stale (triggers refetch)
   //
   // Guard: isLoadingInitialDataRef prevents auto-save during initial data load,
   // avoiding false version history entries when Edit Mode first opens.
   //
   // Note: The sync effect guard (hasLoadedInitialDataRef) ensures that when
   // React Query refetches after this invalidation, it won't overwrite user edits.
+  
+  // Use a ref to store the last saved values for comparison
+  // This prevents infinite loops by only saving when values actually change
+  const lastSavedValuesRef = useRef(null);
+
+  // Deep comparison helper to check if values actually changed
+  const valuesChanged = (newValues, oldValues) => {
+    if (!oldValues) return true; // First save
+    
+    // Compare variable values
+    const newVarKeys = Object.keys(newValues.variableValues || {}).sort();
+    const oldVarKeys = Object.keys(oldValues.variableValues || {}).sort();
+    if (JSON.stringify(newVarKeys) !== JSON.stringify(oldVarKeys)) return true;
+    
+    for (const key of newVarKeys) {
+      const newVal = newValues.variableValues[key];
+      const oldVal = oldValues.variableValues[key];
+      // Normalize for comparison: null, undefined, and empty string are all "empty"
+      const newEmpty = !newVal || (typeof newVal === 'string' && newVal.trim() === '');
+      const oldEmpty = !oldVal || (typeof oldVal === 'string' && oldVal.trim() === '');
+      if (newEmpty !== oldEmpty || newVal !== oldVal) return true;
+    }
+    
+    // Compare toggle states
+    if (JSON.stringify(newValues.toggleStates || {}) !== JSON.stringify(oldValues.toggleStates || {})) {
+      return true;
+    }
+    
+    // Compare custom insertions
+    if (JSON.stringify(newValues.customInsertions || []) !== JSON.stringify(oldValues.customInsertions || [])) {
+      return true;
+    }
+    
+    // Compare internal notes
+    if (JSON.stringify(newValues.internalNotes || []) !== JSON.stringify(oldValues.internalNotes || [])) {
+      return true;
+    }
+    
+    return false; // No changes detected
+  };
+
   useEffect(() => {
     // CRITICAL: Only run in edit mode with all required data
     // Check excerptFromQuery exists (but don't include in dependencies to avoid infinite loops)
@@ -718,9 +833,30 @@ const App = () => {
       return;
     }
 
+    // CRITICAL: Skip if form is not dirty (no changes made)
+    // This prevents unnecessary saves when form is synced from props
+    if (!isDirty) {
+      return;
+    }
+
     // CRITICAL: Skip if a save is already in progress
     // This prevents overlapping saves and infinite loops when multiple embeds are on the page
     if (isSavingRef.current) {
+      return;
+    }
+
+    // Build current form values from watched values
+    const currentValues = {
+      variableValues: variableValues || {},
+      toggleStates: toggleStates || {},
+      customInsertions: customInsertions || [],
+      internalNotes: internalNotes || []
+    };
+
+    // CRITICAL: Only save if values actually changed (deep comparison)
+    // This prevents infinite loops from object reference changes
+    if (!valuesChanged(currentValues, lastSavedValuesRef.current)) {
+      logger.saves('[EmbedContainer] Skipping save - values unchanged', { localId: effectiveLocalId });
       return;
     }
 
@@ -731,47 +867,82 @@ const App = () => {
 
     const timeoutId = setTimeout(async () => {
       try {
-        // Use React Query mutation to save variable values
-        saveVariableValuesMutation({
+        // CRITICAL: Normalize variable values to ensure empty strings are handled correctly
+        const normalizedVariableValues = normalizeVariableValues(currentValues.variableValues);
+        
+        const dataToSave = {
           localId: effectiveLocalId,
           excerptId: selectedExcerptId,
-          variableValues,
-          toggleStates,
-          customInsertions,
-          internalNotes
-        }, {
-          onSuccess: async () => {
-            // Cache generation and saving is now handled server-side in saveVariableValues
-            // This ensures the cache is always up-to-date even if the component unmounts
-            // (e.g., if user clicks Publish before save completes)
-            
-            // Invalidate queries to ensure fresh data on next load
-            // This ensures that when the component re-renders or re-opens, it gets the latest saved data
-            // NOTE: We invalidate with specific localId to avoid affecting other embeds on the page
-            await queryClient.invalidateQueries({ queryKey: ['cachedContent', effectiveLocalId] });
-            await queryClient.invalidateQueries({ queryKey: ['variableValues', effectiveLocalId] });
+          variableValues: normalizedVariableValues,
+          toggleStates: currentValues.toggleStates,
+          customInsertions: currentValues.customInsertions,
+          internalNotes: currentValues.internalNotes
+        };
 
-            const totalDuration = Math.round(performance.now() - saveStartTime);
-            logger.saves('[EmbedContainer] Auto-save complete', { 
-              localId: effectiveLocalId,
-              duration: `${totalDuration}ms`
-            });
-
-            setSaveStatus('saved');
-            isSavingRef.current = false;
-          },
-          onError: (error) => {
-            const totalDuration = Math.round(performance.now() - saveStartTime);
-            logger.errors('[EmbedContainer] Auto-save failed:', error, {
-              localId: effectiveLocalId,
-              duration: `${totalDuration}ms`
-            });
-            setSaveStatus('error');
-            isSavingRef.current = false;
-          }
+        logger.saves('[EmbedContainer] Starting auto-save', { 
+          localId: effectiveLocalId,
+          variableValueCount: Object.keys(normalizedVariableValues).length,
+          sampleValues: Object.keys(normalizedVariableValues).slice(0, 3).map(k => ({
+            key: k,
+            value: normalizedVariableValues[k],
+            isEmpty: !normalizedVariableValues[k] || normalizedVariableValues[k] === ''
+          }))
         });
+
+        // Use mutateAsync to handle the promise directly
+        // Add a timeout to prevent hanging forever
+        const savePromise = saveVariableValuesMutationAsync(dataToSave);
+        const timeoutPromise = new Promise((_, reject) => 
+          setTimeout(() => reject(new Error('Save operation timed out after 10 seconds')), 10000)
+        );
+        
+        logger.saves('[EmbedContainer] Awaiting mutation...', { localId: effectiveLocalId });
+        const result = await Promise.race([savePromise, timeoutPromise]);
+        logger.saves('[EmbedContainer] Mutation completed', { 
+          localId: effectiveLocalId,
+          hasResult: !!result,
+          resultSuccess: result?.success
+        });
+        
+        // If we get here, the mutation succeeded
+        // Update last saved values to prevent duplicate saves
+        lastSavedValuesRef.current = {
+          variableValues: { ...normalizedVariableValues },
+          toggleStates: { ...currentValues.toggleStates },
+          customInsertions: JSON.parse(JSON.stringify(currentValues.customInsertions)),
+          internalNotes: JSON.parse(JSON.stringify(currentValues.internalNotes))
+        };
+        
+        // Mark that we just completed a save to prevent sync effect from overwriting user edits
+        // This prevents the sync effect from running immediately after cache invalidation
+        justCompletedSaveRef.current = true;
+        
+        // Invalidate queries to ensure fresh data on next load
+        await queryClient.invalidateQueries({ queryKey: ['cachedContent', effectiveLocalId] });
+        await queryClient.invalidateQueries({ queryKey: ['variableValues', effectiveLocalId] });
+
+        const totalDuration = Math.round(performance.now() - saveStartTime);
+        logger.saves('[EmbedContainer] Auto-save complete', { 
+          localId: effectiveLocalId,
+          duration: `${totalDuration}ms`
+        });
+
+        setSaveStatus('saved');
+        isSavingRef.current = false;
+        
+        // Clear the "just completed save" flag after a delay
+        // This allows the sync effect to run again after the user has had time to continue editing
+        setTimeout(() => {
+          justCompletedSaveRef.current = false;
+        }, 2000); // 2 second grace period
       } catch (error) {
-        logger.errors('[EmbedContainer] Error during auto-save:', error);
+        const totalDuration = Math.round(performance.now() - saveStartTime);
+        logger.errors('[EmbedContainer] Auto-save failed:', error, {
+          localId: effectiveLocalId,
+          duration: `${totalDuration}ms`,
+          errorMessage: error?.message,
+          errorStack: error?.stack
+        });
         setSaveStatus('error');
         isSavingRef.current = false;
       }
@@ -783,11 +954,10 @@ const App = () => {
       // This prevents the "Saving..." state from getting stuck
       isSavingRef.current = false;
     };
-    // CRITICAL: Do NOT include excerptFromQuery or excerpt in dependencies
-    // They change reference when queries are invalidated, causing infinite loops
-    // We only check if they exist, we don't need to track their changes
+    // CRITICAL: Use individual watched values instead of watch() to avoid reference changes
+    // Only trigger when actual form values change, not when form object reference changes
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [variableValues, toggleStates, customInsertions, internalNotes, isEditing, effectiveLocalId, selectedExcerptId]);
+  }, [variableValues, toggleStates, customInsertions, internalNotes, isDirty, isEditing, effectiveLocalId, selectedExcerptId]);
 
   // Check for staleness in view mode immediately after render, with jitter for performance
   // Starts as soon as content is available, jitter spreads out requests across multiple Embeds
@@ -852,8 +1022,15 @@ const App = () => {
 
           // Load variable values and toggle states for diff view rendering
           // (We already have varsResult from staleness check, so reuse it)
-          setVariableValues(varsData.variableValues || {});
-          setToggleStates(varsData.toggleStates || {});
+          reset({
+            variableValues: normalizeVariableValues(varsData.variableValues || {}),
+            toggleStates: varsData.toggleStates || {},
+            customInsertions: varsData.customInsertions || [],
+            internalNotes: varsData.internalNotes || []
+          }, { keepDefaultValues: false });
+          
+          // Reset last saved values ref to allow next user edit to trigger save
+          lastSavedValuesRef.current = null;
         }
 
         setIsCheckingStaleness(false); // Check complete
@@ -1085,17 +1262,17 @@ const App = () => {
           if (varsData.excerptId) {
             setSelectedExcerptId(varsData.excerptId);
           }
-          if (varsData.variableValues && Object.keys(varsData.variableValues).length > 0) {
-            setVariableValues(varsData.variableValues);
-          }
-          if (varsData.toggleStates && Object.keys(varsData.toggleStates).length > 0) {
-            setToggleStates(varsData.toggleStates);
-          }
-          if (varsData.customInsertions && Array.isArray(varsData.customInsertions) && varsData.customInsertions.length > 0) {
-            setCustomInsertions(varsData.customInsertions);
-          }
-          if (varsData.internalNotes && Array.isArray(varsData.internalNotes) && varsData.internalNotes.length > 0) {
-            setInternalNotes(varsData.internalNotes);
+          // Update form with copied data
+          if (varsData.variableValues || varsData.toggleStates || varsData.customInsertions || varsData.internalNotes) {
+            reset({
+              variableValues: normalizeVariableValues(varsData.variableValues || {}),
+              toggleStates: varsData.toggleStates || {},
+              customInsertions: varsData.customInsertions || [],
+              internalNotes: varsData.internalNotes || []
+            }, { keepDefaultValues: false });
+            
+            // Reset last saved values ref to allow next user edit to trigger save
+            lastSavedValuesRef.current = null;
           }
 
           // Reset the sync guard to allow future syncs if needed
@@ -1255,14 +1432,8 @@ const App = () => {
         saveStatus={saveStatus}
         selectedTabIndex={selectedTabIndex}
         setSelectedTabIndex={setSelectedTabIndex}
-        variableValues={variableValues}
-        setVariableValues={setVariableValues}
-        toggleStates={toggleStates}
-        setToggleStates={setToggleStates}
-        customInsertions={customInsertions}
-        setCustomInsertions={setCustomInsertions}
-        internalNotes={internalNotes}
-        setInternalNotes={setInternalNotes}
+        control={control}
+        setValue={setValue}
         insertionType={insertionType}
         setInsertionType={setInsertionType}
         selectedPosition={selectedPosition}
@@ -1302,7 +1473,9 @@ const App = () => {
 
 ForgeReconciler.render(
   <QueryClientProvider client={queryClient}>
-    <App />
+    <ErrorBoundary>
+      <App />
+    </ErrorBoundary>
     <ReactQueryDevtools initialIsOpen={false} />
   </QueryClientProvider>
 );

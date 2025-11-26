@@ -47,6 +47,7 @@ import { extractTextFromAdf } from '../../utils/adf-utils';
 import { StableTextfield } from '../common/StableTextfield';
 import { middleSectionStyles } from '../../styles/admin-styles';
 import { logger } from '../../utils/logger.js';
+import { getUserFriendlyErrorMessage } from '../../utils/error-utils.js';
 
 // Custom hook for fetching excerpt data with React Query
 const useExcerptQuery = (excerptId, enabled) => {
@@ -574,9 +575,14 @@ export function CreateEditSourceModal({
         }
         
         logger.errors('[REACT-QUERY-CREATE-EDIT] Failed to save:', error);
-        // Display backend validation errors
+        // Log error code for debugging
+        if (error.errorCode) {
+          logger.errors('Resolver error:', { errorCode: error.errorCode, details: error.details });
+        }
+        // Display user-friendly error message
+        const userMessage = getUserFriendlyErrorMessage(error);
         setValidationErrors({ 
-          general: error.message || 'Failed to save. Please check your input and try again.'
+          general: userMessage
         });
       },
       onSuccess: async (data) => {

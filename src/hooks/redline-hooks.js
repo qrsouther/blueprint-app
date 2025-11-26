@@ -19,6 +19,21 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { invoke } from '@forge/bridge';
 import { logger } from '../utils/logger.js';
 
+/**
+ * Helper function to create an error with error code preservation
+ * @param {string} defaultMessage - Default error message
+ * @param {Object} result - Resolver result object
+ * @returns {Error} Error object with errorCode and details if available
+ */
+function createErrorWithCode(defaultMessage, result) {
+  const error = new Error(result?.error || defaultMessage);
+  if (result?.errorCode) {
+    error.errorCode = result.errorCode;
+    error.details = result.details || {};
+  }
+  return error;
+}
+
 // Module-level timeout ID for delayed queue invalidation
 // This allows the user to see comment posting results before the card moves due to re-sorting
 let queueInvalidationTimeoutId = null;
@@ -50,7 +65,7 @@ export const useRedlineQueueQuery = (filters = {}, sortBy = 'status', groupBy = 
       });
 
       if (!result.success || !result.data) {
-        throw new Error(result.error || 'Failed to load redline queue');
+        throw createErrorWithCode('Failed to load redline queue', result);
       }
 
       logger.queries('Loaded all redline queue embeds:', {
@@ -188,7 +203,7 @@ export const useSetRedlineStatusMutation = () => {
       const result = await invoke('setRedlineStatus', { localId, status, userId, reason });
 
       if (!result || !result.success) {
-        throw new Error(result.error || 'Failed to set redline status');
+        throw createErrorWithCode('Failed to set redline status', result);
       }
 
       logger.queries('Status updated:', result.data);
@@ -327,7 +342,7 @@ export const useCheckEmbedExistsQuery = (localId, pageId, enabled = true) => {
       const result = await invoke('checkEmbedExists', { localId, pageId });
 
       if (!result || !result.success || !result.data) {
-        throw new Error(result.error || 'Failed to check embed existence');
+        throw createErrorWithCode('Failed to check embed existence', result);
       }
 
       logger.queries('Embed existence check result:', {
@@ -362,7 +377,7 @@ export const useConfluenceUserQuery = (accountId) => {
       const result = await invoke('getConfluenceUser', { accountId });
 
       if (!result || !result.success || !result.data) {
-        throw new Error(result.error || 'Failed to load user data');
+        throw createErrorWithCode('Failed to load user data', result);
       }
 
       logger.queries('User data loaded:', result.data.displayName);
@@ -392,7 +407,7 @@ export const useRedlineStatsQuery = () => {
       const result = await invoke('getRedlineStats');
 
       if (!result || !result.success || !result.data) {
-        throw new Error(result.error || 'Failed to load redline stats');
+        throw createErrorWithCode('Failed to load redline stats', result);
       }
 
       logger.queries('Stats loaded:', result.data);
@@ -423,7 +438,7 @@ export const useCheckRedlineStaleQuery = (localId, enabled = true) => {
       const result = await invoke('checkRedlineStale', { localId });
 
       if (!result || !result.success || !result.data) {
-        throw new Error(result.error || 'Failed to check redline staleness');
+        throw createErrorWithCode('Failed to check redline staleness', result);
       }
 
       logger.queries('Staleness check:', {
@@ -456,7 +471,7 @@ export const usePostRedlineCommentMutation = () => {
       const result = await invoke('postRedlineComment', { localId, pageId, commentText, userId });
 
       if (!result || !result.success || !result.data) {
-        throw new Error(result.error || 'Failed to post inline comment');
+        throw createErrorWithCode('Failed to post inline comment', result);
       }
 
       logger.queries('Comment posted:', {

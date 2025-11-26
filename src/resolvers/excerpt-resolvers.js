@@ -15,6 +15,7 @@ import { updateExcerptIndex } from '../utils/storage-utils.js';
 import { calculateContentHash } from '../utils/hash-utils.js';
 import { logFunction, logPhase, logSuccess, logFailure, logWarning } from '../utils/forge-logger.js';
 import { validateExcerptData } from '../utils/storage-validator.js';
+import { createErrorResponse, ERROR_CODES } from '../utils/error-codes.js';
 
 /**
  * Save excerpt (create or update)
@@ -29,57 +30,63 @@ export async function saveExcerpt(req) {
   // Validate required fields
   if (!excerptName || typeof excerptName !== 'string' || excerptName.trim() === '') {
     logFailure('saveExcerpt', 'Validation failed: excerptName is required and must be a non-empty string', new Error('Invalid excerptName'));
-    return {
-      success: false,
-      error: 'excerptName is required and must be a non-empty string'
-    };
+    return createErrorResponse(
+      ERROR_CODES.VALIDATION_REQUIRED,
+      'excerptName is required and must be a non-empty string',
+      { field: 'excerptName' }
+    );
   }
 
   // Validate content (must be ADF object if provided)
   if (content !== undefined && content !== null) {
     if (typeof content !== 'object' || Array.isArray(content)) {
       logFailure('saveExcerpt', 'Validation failed: content must be an ADF object', new Error('Invalid content type'));
-      return {
-        success: false,
-        error: 'content must be an ADF object'
-      };
+      return createErrorResponse(
+        ERROR_CODES.VALIDATION_INVALID_TYPE,
+        'content must be an ADF object',
+        { field: 'content' }
+      );
     }
   }
 
   // Validate excerptId format if provided (should be UUID)
   if (excerptId && typeof excerptId !== 'string') {
     logFailure('saveExcerpt', 'Validation failed: excerptId must be a string', new Error('Invalid excerptId type'));
-    return {
-      success: false,
-      error: 'excerptId must be a string'
-    };
+    return createErrorResponse(
+      ERROR_CODES.VALIDATION_INVALID_TYPE,
+      'excerptId must be a string',
+      { field: 'excerptId' }
+    );
   }
 
   // Validate variableMetadata if provided
   if (variableMetadata !== undefined && !Array.isArray(variableMetadata)) {
     logFailure('saveExcerpt', 'Validation failed: variableMetadata must be an array', new Error('Invalid variableMetadata type'));
-    return {
-      success: false,
-      error: 'variableMetadata must be an array'
-    };
+    return createErrorResponse(
+      ERROR_CODES.VALIDATION_INVALID_TYPE,
+      'variableMetadata must be an array',
+      { field: 'variableMetadata' }
+    );
   }
 
   // Validate toggleMetadata if provided
   if (toggleMetadata !== undefined && !Array.isArray(toggleMetadata)) {
     logFailure('saveExcerpt', 'Validation failed: toggleMetadata must be an array', new Error('Invalid toggleMetadata type'));
-    return {
-      success: false,
-      error: 'toggleMetadata must be an array'
-    };
+    return createErrorResponse(
+      ERROR_CODES.VALIDATION_INVALID_TYPE,
+      'toggleMetadata must be an array',
+      { field: 'toggleMetadata' }
+    );
   }
 
   // Validate documentationLinks if provided
   if (documentationLinks !== undefined && !Array.isArray(documentationLinks)) {
     logFailure('saveExcerpt', 'Validation failed: documentationLinks must be an array', new Error('Invalid documentationLinks type'));
-    return {
-      success: false,
-      error: 'documentationLinks must be an array'
-    };
+    return createErrorResponse(
+      ERROR_CODES.VALIDATION_INVALID_TYPE,
+      'documentationLinks must be an array',
+      { field: 'documentationLinks' }
+    );
   }
 
   // Extract page information from backend context (more reliable than frontend)
@@ -188,10 +195,11 @@ export async function saveExcerpt(req) {
       excerptId: id,
       errors: validation.errors
     });
-    return {
-      success: false,
-      error: `Validation failed: ${validation.errors.join(', ')}`
-    };
+    return createErrorResponse(
+      ERROR_CODES.VALIDATION_INVALID_VALUE,
+      `Validation failed: ${validation.errors.join(', ')}`,
+      { errors: validation.errors }
+    );
   }
 
   logPhase('saveExcerpt', 'Excerpt object prepared and validated', {
@@ -247,33 +255,40 @@ export async function updateExcerptContent(req) {
     // Input validation
     if (!excerptId || typeof excerptId !== 'string' || excerptId.trim() === '') {
       logFailure('updateExcerptContent', 'Validation failed: excerptId is required and must be a non-empty string', new Error('Invalid excerptId'));
-      return {
-        success: false,
-        error: 'excerptId is required and must be a non-empty string'
-      };
+      return createErrorResponse(
+        ERROR_CODES.VALIDATION_REQUIRED,
+        'excerptId is required and must be a non-empty string',
+        { field: 'excerptId' }
+      );
     }
 
     if (content === undefined || content === null) {
       logFailure('updateExcerptContent', 'Validation failed: content is required', new Error('Missing content'));
-      return {
-        success: false,
-        error: 'content is required'
-      };
+      return createErrorResponse(
+        ERROR_CODES.VALIDATION_REQUIRED,
+        'content is required',
+        { field: 'content' }
+      );
     }
 
     if (typeof content !== 'object' || Array.isArray(content)) {
       logFailure('updateExcerptContent', 'Validation failed: content must be an ADF object', new Error('Invalid content type'));
-      return {
-        success: false,
-        error: 'content must be an ADF object'
-      };
+      return createErrorResponse(
+        ERROR_CODES.VALIDATION_INVALID_TYPE,
+        'content must be an ADF object',
+        { field: 'content' }
+      );
     }
 
     // Load existing excerpt
     const excerpt = await storage.get(`excerpt:${excerptId}`);
     if (!excerpt) {
       logFailure('updateExcerptContent', 'Excerpt not found', new Error('Excerpt not found'), { excerptId });
-      return { success: false, error: 'Excerpt not found' };
+      return createErrorResponse(
+        ERROR_CODES.NOT_FOUND_EXCERPT,
+        'Excerpt not found',
+        { excerptId }
+      );
     }
 
     // Update content and re-detect variables/toggles
@@ -327,10 +342,11 @@ export async function updateExcerptContent(req) {
         excerptId,
         errors: validation.errors
       });
-      return {
-        success: false,
-        error: `Validation failed: ${validation.errors.join(', ')}`
-      };
+      return createErrorResponse(
+        ERROR_CODES.VALIDATION_INVALID_VALUE,
+        `Validation failed: ${validation.errors.join(', ')}`,
+        { errors: validation.errors }
+      );
     }
 
     // Simple versioning: Keep only current + previous version (2 total)
@@ -346,10 +362,11 @@ export async function updateExcerptContent(req) {
     return { success: true, unchanged: false };
   } catch (error) {
     logFailure('updateExcerptContent', 'Error updating excerpt content', error, { excerptId: extractedExcerptId });
-    return {
-      success: false,
-      error: error.message
-    };
+    return createErrorResponse(
+      ERROR_CODES.INTERNAL_ERROR,
+      error.message,
+      { excerptId: extractedExcerptId }
+    );
   }
 }
 
@@ -376,10 +393,10 @@ export async function getAllExcerpts() {
     };
   } catch (error) {
     logFailure('getAllExcerpts', 'Error getting all excerpts', error);
-    return {
-      success: false,
-      error: error.message
-    };
+    return createErrorResponse(
+      ERROR_CODES.INTERNAL_ERROR,
+      error.message
+    );
   }
 }
 
@@ -394,10 +411,11 @@ export async function deleteExcerpt(req) {
     // Input validation
     if (!excerptId || typeof excerptId !== 'string' || excerptId.trim() === '') {
       logFailure('deleteExcerpt', 'Validation failed: excerptId is required and must be a non-empty string', new Error('Invalid excerptId'));
-      return {
-        success: false,
-        error: 'excerptId is required and must be a non-empty string'
-      };
+      return createErrorResponse(
+        ERROR_CODES.VALIDATION_REQUIRED,
+        'excerptId is required and must be a non-empty string',
+        { field: 'excerptId' }
+      );
     }
 
     // Delete the excerpt and its previous version
@@ -414,10 +432,11 @@ export async function deleteExcerpt(req) {
     };
   } catch (error) {
     logFailure('deleteExcerpt', 'Error deleting excerpt', error, { excerptId: extractedExcerptId });
-    return {
-      success: false,
-      error: error.message
-    };
+    return createErrorResponse(
+      ERROR_CODES.INTERNAL_ERROR,
+      error.message,
+      { excerptId: extractedExcerptId }
+    );
   }
 }
 
@@ -432,35 +451,39 @@ export async function updateExcerptMetadata(req) {
     // Input validation
     if (!excerptId || typeof excerptId !== 'string' || excerptId.trim() === '') {
       logFailure('updateExcerptMetadata', 'Validation failed: excerptId is required and must be a non-empty string', new Error('Invalid excerptId'));
-      return {
-        success: false,
-        error: 'excerptId is required and must be a non-empty string'
-      };
+      return createErrorResponse(
+        ERROR_CODES.VALIDATION_REQUIRED,
+        'excerptId is required and must be a non-empty string',
+        { field: 'excerptId' }
+      );
     }
 
     if (name !== undefined && (typeof name !== 'string' || name.trim() === '')) {
       logFailure('updateExcerptMetadata', 'Validation failed: name must be a non-empty string', new Error('Invalid name'));
-      return {
-        success: false,
-        error: 'name must be a non-empty string'
-      };
+      return createErrorResponse(
+        ERROR_CODES.VALIDATION_INVALID_TYPE,
+        'name must be a non-empty string',
+        { field: 'name' }
+      );
     }
 
     if (category !== undefined && typeof category !== 'string') {
       logFailure('updateExcerptMetadata', 'Validation failed: category must be a string', new Error('Invalid category'));
-      return {
-        success: false,
-        error: 'category must be a string'
-      };
+      return createErrorResponse(
+        ERROR_CODES.VALIDATION_INVALID_TYPE,
+        'category must be a string',
+        { field: 'category' }
+      );
     }
 
     // Load the existing excerpt
     const excerpt = await storage.get(`excerpt:${excerptId}`);
     if (!excerpt) {
-      return {
-        success: false,
-        error: 'Excerpt not found'
-      };
+      return createErrorResponse(
+        ERROR_CODES.NOT_FOUND_EXCERPT,
+        'Excerpt not found',
+        { excerptId }
+      );
     }
 
     // Update the metadata (only if provided)
@@ -479,10 +502,11 @@ export async function updateExcerptMetadata(req) {
         excerptId,
         errors: validation.errors
       });
-      return {
-        success: false,
-        error: `Validation failed: ${validation.errors.join(', ')}`
-      };
+      return createErrorResponse(
+        ERROR_CODES.VALIDATION_INVALID_VALUE,
+        `Validation failed: ${validation.errors.join(', ')}`,
+        { errors: validation.errors }
+      );
     }
 
     // Simple versioning: Keep only current + previous version (2 total)
@@ -501,10 +525,11 @@ export async function updateExcerptMetadata(req) {
     };
   } catch (error) {
     logFailure('updateExcerptMetadata', 'Error updating excerpt metadata', error, { excerptId: extractedExcerptId });
-    return {
-      success: false,
-      error: error.message
-    };
+    return createErrorResponse(
+      ERROR_CODES.INTERNAL_ERROR,
+      error.message,
+      { excerptId: extractedExcerptId }
+    );
   }
 }
 
@@ -519,28 +544,31 @@ export async function massUpdateExcerpts(req) {
     // Input validation
     if (!excerptIds || !Array.isArray(excerptIds) || excerptIds.length === 0) {
       logFailure('massUpdateExcerpts', 'Validation failed: excerptIds is required and must be a non-empty array', new Error('Invalid excerptIds'));
-      return {
-        success: false,
-        error: 'excerptIds is required and must be a non-empty array'
-      };
+      return createErrorResponse(
+        ERROR_CODES.VALIDATION_REQUIRED,
+        'excerptIds is required and must be a non-empty array',
+        { field: 'excerptIds' }
+      );
     }
 
     if (category !== undefined && typeof category !== 'string') {
       logFailure('massUpdateExcerpts', 'Validation failed: category must be a string', new Error('Invalid category'));
-      return {
-        success: false,
-        error: 'category must be a string'
-      };
+      return createErrorResponse(
+        ERROR_CODES.VALIDATION_INVALID_TYPE,
+        'category must be a string',
+        { field: 'category' }
+      );
     }
 
     // Validate each excerptId in the array
     for (const excerptId of excerptIds) {
       if (!excerptId || typeof excerptId !== 'string' || excerptId.trim() === '') {
         logFailure('massUpdateExcerpts', 'Validation failed: all excerptIds must be non-empty strings', new Error('Invalid excerptId in array'));
-        return {
-          success: false,
-          error: 'All excerptIds must be non-empty strings'
-        };
+        return createErrorResponse(
+          ERROR_CODES.VALIDATION_INVALID_TYPE,
+          'All excerptIds must be non-empty strings',
+          { field: 'excerptIds' }
+        );
       }
     }
 
@@ -565,7 +593,7 @@ export async function massUpdateExcerpts(req) {
         await updateExcerptIndex(excerpt);
         return { excerptId, success: true };
       }
-      return { excerptId, success: false, error: 'Excerpt not found' };
+      return { excerptId, success: false, error: 'Excerpt not found', errorCode: ERROR_CODES.NOT_FOUND_EXCERPT };
     });
 
     await Promise.all(updatePromises);
@@ -575,10 +603,11 @@ export async function massUpdateExcerpts(req) {
     };
   } catch (error) {
     logFailure('massUpdateExcerpts', 'Error in mass update', error, { excerptIds: extractedExcerptIds });
-    return {
-      success: false,
-      error: error.message
-    };
+    return createErrorResponse(
+      ERROR_CODES.INTERNAL_ERROR,
+      error.message,
+      { excerptIds: extractedExcerptIds }
+    );
   }
 }
 
@@ -595,42 +624,47 @@ export async function updateSourceMacroBody(req) {
     // Input validation
     if (!pageId || typeof pageId !== 'string' || pageId.trim() === '') {
       logFailure('updateSourceMacroBody', 'Validation failed: pageId is required and must be a non-empty string', new Error('Invalid pageId'));
-      return {
-        success: false,
-        error: 'pageId is required and must be a non-empty string'
-      };
+      return createErrorResponse(
+        ERROR_CODES.VALIDATION_REQUIRED,
+        'pageId is required and must be a non-empty string',
+        { field: 'pageId' }
+      );
     }
 
     if (!excerptId || typeof excerptId !== 'string' || excerptId.trim() === '') {
       logFailure('updateSourceMacroBody', 'Validation failed: excerptId is required and must be a non-empty string', new Error('Invalid excerptId'));
-      return {
-        success: false,
-        error: 'excerptId is required and must be a non-empty string'
-      };
+      return createErrorResponse(
+        ERROR_CODES.VALIDATION_REQUIRED,
+        'excerptId is required and must be a non-empty string',
+        { field: 'excerptId' }
+      );
     }
 
     if (content === undefined || content === null) {
       logFailure('updateSourceMacroBody', 'Validation failed: content is required', new Error('Missing content'));
-      return {
-        success: false,
-        error: 'content is required'
-      };
+      return createErrorResponse(
+        ERROR_CODES.VALIDATION_REQUIRED,
+        'content is required',
+        { field: 'content' }
+      );
     }
 
     if (typeof content !== 'object' || Array.isArray(content)) {
       logFailure('updateSourceMacroBody', 'Validation failed: content must be an ADF object', new Error('Invalid content type'));
-      return {
-        success: false,
-        error: 'content must be an ADF object'
-      };
+      return createErrorResponse(
+        ERROR_CODES.VALIDATION_INVALID_TYPE,
+        'content must be an ADF object',
+        { field: 'content' }
+      );
     }
 
     if (localId !== undefined && (typeof localId !== 'string' || localId.trim() === '')) {
       logFailure('updateSourceMacroBody', 'Validation failed: localId must be a non-empty string if provided', new Error('Invalid localId'));
-      return {
-        success: false,
-        error: 'localId must be a non-empty string if provided'
-      };
+      return createErrorResponse(
+        ERROR_CODES.VALIDATION_INVALID_TYPE,
+        'localId must be a non-empty string if provided',
+        { field: 'localId' }
+      );
     }
 
     logFunction('updateSourceMacroBody', 'START', { pageId: extractedPageId, excerptId: extractedExcerptId, localId: extractedLocalId });
@@ -648,10 +682,15 @@ export async function updateSourceMacroBody(req) {
     if (!pageResponse.ok) {
       const errorText = await pageResponse.text();
       logFailure('updateSourceMacroBody', 'Failed to get page', new Error(errorText), { pageId: extractedPageId, status: pageResponse.status });
-      return {
-        success: false,
-        error: `Failed to get page: ${pageResponse.status}`
-      };
+      const errorCode = pageResponse.status === 404 ? ERROR_CODES.NOT_FOUND_PAGE : 
+                       pageResponse.status === 403 ? ERROR_CODES.API_FORBIDDEN :
+                       pageResponse.status === 401 ? ERROR_CODES.API_UNAUTHORIZED :
+                       ERROR_CODES.API_SERVER_ERROR;
+      return createErrorResponse(
+        errorCode,
+        `Failed to get page: ${pageResponse.status}`,
+        { pageId: extractedPageId, status: pageResponse.status }
+      );
     }
 
     const pageData = await pageResponse.json();
@@ -680,10 +719,11 @@ export async function updateSourceMacroBody(req) {
 
     if (!match) {
       logFailure('updateSourceMacroBody', 'Macro not found', new Error('Macro not found on page'), { pageId: extractedPageId, excerptId: extractedExcerptId, localId: extractedLocalId });
-      return {
-        success: false,
-        error: `Source macro not found on page`
-      };
+      return createErrorResponse(
+        ERROR_CODES.NOT_FOUND_EMBED,
+        'Source macro not found on page',
+        { pageId: extractedPageId, excerptId: extractedExcerptId, localId: extractedLocalId }
+      );
     }
 
     // Step 3: Replace the content within <ac:adf-content> tags
@@ -731,10 +771,15 @@ export async function updateSourceMacroBody(req) {
     if (!updateResponse.ok) {
       const errorText = await updateResponse.text();
       logFailure('updateSourceMacroBody', 'Failed to update page', new Error(errorText), { pageId: extractedPageId, status: updateResponse.status });
-      return {
-        success: false,
-        error: `Failed to update page: ${updateResponse.status}`
-      };
+      const errorCode = updateResponse.status === 404 ? ERROR_CODES.NOT_FOUND_PAGE : 
+                       updateResponse.status === 403 ? ERROR_CODES.API_FORBIDDEN :
+                       updateResponse.status === 401 ? ERROR_CODES.API_UNAUTHORIZED :
+                       ERROR_CODES.API_SERVER_ERROR;
+      return createErrorResponse(
+        errorCode,
+        `Failed to update page: ${updateResponse.status}`,
+        { pageId: extractedPageId, status: updateResponse.status }
+      );
     }
 
     const updatedPage = await updateResponse.json();
@@ -748,9 +793,10 @@ export async function updateSourceMacroBody(req) {
 
   } catch (error) {
     logFailure('updateSourceMacroBody', 'Error', error, { pageId: extractedPageId, excerptId: extractedExcerptId, localId: extractedLocalId });
-    return {
-      success: false,
-      error: error.message
-    };
+    return createErrorResponse(
+      ERROR_CODES.INTERNAL_ERROR,
+      error.message,
+      { pageId: extractedPageId, excerptId: extractedExcerptId, localId: extractedLocalId }
+    );
   }
 }

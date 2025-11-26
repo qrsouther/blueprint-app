@@ -15,6 +15,7 @@
  */
 
 import React from 'react';
+import { useWatch, useFieldArray } from 'react-hook-form';
 import {
   Text,
   Strong,
@@ -52,12 +53,7 @@ const variableBoxStyle = xcss({
  *
  * @param {Object} props
  * @param {Object} props.excerpt - The Blueprint Standard/excerpt object
- * @param {Object} props.variableValues - Current variable values (for processing content)
- * @param {Object} props.toggleStates - Current toggle states (for processing content)
- * @param {Array} props.customInsertions - Array of custom paragraph insertions
- * @param {Function} props.setCustomInsertions - Function to update custom insertions
- * @param {Array} props.internalNotes - Array of internal notes
- * @param {Function} props.setInternalNotes - Function to update internal notes
+ * @param {Object} props.control - React Hook Form control from parent form
  * @param {string} props.insertionType - Current insertion type ('body' or 'note')
  * @param {Function} props.setInsertionType - Function to update insertion type
  * @param {number|null} props.selectedPosition - Currently selected position for insertion
@@ -68,12 +64,7 @@ const variableBoxStyle = xcss({
  */
 export const CustomInsertionsPanel = ({
   excerpt,
-  variableValues,
-  toggleStates,
-  customInsertions,
-  setCustomInsertions,
-  internalNotes,
-  setInternalNotes,
+  control,
   insertionType,
   setInsertionType,
   selectedPosition,
@@ -81,6 +72,24 @@ export const CustomInsertionsPanel = ({
   customText,
   setCustomText
 }) => {
+  // Watch form values from parent form
+  const variableValues = useWatch({ control, name: 'variableValues' }) || {};
+  const toggleStates = useWatch({ control, name: 'toggleStates' }) || {};
+  
+  // Use useFieldArray for customInsertions and internalNotes
+  const { fields: customInsertionFields, append: appendCustomInsertion, remove: removeCustomInsertion } = useFieldArray({
+    control,
+    name: 'customInsertions'
+  });
+  
+  const { fields: internalNoteFields, append: appendInternalNote, remove: removeInternalNote } = useFieldArray({
+    control,
+    name: 'internalNotes'
+  });
+  
+  // Convert fields to arrays for compatibility with existing code
+  const customInsertions = customInsertionFields || [];
+  const internalNotes = internalNoteFields || [];
   // Extract paragraphs from ORIGINAL excerpt content only (not preview with custom insertions)
   // This ensures users can only position custom content relative to source content
   let originalContent = excerpt?.content;
@@ -189,14 +198,14 @@ export const CustomInsertionsPanel = ({
                     position: targetPosition,
                     text: customText.trim()
                   };
-                  setCustomInsertions([...customInsertions, newInsertion]);
+                  appendCustomInsertion(newInsertion);
                 } else {
                   if (!hasNoteAtPosition) {
                     const newNote = {
                       position: targetPosition,
                       content: customText.trim()
                     };
-                    setInternalNotes([...internalNotes, newNote]);
+                    appendInternalNote(newNote);
                   }
                 }
 
@@ -247,9 +256,9 @@ export const CustomInsertionsPanel = ({
                 appearance="subtle"
                 onClick={() => {
                   if (item.type === 'paragraph') {
-                    setCustomInsertions(customInsertions.filter((_, i) => i !== item.originalIndex));
+                    removeCustomInsertion(item.originalIndex);
                   } else {
-                    setInternalNotes(internalNotes.filter((_, i) => i !== item.originalIndex));
+                    removeInternalNote(item.originalIndex);
                   }
                 }}
               >

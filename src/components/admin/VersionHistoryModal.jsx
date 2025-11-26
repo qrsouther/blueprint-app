@@ -37,6 +37,7 @@ import {
   xcss
 } from '@forge/react';
 import { invoke } from '@forge/bridge';
+import { useQueryClient } from '@tanstack/react-query';
 import { StableTextfield } from '../common/StableTextfield';
 import { logger } from '../../utils/logger.js';
 
@@ -73,6 +74,7 @@ const jsonPreviewStyle = xcss({
  * Version History Modal
  */
 export function VersionHistoryModal({ isOpen, onClose, embedUuid }) {
+  const queryClient = useQueryClient();
   const [versionLocalId, setVersionLocalId] = useState(embedUuid || '');
   const [versions, setVersions] = useState([]);
   const [loadingVersions, setLoadingVersions] = useState(false);
@@ -91,10 +93,20 @@ export function VersionHistoryModal({ isOpen, onClose, embedUuid }) {
   // Auto-load version history when UUID is provided
   useEffect(() => {
     if (isOpen && embedUuid) {
-      // Small delay to ensure state is set
-      setTimeout(() => {
-        handleLoadVersions();
-      }, 100);
+      // Small delay to ensure state is set from the previous useEffect
+      // This prevents false validation errors when the modal first opens
+      const timeoutId = setTimeout(() => {
+        // Use embedUuid directly to avoid timing issues with state updates
+        if (embedUuid.trim()) {
+          setVersionLocalId(embedUuid);
+          // Call handleLoadVersions after state is set
+          setTimeout(() => {
+            handleLoadVersions();
+          }, 50);
+        }
+      }, 150);
+      
+      return () => clearTimeout(timeoutId);
     }
   }, [isOpen, embedUuid]);
 
@@ -102,8 +114,15 @@ export function VersionHistoryModal({ isOpen, onClose, embedUuid }) {
    * Load version history from backend
    */
   const handleLoadVersions = async () => {
-    if (!versionLocalId.trim()) {
-      setVersionError('Please enter a valid Embed UUID (localId)');
+    // Don't show validation error if we're auto-loading (embedUuid prop is provided)
+    // This prevents false validation errors when the modal first opens
+    const uuidToUse = versionLocalId.trim() || embedUuid?.trim() || '';
+    
+    if (!uuidToUse) {
+      // Only show error if user manually clicked "Load History" without entering a UUID
+      if (!embedUuid) {
+        setVersionError('Please enter a valid Embed UUID (localId)');
+      }
       return;
     }
 
@@ -113,7 +132,8 @@ export function VersionHistoryModal({ isOpen, onClose, embedUuid }) {
     setSelectedVersion(null);
 
     try {
-      const entityId = versionLocalId.trim(); // Just the UUID, not the storage key
+      // Use the UUID we validated above (either from state or prop)
+      const entityId = uuidToUse; // Just the UUID, not the storage key
 
       const response = await invoke('getVersionHistory', { entityId });
 
@@ -177,7 +197,88 @@ export function VersionHistoryModal({ isOpen, onClose, embedUuid }) {
       const response = await invoke('restoreFromVersion', { versionId });
 
       if (response.success && response.data) {
-        alert(`✅ Successfully restored Embed!\n\nRestored from: ${formatTimestamp(response.data.versionId)}\nBackup created: ${response.data.backupVersionId}\n\nThe Embed is now live with the restored data.`);
+        // Extract localId from storageKey (format: "macro-vars:{localId}")
+        const storageKey = response.data.storageKey;
+        const localId = storageKey?.replace('macro-vars:', '') || versionLocalId.trim();
+
+        // Get excerptId from the restored version data (critical for view mode regeneration)
+        const excerptId = selectedVersion?.data?.excerptId;
+
+        // CRITICAL: Remove and invalidate queries to force fresh fetch after restore
+        // The embed view mode might be stuck in a loading state, so we need to remove
+        // the cachedContent query from cache entirely to force it to start fresh
+        
+        // Remove cachedContent query entirely - this forces a fresh fetch when embed loads
+        // This is critical because the query might be stuck in a loading state after restore
+        queryClient.removeQueries({ queryKey: ['cachedContent', localId], exact: true });
+        
+        // Also invalidate it to ensure any active queries refetch
+        queryClient.invalidateQueries({ queryKey: ['cachedContent', localId] });
+        
+        // Invalidate variableValues (needed for cachedContent generation)
+        queryClient.invalidateQueries({ queryKey: ['variableValues', localId] });
+        
+        // Invalidate excerpt query if excerptId is available (needed for cachedContent generation)
+        if (excerptId) {
+          queryClient.invalidateQueries({ queryKey: ['excerpt', excerptId] });
+        }
+        
+        // Invalidate Admin page usage queries to force refresh
+        if (excerptId) {
+          // Invalidate specific excerpt usage query (will refetch when Admin page accesses it)
+          queryClient.invalidateQueries({ queryKey: ['excerpt', excerptId, 'usage'] });
+        }
+        
+        // Invalidate all excerpt-related queries for Admin page
+        queryClient.invalidateQueries({ queryKey: ['excerpt'] }); // All excerpt queries
+        queryClient.invalidateQueries({ queryKey: ['excerpts', 'list'] }); // Excerpts list
+        queryClient.invalidateQueries({ queryKey: ['usageCounts', 'all'] }); // Usage counts
+        
+        // Small delay to ensure storage has been updated before any refetch attempts
+        await new Promise(resolve => setTimeout(resolve, 200));
+        
+        // Try to refetch Admin page queries if they're active (for immediate update)
+        if (excerptId) {
+          try {
+            await Promise.all([
+              queryClient.refetchQueries({ queryKey: ['excerpt', excerptId, 'usage'] }),
+              queryClient.refetchQueries({ queryKey: ['usageCounts', 'all'] })
+            ]);
+          } catch (err) {
+            // If refetch fails (queries not active), that's okay - invalidateQueries will handle it
+            logger.errors('[VersionHistory] Error refetching Admin queries (may not be active):', err);
+          }
+        }
+        
+        // Try to refetch active queries (if they're mounted, they'll refetch immediately)
+        // If they're not mounted, invalidateQueries above ensures they'll refetch when accessed
+        try {
+          // Refetch variableValues first (needed for cachedContent generation)
+          await queryClient.refetchQueries({ queryKey: ['variableValues', localId], exact: true });
+          
+          // Refetch excerpt if available (needed for cachedContent generation)
+          if (excerptId) {
+            await queryClient.refetchQueries({ queryKey: ['excerpt', excerptId], exact: true });
+          }
+          
+          // Wait a bit for variableValues to complete before attempting cachedContent
+          await new Promise(resolve => setTimeout(resolve, 200));
+          
+          // Note: We removed cachedContent from cache above, so it will be created fresh
+          // when the embed component accesses it. We don't need to refetch it here because
+          // it doesn't exist in cache anymore - it will be created on-demand with fresh data.
+          
+        } catch (err) {
+          // If refetch fails (queries not active), that's okay - invalidateQueries will handle it
+          logger.errors('[VersionHistory] Error refetching queries (may not be active):', err);
+        }
+
+        alert(
+          `✅ Successfully restored Embed!\n\n` +
+          `Restored from: ${formatTimestamp(response.data.versionId)}\n` +
+          `Backup created: ${response.data.backupVersionId}\n\n` +
+          `The Embed has been restored and will display the restored content on the page.`
+        );
         setSelectedVersion(null);
         // Refresh version list to show new backup
         handleLoadVersions();

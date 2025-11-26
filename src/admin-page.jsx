@@ -39,6 +39,7 @@ import { invoke, router } from '@forge/bridge';
 import { QueryClient, QueryClientProvider, useQueryClient } from '@tanstack/react-query';
 import { ReactQueryDevtools } from '@tanstack/react-query-devtools';
 import { logger } from './utils/logger.js';
+import ErrorBoundary from './components/common/ErrorBoundary.jsx';
 
 // Import React Query hooks
 import {
@@ -2810,7 +2811,9 @@ const App = () => {
 ForgeReconciler.render(
   <QueryClientProvider client={queryClient}>
     <React.StrictMode>
-      <App />
+      <ErrorBoundary>
+        <App />
+      </ErrorBoundary>
     </React.StrictMode>
     <ReactQueryDevtools initialIsOpen={false} />
   </QueryClientProvider>

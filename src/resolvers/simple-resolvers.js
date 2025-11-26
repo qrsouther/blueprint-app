@@ -20,6 +20,7 @@ import {
   logSuccess,
   logFailure
 } from '../utils/forge-logger.js';
+import { createErrorResponse, ERROR_CODES } from '../utils/error-codes.js';
 
 /**
  * Detect variables from content (for UI to call)
@@ -31,11 +32,11 @@ export async function detectVariablesFromContent(req) {
     // Input validation
     if (content === undefined || content === null) {
       logFailure('detectVariablesFromContent', 'Validation failed: content is required', new Error('Missing content'));
-      return {
-        success: false,
-        error: 'content is required',
-        variables: []
-      };
+      return createErrorResponse(
+        ERROR_CODES.VALIDATION_REQUIRED,
+        'content is required',
+        { field: 'content' }
+      );
     }
 
     // Handle different content formats
@@ -63,21 +64,21 @@ export async function detectVariablesFromContent(req) {
     // Both are acceptable since detectVariables handles both
     if (contentToProcess === null || contentToProcess === undefined) {
       logFailure('detectVariablesFromContent', 'Validation failed: content is null or undefined', new Error('Invalid content'));
-      return {
-        success: false,
-        error: 'content must be an ADF object or text string',
-        variables: []
-      };
+      return createErrorResponse(
+        ERROR_CODES.VALIDATION_INVALID_TYPE,
+        'content must be an ADF object or text string',
+        { field: 'content' }
+      );
     }
 
     // Reject arrays (not a valid format)
     if (Array.isArray(contentToProcess)) {
       logFailure('detectVariablesFromContent', 'Validation failed: content cannot be an array', new Error('Invalid content type'));
-      return {
-        success: false,
-        error: 'content must be an ADF object or text string, not an array',
-        variables: []
-      };
+      return createErrorResponse(
+        ERROR_CODES.VALIDATION_INVALID_TYPE,
+        'content must be an ADF object or text string, not an array',
+        { field: 'content' }
+      );
     }
 
     const variables = detectVariables(contentToProcess);
@@ -89,10 +90,10 @@ export async function detectVariablesFromContent(req) {
     };
   } catch (error) {
     logFailure('detectVariablesFromContent', 'Error detecting variables', error);
-    return {
-      success: false,
-      error: error.message
-    };
+    return createErrorResponse(
+      ERROR_CODES.INTERNAL_ERROR,
+      error.message
+    );
   }
 }
 
@@ -164,10 +165,10 @@ export async function detectTogglesFromContent(req) {
     };
   } catch (error) {
     logFailure('detectTogglesFromContent', 'Error detecting toggles', error);
-    return {
-      success: false,
-      error: error.message
-    };
+    return createErrorResponse(
+      ERROR_CODES.INTERNAL_ERROR,
+      error.message
+    );
   }
 }
 
@@ -189,10 +190,10 @@ export async function getExcerpts() {
     };
   } catch (error) {
     logFailure('getExcerpts', 'Error getting excerpts', error);
-    return {
-      success: false,
-      error: error.message
-    };
+    return createErrorResponse(
+      ERROR_CODES.INTERNAL_ERROR,
+      error.message
+    );
   }
 }
 
@@ -863,7 +864,10 @@ export async function getCachedContent(req) {
     const cached = await storage.get(key);
 
     if (!cached) {
-      return { success: false, error: 'No cached content found' };
+      return createErrorResponse(
+        ERROR_CODES.NOT_FOUND_EMBED,
+        'No cached content found'
+      );
     }
 
     return {
@@ -875,7 +879,7 @@ export async function getCachedContent(req) {
     };
   } catch (error) {
     logFailure('getCachedContent', 'Error loading cached content', error, { localId: req.payload?.localId });
-    return { success: false, error: error.message };
+    return createErrorResponse(ERROR_CODES.INTERNAL_ERROR, error.message);
   }
 }
 
@@ -969,7 +973,10 @@ export async function checkVersionStaleness(req) {
     // Get excerpt's lastModified (updatedAt)
     const excerpt = await storage.get(`excerpt:${excerptId}`);
     if (!excerpt) {
-      return { success: false, error: 'Excerpt not found' };
+      return createErrorResponse(
+        ERROR_CODES.NOT_FOUND_EXCERPT,
+        'Excerpt not found'
+      );
     }
 
     // Get Embed instance's lastSynced
@@ -989,7 +996,7 @@ export async function checkVersionStaleness(req) {
     };
   } catch (error) {
     logFailure('checkVersionStaleness', 'Error checking version staleness', error, { localId: req.payload?.localId, excerptId: req.payload?.excerptId });
-    return { success: false, error: error.message };
+    return createErrorResponse(ERROR_CODES.INTERNAL_ERROR, error.message);
   }
 }
 
@@ -1169,7 +1176,7 @@ export async function saveCachedContent(req) {
     };
   } catch (error) {
     logFailure('saveCachedContent', 'Error saving cached content', error);
-    return { success: false, error: error.message };
+    return createErrorResponse(ERROR_CODES.INTERNAL_ERROR, error.message);
   }
 }
 

@@ -34,6 +34,7 @@ import api, { route } from '@forge/api';
 import { listVersions } from '../utils/version-manager.js';
 import { logPhase, logSuccess, logFailure, logWarning } from '../utils/forge-logger.js';
 import { fetchPageContent, checkMacroExistsInADF } from '../workers/helpers/page-scanner.js';
+import { createErrorResponse, ERROR_CODES } from '../utils/error-codes.js';
 
 /**
  * Get redline queue with filtering, sorting, and grouping

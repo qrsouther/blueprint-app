@@ -412,7 +412,27 @@ export async function restoreVersion(storageInstance, versionId) {
     }
 
     // Restore data to active storage
-    await storageInstance.set(storageKey, data);
+    // Restore the version data, but preserve newer metadata fields that weren't in old versions
+    // This ensures we don't lose fields like pageTitle that were added after the version was created
+    // IMPORTANT: Restore ALL fields from version snapshot, including variableValues, toggleStates, etc.
+    const restoredData = {
+      ...data, // Restored version data (primary source) - includes variableValues, toggleStates, customInsertions, internalNotes
+      // Preserve newer metadata fields that might not be in old version snapshots
+      pageTitle: currentData?.pageTitle || data.pageTitle, // Preserve pageTitle if it exists in current
+      // Ensure critical fields are present
+      excerptId: data.excerptId || currentData?.excerptId,
+      updatedAt: new Date().toISOString() // Update timestamp to reflect restore
+    };
+    
+    // Log what we're restoring for debugging
+    logPhase(FUNCTION_NAME, 'Restoring data', {
+      hasVariableValues: !!restoredData.variableValues,
+      variableCount: restoredData.variableValues ? Object.keys(restoredData.variableValues).length : 0,
+      hasToggleStates: !!restoredData.toggleStates,
+      toggleCount: restoredData.toggleStates ? Object.keys(restoredData.toggleStates).length : 0
+    });
+    
+    await storageInstance.set(storageKey, restoredData);
     logStorageOp(FUNCTION_NAME, 'WRITE', storageKey, true);
 
     // Clear cached rendered content for macro-vars (Embeds)

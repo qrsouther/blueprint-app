@@ -12,6 +12,7 @@
  */
 
 import React from 'react';
+import { useWatch } from 'react-hook-form';
 import {
   Text,
   Strong,
@@ -36,11 +37,15 @@ const variableBoxStyle = xcss({
  *
  * @param {Object} props
  * @param {Object} props.excerpt - The Blueprint Standard/excerpt object containing toggles
- * @param {Object} props.toggleStates - Current toggle states (map of name -> boolean)
- * @param {Function} props.setToggleStates - Function to update toggle states
+ * @param {Object} props.control - React Hook Form control from parent form
  * @returns {JSX.Element}
  */
-export const ToggleConfigPanel = ({ excerpt, toggleStates, setToggleStates }) => {
+export const ToggleConfigPanel = ({ excerpt, control, setValue }) => {
+  // Watch toggle states from parent form
+  const toggleStates = useWatch({
+    control,
+    name: 'toggleStates'
+  }) || {};
   // Handle null excerpt (template context where user hasn't selected a source yet)
   if (!excerpt) {
     return <Text>Please select a Source first to configure toggles.</Text>;
@@ -73,33 +78,35 @@ export const ToggleConfigPanel = ({ excerpt, toggleStates, setToggleStates }) =>
             }
           ]
         }}
-        rows={excerpt.toggles.map(toggle => ({
-          key: toggle.name,
-          cells: [
-            {
-              key: 'toggle',
-              content: (
-                <Toggle
-                  isChecked={toggleStates[toggle.name] || false}
-                  onChange={(e) => {
-                    setToggleStates({
-                      ...toggleStates,
-                      [toggle.name]: e.target.checked
-                    });
-                  }}
-                />
-              )
-            },
-            {
-              key: 'name',
-              content: <Text><Strong>{toggle.name}</Strong></Text>
-            },
-            {
-              key: 'description',
-              content: toggle.description ? <Text><Em>{toggle.description}</Em></Text> : <Text>—</Text>
-            }
-          ]
-        }))}
+        rows={excerpt.toggles.map(toggle => {
+          const fieldName = `toggleStates.${toggle.name}`;
+          const currentValue = toggleStates[toggle.name] || false;
+
+          return {
+            key: toggle.name,
+            cells: [
+              {
+                key: 'toggle',
+                content: (
+                  <Toggle
+                    isChecked={currentValue}
+                    onChange={(e) => {
+                      setValue(fieldName, e.target.checked, { shouldDirty: true });
+                    }}
+                  />
+                )
+              },
+              {
+                key: 'name',
+                content: <Text><Strong>{toggle.name}</Strong></Text>
+              },
+              {
+                key: 'description',
+                content: toggle.description ? <Text><Em>{toggle.description}</Em></Text> : <Text>—</Text>
+              }
+            ]
+          };
+        })}
       />
     </Box>
   );

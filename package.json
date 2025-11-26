@@ -4,7 +4,9 @@
   "description": "Blueprint App - A high-performance content reuse system for Confluence",
   "main": "src/index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1",
+    "test": "jest",
+    "test:watch": "jest --watch",
+    "test:coverage": "jest --coverage",
     "prebuild": "node scripts/generate-build-timestamp.js",
     "predeploy": "node scripts/generate-build-timestamp.js",
     "deploy": "node scripts/generate-build-timestamp.js && forge deploy --environment production --no-verify",
@@ -27,15 +29,25 @@
     "@forge/events": "^2.0.9",
     "@forge/react": "^11.6.0",
     "@forge/resolver": "^1.7.1",
+    "@hookform/resolvers": "^5.2.2",
     "@tanstack/react-query": "^5.90.7",
     "@tanstack/react-query-devtools": "^5.90.2",
     "debug": "^4.4.3",
     "diff": "^8.0.2",
-    "react": "^18.2.0"
+    "react": "^18.2.0",
+    "react-hook-form": "^7.66.1",
+    "zod": "^4.1.13"
   },
   "devDependencies": {
     "@atlaskit/eslint-plugin-design-system": "^13.26.0",
+    "@babel/core": "^7.28.5",
+    "@babel/preset-env": "^7.28.5",
+    "@babel/preset-react": "^7.28.5",
     "@forge/cli": "^12.7.1",
-    "eslint": "^8.57.1"
+    "@testing-library/jest-dom": "^6.9.1",
+    "@testing-library/react": "^16.3.0",
+    "babel-jest": "^30.2.0",
+    "eslint": "^8.57.1",
+    "jest": "^30.2.0"
   }
 }

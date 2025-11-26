@@ -13,6 +13,7 @@ This app was built by the SeatGeek Architecture team using a combination of Clau
 - [📦 Source Macro Features and Workflow](#-source-macro-features-and-workflow)
 - [🎯 Embed Macro Features and Workflow](#-embed-macro-features-and-workflow)
 - [📘 ⚙️ Admin UI Features](#-admin-ui-features)
+- [🔧 Developer Documentation](#-developer-documentation)
 - [🐛 Known Issues](#-known-issues)
 - [🤝 Contributing](#-contributing)
 - [📄 License](#-license)
@@ -823,6 +824,28 @@ logError('API call failed', error, { pageId, excerptId });
 ```
 
 ---
+
+## 🔧 Developer Documentation
+
+### Error Handling
+
+The codebase uses a standardized error handling system with error codes, user-friendly messages, and error boundaries. See [Error Handling Guide](docs/ERROR_HANDLING_GUIDE.md) for:
+
+- Error code constants and usage
+- Resolver error response format
+- React Query hook error handling
+- Component error handling patterns
+- Error boundary usage
+- Adding new error codes
+
+### Resolver Return Values
+
+All resolvers follow a consistent return value format. See [Resolver Return Standard](docs/RESOLVER_RETURN_STANDARD.md) for:
+
+- Success response format
+- Error response format (with error codes)
+- Frontend usage patterns
+- Migration checklist
 
 ## 🐛 Known Issues
 

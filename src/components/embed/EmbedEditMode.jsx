@@ -81,14 +81,8 @@ export function EmbedEditMode({
   saveStatus,
   selectedTabIndex,
   setSelectedTabIndex,
-  variableValues,
-  setVariableValues,
-  toggleStates,
-  setToggleStates,
-  customInsertions,
-  setCustomInsertions,
-  internalNotes,
-  setInternalNotes,
+  control,
+  setValue,
   insertionType,
   setInsertionType,
   selectedPosition,
@@ -251,8 +245,8 @@ export function EmbedEditMode({
         <TabPanel>
           <ToggleConfigPanel
             excerpt={excerpt}
-            toggleStates={toggleStates}
-            setToggleStates={setToggleStates}
+            control={control}
+            setValue={setValue}
           />
         </TabPanel>
 
@@ -260,8 +254,8 @@ export function EmbedEditMode({
         <TabPanel>
           <VariableConfigPanel
             excerpt={excerpt}
-            variableValues={variableValues}
-            setVariableValues={setVariableValues}
+            control={control}
+            setValue={setValue}
           />
         </TabPanel>
 
@@ -269,12 +263,7 @@ export function EmbedEditMode({
         <TabPanel>
           <CustomInsertionsPanel
             excerpt={excerpt}
-            variableValues={variableValues}
-            toggleStates={toggleStates}
-            customInsertions={customInsertions}
-            setCustomInsertions={setCustomInsertions}
-            internalNotes={internalNotes}
-            setInternalNotes={setInternalNotes}
+            control={control}
             insertionType={insertionType}
             setInsertionType={setInsertionType}
             selectedPosition={selectedPosition}

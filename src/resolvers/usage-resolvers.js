@@ -22,6 +22,7 @@ import { storage, startsWith } from '@forge/api';
 import api, { route } from '@forge/api';
 import { findHeadingBeforeMacro } from '../utils/adf-utils.js';
 import { logFailure, logWarning } from '../utils/forge-logger.js';
+import { createErrorResponse, ERROR_CODES } from '../utils/error-codes.js';
 
 /**
  * Track excerpt usage - record when/where an excerpt is used
@@ -508,7 +509,7 @@ export async function pushUpdatesToAll(req) {
     };
   } catch (error) {
     logFailure('pushUpdatesToAll', 'Error pushing updates to all', error, { excerptId: extractedExcerptId });
-    return { success: false, error: error.message };
+    return createErrorResponse(ERROR_CODES.INTERNAL_ERROR, error.message);
   }
 }
 
@@ -582,6 +583,6 @@ export async function pushUpdatesToPage(req) {
     };
   } catch (error) {
     logFailure('pushUpdatesToPage', 'Error pushing updates to page', error, { excerptId, pageId });
-    return { success: false, error: error.message };
+    return createErrorResponse(ERROR_CODES.INTERNAL_ERROR, error.message);
   }
 }

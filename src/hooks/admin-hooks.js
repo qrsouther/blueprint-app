@@ -22,6 +22,21 @@ import { invoke } from '@forge/bridge';
 import { logger } from '../utils/logger.js';
 
 /**
+ * Helper function to create an error with error code preservation
+ * @param {string} defaultMessage - Default error message
+ * @param {Object} result - Resolver result object
+ * @returns {Error} Error object with errorCode and details if available
+ */
+function createErrorWithCode(defaultMessage, result) {
+  const error = new Error(result?.error || defaultMessage);
+  if (result?.errorCode) {
+    error.errorCode = result.errorCode;
+    error.details = result.details || {};
+  }
+  return error;
+}
+
+/**
  * Hook for fetching current user context
  *
  * Fetches the current user's accountId from Forge context.
@@ -59,7 +74,7 @@ export const useExcerptsQuery = () => {
       const result = await invoke('getAllExcerpts');
 
       if (!result || !result.success || !result.data) {
-        throw new Error(result.error || 'Failed to load excerpts');
+        throw createErrorWithCode('Failed to load excerpts', result);
       }
 
       // Sanitize excerpts
@@ -190,7 +205,7 @@ export const useExcerptUsageQuery = (excerptId, enabled = true) => {
       if (result && result.success && result.data) {
         return result.data.usage || [];
       }
-      throw new Error(result.error || 'Failed to load usage data');
+      throw createErrorWithCode('Failed to load usage data', result);
     },
     enabled: enabled && !!excerptId,
     staleTime: 1000 * 60 * 2, // 2 minutes for usage data
@@ -213,7 +228,7 @@ export const useDeleteExcerptMutation = () => {
     mutationFn: async (excerptId) => {
       const result = await invoke('deleteExcerpt', { excerptId });
       if (!result.success) {
-        throw new Error(result.error || 'Failed to delete excerpt');
+        throw createErrorWithCode('Failed to delete excerpt', result);
       }
       return excerptId;
     },
@@ -269,7 +284,7 @@ export const useCheckAllSourcesMutation = () => {
     mutationFn: async () => {
       const result = await invoke('checkAllSources');
       if (!result.success) {
-        throw new Error(result.error || 'Check failed');
+        throw createErrorWithCode('Check failed', result);
       }
       return result;
     },
@@ -297,7 +312,7 @@ export const useCheckAllIncludesMutation = () => {
     mutationFn: async () => {
       const result = await invoke('checkAllIncludes');
       if (!result.success) {
-        throw new Error(result.error || 'Check failed');
+        throw createErrorWithCode('Check failed', result);
       }
       return result;
     },
@@ -327,7 +342,7 @@ export const usePushUpdatesToPageMutation = () => {
     mutationFn: async ({ excerptId, pageId }) => {
       const result = await invoke('pushUpdatesToPage', { excerptId, pageId });
       if (!result.success) {
-        throw new Error(result.error || 'Failed to push updates');
+        throw createErrorWithCode('Failed to push updates', result);
       }
       return { excerptId, result };
     },
@@ -352,7 +367,7 @@ export const usePushUpdatesToAllMutation = () => {
     mutationFn: async (excerptId) => {
       const result = await invoke('pushUpdatesToAll', { excerptId });
       if (!result.success) {
-        throw new Error(result.error || 'Failed to push updates');
+        throw createErrorWithCode('Failed to push updates', result);
       }
       return { excerptId, result };
     },
@@ -380,7 +395,7 @@ export const useAllUsageCountsQuery = () => {
         // Returns object like { excerptId1: 5, excerptId2: 12, ... }
         return result.data.usageCounts || {};
       }
-      throw new Error(result.error || 'Failed to load usage counts');
+      throw createErrorWithCode('Failed to load usage counts', result);
     },
     staleTime: 1000 * 60 * 2, // 2 minutes
     gcTime: 1000 * 60 * 10, // 10 minutes
@@ -400,7 +415,7 @@ export const useCreateTestPageMutation = () => {
     mutationFn: async ({ pageId }) => {
       const result = await invoke('createTestEmbedsPage', { pageId });
       if (!result.success) {
-        throw new Error(result.error || 'Failed to create test page');
+        throw createErrorWithCode('Failed to create test page', result);
       }
       return result;
     },

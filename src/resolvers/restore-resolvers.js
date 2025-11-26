@@ -10,6 +10,7 @@
 
 import { storage, startsWith } from '@forge/api';
 import { logSuccess, logFailure } from '../utils/forge-logger.js';
+import { createErrorResponse, ERROR_CODES } from '../utils/error-codes.js';
 
 /**
  * List all available backup snapshots
@@ -47,10 +48,10 @@ export async function listBackups() {
     };
   } catch (error) {
     logFailure('listBackups', 'Error listing backups', error);
-    return {
-      success: false,
-      error: error.message
-    };
+    return createErrorResponse(
+      ERROR_CODES.STORAGE_READ_FAILED,
+      error.message
+    );
   }
 }
 
@@ -98,11 +99,11 @@ export async function listDeletedEmbeds() {
     };
   } catch (error) {
     logFailure('listDeletedEmbeds', 'Error listing deleted embeds', error);
-    return {
-      success: false,
-      error: error.message,
-      deletedEmbeds: []
-    };
+    return createErrorResponse(
+      ERROR_CODES.STORAGE_READ_FAILED,
+      error.message,
+      { deletedEmbeds: [] }
+    );
   }
 }
 
@@ -122,10 +123,11 @@ export async function previewFromBackup(req) {
     const backupData = await storage.get(`${backupId}:embed:${localId}`);
 
     if (!backupData) {
-      return {
-        success: false,
-        error: `No backup found for embed ${localId} in backup ${backupId}`
-      };
+      return createErrorResponse(
+        ERROR_CODES.NOT_FOUND_EMBED,
+        `No backup found for embed ${localId} in backup ${backupId}`,
+        { localId, backupId }
+      );
     }
 
     // Get current data for comparison (if exists)
@@ -160,10 +162,11 @@ export async function previewFromBackup(req) {
     };
   } catch (error) {
     logFailure('previewFromBackup', 'Error previewing backup', error, { backupId: extractedBackupId, localId: extractedLocalId });
-    return {
-      success: false,
-      error: error.message
-    };
+    return createErrorResponse(
+      ERROR_CODES.INTERNAL_ERROR,
+      error.message,
+      { backupId: extractedBackupId, localId: extractedLocalId }
+    );
   }
 }
 
@@ -182,10 +185,11 @@ export async function previewDeletedEmbed(req) {
     const deletedData = await storage.get(`macro-vars-deleted:${localId}`);
 
     if (!deletedData) {
-      return {
-        success: false,
-        error: `No soft-deleted data found for embed ${localId}`
-      };
+      return createErrorResponse(
+        ERROR_CODES.NOT_FOUND_EMBED,
+        `No soft-deleted data found for embed ${localId}`,
+        { localId }
+      );
     }
 
     // Get current data for comparison (if exists)
@@ -218,10 +222,11 @@ export async function previewDeletedEmbed(req) {
     };
   } catch (error) {
     logFailure('previewDeletedEmbed', 'Error previewing deleted embed', error, { localId: extractedLocalId });
-    return {
-      success: false,
-      error: error.message
-    };
+    return createErrorResponse(
+      ERROR_CODES.INTERNAL_ERROR,
+      error.message,
+      { localId: extractedLocalId }
+    );
   }
 }
 
@@ -237,46 +242,50 @@ export async function restoreDeletedEmbed(req) {
     // Input validation
     if (!localId || typeof localId !== 'string' || localId.trim() === '') {
       logFailure('restoreDeletedEmbed', 'Validation failed: localId is required and must be a non-empty string', new Error('Invalid localId'));
-      return {
-        success: false,
-        error: 'localId is required and must be a non-empty string'
-      };
+      return createErrorResponse(
+        ERROR_CODES.VALIDATION_REQUIRED,
+        'localId is required and must be a non-empty string',
+        { field: 'localId' }
+      );
     }
 
     if (force !== undefined && typeof force !== 'boolean') {
       logFailure('restoreDeletedEmbed', 'Validation failed: force must be a boolean', new Error('Invalid force type'));
-      return {
-        success: false,
-        error: 'force must be a boolean'
-      };
+      return createErrorResponse(
+        ERROR_CODES.VALIDATION_INVALID_TYPE,
+        'force must be a boolean',
+        { field: 'force' }
+      );
     }
 
     // Get soft-deleted data
     const deletedData = await storage.get(`macro-vars-deleted:${localId}`);
 
     if (!deletedData) {
-      return {
-        success: false,
-        error: 'No deleted data found for this embed'
-      };
+      return createErrorResponse(
+        ERROR_CODES.NOT_FOUND_EMBED,
+        'No deleted data found for this embed',
+        { localId }
+      );
     }
 
     // Check if canRecover flag is set
     if (!deletedData.canRecover) {
-      return {
-        success: false,
-        error: 'This embed is marked as non-recoverable'
-      };
+      return createErrorResponse(
+        ERROR_CODES.OPERATION_NOT_ALLOWED,
+        'This embed is marked as non-recoverable',
+        { localId }
+      );
     }
 
     // Check if current data exists
     const currentData = await storage.get(`macro-vars:${localId}`);
     if (currentData && !force) {
-      return {
-        success: false,
-        error: 'Embed already exists - use force=true to overwrite',
-        hasConflict: true
-      };
+      return createErrorResponse(
+        ERROR_CODES.DEPENDENCY_EXISTS,
+        'Embed already exists - use force=true to overwrite',
+        { localId, hasConflict: true }
+      );
     }
 
     // Remove deletion metadata before restoring
@@ -304,10 +313,11 @@ export async function restoreDeletedEmbed(req) {
     };
   } catch (error) {
     logFailure('restoreDeletedEmbed', 'Error restoring deleted embed', error, { localId: extractedLocalId });
-    return {
-      success: false,
-      error: error.message
-    };
+    return createErrorResponse(
+      ERROR_CODES.INTERNAL_ERROR,
+      error.message,
+      { localId: extractedLocalId }
+    );
   }
 }
 
@@ -327,10 +337,11 @@ export async function restoreFromBackup(req) {
     const metadata = await storage.get(`${backupId}:metadata`);
 
     if (!metadata || !metadata.canRestore) {
-      return {
-        success: false,
-        error: 'Backup not found or not restorable'
-      };
+      return createErrorResponse(
+        ERROR_CODES.NOT_FOUND_EMBED,
+        'Backup not found or not restorable',
+        { backupId }
+      );
     }
 
     const restored = [];
@@ -387,9 +398,10 @@ export async function restoreFromBackup(req) {
     };
   } catch (error) {
     logFailure('restoreFromBackup', 'Error restoring from backup', error, { backupId: extractedBackupId });
-    return {
-      success: false,
-      error: error.message
-    };
+    return createErrorResponse(
+      ERROR_CODES.INTERNAL_ERROR,
+      error.message,
+      { backupId: extractedBackupId }
+    );
   }
 }

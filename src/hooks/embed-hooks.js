@@ -23,6 +23,21 @@ import {
 } from '../utils/adf-rendering-utils';
 
 /**
+ * Helper function to create an error with error code preservation
+ * @param {string} defaultMessage - Default error message
+ * @param {Object} result - Resolver result object
+ * @returns {Error} Error object with errorCode and details if available
+ */
+function createErrorWithCode(defaultMessage, result) {
+  const error = new Error(result?.error || defaultMessage);
+  if (result?.errorCode) {
+    error.errorCode = result.errorCode;
+    error.details = result.details || {};
+  }
+  return error;
+}
+
+/**
  * Custom hook for fetching excerpt data with React Query
  *
  * Fetches a specific excerpt/source by ID, including its content, variables, and metadata.
@@ -44,7 +59,7 @@ export const useExcerptData = (excerptId, enabled) => {
       const result = await invoke('getExcerpt', { excerptId });
 
       if (!result.success || !result.data || !result.data.excerpt) {
-        throw new Error('Failed to load excerpt');
+        throw createErrorWithCode('Failed to load excerpt', result);
       }
 
       return result.data.excerpt;
@@ -81,7 +96,7 @@ export const useSaveVariableValues = () => {
       });
 
       if (!result.success) {
-        throw new Error(result.error || 'Failed to save variable values');
+        throw createErrorWithCode('Failed to save variable values', result);
       }
 
       return result;
@@ -163,10 +178,7 @@ export const useVariableValues = (localId, enabled) => {
  * @param {string} excerptId - The ID of the excerpt to render
  * @param {boolean} enabled - Whether the query should run
  * @param {Object} context - Forge context object
- * @param {Function} setVariableValues - State setter for variable values
- * @param {Function} setToggleStates - State setter for toggle states
- * @param {Function} setCustomInsertions - State setter for custom insertions
- * @param {Function} setInternalNotes - State setter for internal notes
+ * @param {Function} reset - React Hook Form reset function
  * @param {Function} setExcerptForViewMode - State setter for excerpt data
  * @returns {Object} React Query result with cached content
  */
@@ -175,10 +187,7 @@ export const useCachedContent = (
   excerptId,
   enabled,
   context,
-  setVariableValues,
-  setToggleStates,
-  setCustomInsertions,
-  setInternalNotes,
+  reset,
   setExcerptForViewMode
 ) => {
   return useQuery({
@@ -195,10 +204,24 @@ export const useCachedContent = (
 
       const excerptResult = await invoke('getExcerpt', { excerptId });
       if (!excerptResult.success || !excerptResult.data || !excerptResult.data.excerpt) {
-        throw new Error('Failed to load excerpt');
+        throw new Error(`Failed to load excerpt: ${excerptResult.error || 'Excerpt not found'}`);
       }
 
-      setExcerptForViewMode(excerptResult.data.excerpt);
+      const excerpt = excerptResult.data.excerpt;
+      
+      // Validate excerpt has valid content
+      if (!excerpt.content) {
+        throw new Error('Excerpt has no content');
+      }
+      
+      // Validate ADF structure if it's an ADF document
+      if (excerpt.content && typeof excerpt.content === 'object' && excerpt.content.type === 'doc') {
+        if (!excerpt.content.content || !Array.isArray(excerpt.content.content)) {
+          throw new Error('Invalid ADF structure: missing or invalid content array');
+        }
+      }
+
+      setExcerptForViewMode(excerpt);
 
       // Load variable values and check for orphaned data
       let varsResult = await invoke('getVariableValues', { localId });
@@ -232,24 +255,45 @@ export const useCachedContent = (
       const loadedCustomInsertions = finalVarsData.customInsertions || [];
       const loadedInternalNotes = finalVarsData.internalNotes || [];
 
-      setVariableValues(loadedVariableValues);
-      setToggleStates(loadedToggleStates);
-      setCustomInsertions(loadedCustomInsertions);
-      setInternalNotes(loadedInternalNotes);
+      // Update form with loaded values
+      if (reset) {
+        const { normalizeVariableValues } = require('../schemas/form-schemas');
+        reset({
+          variableValues: normalizeVariableValues(loadedVariableValues),
+          toggleStates: loadedToggleStates,
+          customInsertions: loadedCustomInsertions,
+          internalNotes: loadedInternalNotes
+        }, { keepDefaultValues: false });
+      }
 
       // Generate and cache the content
-      let freshContent = excerptResult.data.excerpt.content;
+      // IMPORTANT: Create a deep copy to avoid mutating the original excerpt content
+      let freshContent = excerpt.content;
+      if (typeof freshContent === 'object' && freshContent !== null) {
+        freshContent = JSON.parse(JSON.stringify(freshContent));
+      }
+      
       const isAdf = freshContent && typeof freshContent === 'object' && freshContent.type === 'doc';
 
       if (isAdf) {
-        // Fix for GitHub issue #2 - Free Write paragraph insertion position with enabled toggles
-        // FIX: Insert custom paragraphs BEFORE toggle filtering (same as EmbedContainer.jsx fix above)
-        // Insert custom paragraphs and internal notes into original content (before toggle filtering)
-        freshContent = substituteVariablesInAdf(freshContent, loadedVariableValues);
-        freshContent = insertCustomParagraphsInAdf(freshContent, loadedCustomInsertions);
-        freshContent = insertInternalNotesInAdf(freshContent, loadedInternalNotes);
-        // Then filter toggles (this will preserve insertions inside enabled toggles)
-        freshContent = filterContentByToggles(freshContent, loadedToggleStates);
+        try {
+          // Fix for GitHub issue #2 - Free Write paragraph insertion position with enabled toggles
+          // FIX: Insert custom paragraphs BEFORE toggle filtering (same as EmbedContainer.jsx fix above)
+          // Insert custom paragraphs and internal notes into original content (before toggle filtering)
+          freshContent = substituteVariablesInAdf(freshContent, loadedVariableValues);
+          freshContent = insertCustomParagraphsInAdf(freshContent, loadedCustomInsertions);
+          freshContent = insertInternalNotesInAdf(freshContent, loadedInternalNotes);
+          // Then filter toggles (this will preserve insertions inside enabled toggles)
+          freshContent = filterContentByToggles(freshContent, loadedToggleStates);
+          
+          // Validate the processed ADF structure before caching
+          if (!freshContent.content || !Array.isArray(freshContent.content)) {
+            throw new Error('ADF processing resulted in invalid structure: missing content array');
+          }
+        } catch (processingError) {
+          logger.errors('[useCachedContent] Error processing ADF content:', processingError);
+          throw new Error(`Failed to process content: ${processingError.message}`);
+        }
       } else {
         // For plain text, filter toggles
         const toggleRegex = /\{\{toggle:([^}]+)\}\}([\s\S]*?)\{\{\/toggle:\1\}\}/g;
@@ -276,8 +320,8 @@ export const useCachedContent = (
       await invoke('saveCachedContent', {
         localId,
         renderedContent: freshContent,
-        syncedContentHash: excerptResult.excerpt.contentHash,
-        syncedContent: excerptResult.excerpt.content
+        syncedContentHash: excerpt.contentHash,
+        syncedContent: excerpt.content
       });
 
       return { content: freshContent, fromCache: false };

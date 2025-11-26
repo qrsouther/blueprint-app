@@ -7,10 +7,11 @@ This file tracks ongoing tasks, future enhancements, and technical debt for the 
 ## Current Sprint / Active Work
 
 ### Test Priority 5: Version History & Recovery
-**Status:** 🔄 TODO
+**Status:** 🔄 IN PROGRESS - Test Guide Created
 **Priority:** High
 **Created:** 2025-11-21
-**Target Date:** 2025-11-22
+**Target Date:** 2025-11-25
+**Test Guide:** `docs/testing/TEST_PRIORITY_5_GUIDE.md`
 
 **Context:**
 After completing the API contract standardization refactor, we tested Priorities 1-4 (all passing). Priority 5 (Version History & Recovery) was deferred as lower priority but should be tested to ensure the standardized API contract works for all resolvers.
@@ -133,9 +134,9 @@ This allows the insertion logic to work on the original structure (with toggle m
 - Component: Lines 451-466 (commented with note)
 
 ### README Rewrite & Simplification
-**Status:** Not Started
-**Priority:** Medium (documentation quality)
-**Estimated Effort:** Medium (4-6 hours)
+**Status:** ✅ COMPLETE
+**Priority:** N/A (completed)
+**Estimated Effort:** N/A (completed)
 
 **Problem:**
 The current README.md is bloated with irrelevant content, outdated information, and lacks clear structure. It needs a comprehensive section-by-section rewrite to be useful for new developers and users.
@@ -554,9 +555,9 @@ Completed in `src/embed-display.jsx` staleness check useEffect hook with:
 ---
 
 ### Enhanced Diff View with Ghost Mode Rendering
-**Status:** BACKLOG - Not Currently Being Worked On
-**Priority:** Medium (improved diff view quality)
-**Estimated Effort:** Large (12-15 hours / 1.5-2 days)
+**Status:** ❌ ABANDONED
+**Priority:** N/A (abandoned)
+**Estimated Effort:** N/A
 
 **Background:**
 Current diff view compares "apples to oranges" - rendered content on left vs raw source with `{{variable}}` tags on right. Users cannot meaningfully see what changed. Additionally, changes in disabled toggle blocks are invisible, causing false "nothing changed" diffs.
@@ -926,9 +927,12 @@ A dedicated review UI that presents Embeds as a sequential stack for systematic 
 - Highlight potential issues in admin preview
 
 ### Hypercritical Codebase Review (Post-Refactor)
-**Status:** Planned for after embed-display.jsx refactoring
-**Priority:** High (code quality audit)
-**Estimated Effort:** Large (comprehensive review, multiple sessions)
+**Status:** ✅ COMPLETE
+**Priority:** N/A (completed)
+**Completion Date:** 2025-11-25
+**Output Files:**
+- `docs/code-review/CODE_REVIEW_FINDINGS.md`
+- `docs/code-review/CODE_REVIEW_PLAN_UPDATES.md`
 
 **Philosophy:**
 "If a crusty old software engineer with 30 years of experience can't understand your code from reading ONLY the code, comments, and README - without any conversation context - then your code is not optimized."

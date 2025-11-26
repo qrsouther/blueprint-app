@@ -21,7 +21,8 @@ All resolvers must follow this consistent return format:
 ```javascript
 {
   success: false,
-  error: "error message string"
+  error: "error message string",
+  errorCode?: "ERROR_CODE"  // Optional: Error code constant for programmatic handling
 }
 ```
 
@@ -32,6 +33,7 @@ All resolvers must follow this consistent return format:
 3. **Never throw errors** - Always return `{ success: false, error: "..." }`
 4. **No partial data on error** - Don't include data fields in error responses
 5. **Consistent error format** - Always use `error` property (not `errorMessage`, `err`, etc.)
+6. **Use error codes for programmatic handling** - Include `errorCode` for common error scenarios (see Error Codes section)
 
 ## Examples
 
@@ -50,6 +52,37 @@ export async function getCategories() {
     return {
       success: false,
       error: error.message
+    };
+  }
+}
+```
+
+### Resolver with Error Code
+```javascript
+import { createErrorResponse, ERROR_CODES } from '../utils/error-codes.js';
+
+export async function saveExcerpt(req) {
+  try {
+    // Validation
+    if (!req.payload.excerptName) {
+      return createErrorResponse(
+        ERROR_CODES.VALIDATION_REQUIRED,
+        'excerptName is required and must be a non-empty string',
+        { field: 'excerptName' }
+      );
+    }
+    
+    // ... save logic ...
+    
+    return {
+      success: true,
+      data: { excerptId, excerptName }
+    };
+  } catch (error) {
+    return {
+      success: false,
+      error: error.message,
+      errorCode: ERROR_CODES.INTERNAL_ERROR
     };
   }
 }
@@ -123,7 +156,31 @@ When standardizing a resolver:
 4. ✅ Verify error handling works correctly
 5. ✅ Check for any other code that might depend on the old format
 
+## Error Codes
+
+Error codes enable programmatic error handling and better user experience. Use error codes for common error scenarios:
+
+- **Validation errors**: `VALIDATION_REQUIRED`, `VALIDATION_INVALID_TYPE`, etc.
+- **Not found errors**: `NOT_FOUND_EXCERPT`, `NOT_FOUND_EMBED`, etc.
+- **Storage errors**: `STORAGE_READ_FAILED`, `STORAGE_WRITE_FAILED`, etc.
+- **API errors**: `API_RATE_LIMIT`, `API_UNAUTHORIZED`, etc.
+- **Business logic errors**: `DUPLICATE_EXCERPT`, `INVALID_STATE_TRANSITION`, etc.
+
+See `src/utils/error-codes.js` for all available error codes and the `createErrorResponse()` helper function.
+
+**When to use error codes:**
+- Common error scenarios that need programmatic handling
+- Errors that should show user-friendly messages
+- Errors that need special handling in the frontend
+
+**When NOT to use error codes:**
+- One-off errors that are unlikely to recur
+- Errors that are already handled gracefully
+- Internal errors that don't need user-facing messages
+
 ## Reference Implementation
 
-See `src/resolvers/simple-resolvers.js::getCategories()` as the reference implementation.
+See `src/resolvers/simple-resolvers.js::getCategories()` as the reference implementation for basic resolvers.
+
+See `src/resolvers/excerpt-resolvers.js::saveExcerpt()` as the reference implementation for resolvers with error codes.
 

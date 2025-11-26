@@ -24,6 +24,7 @@ import {
   pruneExpiredVersions,
   getVersioningStats
 } from '../utils/version-manager.js';
+import { createErrorResponse, ERROR_CODES } from '../utils/error-codes.js';
 import {
   logFunction,
   logSuccess,
@@ -56,12 +57,11 @@ export async function getVersionHistory(req) {
     if (!entityId || typeof entityId !== 'string' || entityId.trim() === '') {
       logFailure(FUNCTION_NAME, 'Validation failed: entityId is required and must be a non-empty string', new Error('Invalid entityId'));
       logFunction(FUNCTION_NAME, 'END', { success: false });
-      return {
-        success: false,
-        error: 'entityId is required and must be a non-empty string',
-        versions: [],
-        totalCount: 0
-      };
+      return createErrorResponse(
+        ERROR_CODES.VALIDATION_REQUIRED,
+        'entityId is required and must be a non-empty string',
+        { field: 'entityId', versions: [], totalCount: 0 }
+      );
     }
 
     const result = await listVersions(storage, entityId);
@@ -69,12 +69,11 @@ export async function getVersionHistory(req) {
     if (!result.success) {
       logFailure(FUNCTION_NAME, 'Failed to list versions', new Error(result.error || 'Failed to list versions'), { entityId });
       logFunction(FUNCTION_NAME, 'END', { success: false });
-      return {
-        success: false,
-        error: result.error || 'Failed to list versions',
-        versions: [],
-        totalCount: 0
-      };
+      return createErrorResponse(
+        ERROR_CODES.STORAGE_READ_FAILED,
+        result.error || 'Failed to list versions',
+        { entityId, versions: [], totalCount: 0 }
+      );
     }
 
     // Sort versions by timestamp (newest first) for UI display
@@ -105,10 +104,11 @@ export async function getVersionHistory(req) {
   } catch (error) {
     logFailure(FUNCTION_NAME, 'Failed to get version history', error, { entityId });
     logFunction(FUNCTION_NAME, 'END', { success: false });
-    return {
-      success: false,
-      error: error.message
-    };
+    return createErrorResponse(
+      ERROR_CODES.INTERNAL_ERROR,
+      error.message,
+      { entityId }
+    );
   }
 }
 
@@ -138,10 +138,11 @@ export async function getVersionDetails(req) {
     if (!versionId || typeof versionId !== 'string' || versionId.trim() === '') {
       logFailure(FUNCTION_NAME, 'Validation failed: versionId is required and must be a non-empty string', new Error('Invalid versionId'));
       logFunction(FUNCTION_NAME, 'END', { success: false });
-      return {
-        success: false,
-        error: 'versionId is required and must be a non-empty string'
-      };
+      return createErrorResponse(
+        ERROR_CODES.VALIDATION_REQUIRED,
+        'versionId is required and must be a non-empty string',
+        { field: 'versionId' }
+      );
     }
 
     const result = await getVersion(storage, versionId);
@@ -149,10 +150,11 @@ export async function getVersionDetails(req) {
     if (!result.success) {
       logFailure(FUNCTION_NAME, 'Failed to get version', new Error(result.error || 'Failed to get version'), { versionId });
       logFunction(FUNCTION_NAME, 'END', { success: false });
-      return {
-        success: false,
-        error: result.error || 'Failed to get version'
-      };
+      return createErrorResponse(
+        ERROR_CODES.NOT_FOUND_VERSION,
+        result.error || 'Failed to get version',
+        { versionId }
+      );
     }
 
     const version = result.version;
@@ -180,10 +182,11 @@ export async function getVersionDetails(req) {
   } catch (error) {
     logFailure(FUNCTION_NAME, 'Failed to get version details', error, { versionId });
     logFunction(FUNCTION_NAME, 'END', { success: false });
-    return {
-      success: false,
-      error: error.message
-    };
+    return createErrorResponse(
+      ERROR_CODES.INTERNAL_ERROR,
+      error.message,
+      { versionId }
+    );
   }
 }
 
@@ -213,10 +216,11 @@ export async function restoreFromVersion(req) {
     if (!versionId || typeof versionId !== 'string' || versionId.trim() === '') {
       logFailure(FUNCTION_NAME, 'Validation failed: versionId is required and must be a non-empty string', new Error('Invalid versionId'));
       logFunction(FUNCTION_NAME, 'END', { success: false });
-      return {
-        success: false,
-        error: 'versionId is required and must be a non-empty string'
-      };
+      return createErrorResponse(
+        ERROR_CODES.VALIDATION_REQUIRED,
+        'versionId is required and must be a non-empty string',
+        { field: 'versionId' }
+      );
     }
 
     logPhase(FUNCTION_NAME, `Restoring from version: ${versionId}`);
@@ -226,10 +230,11 @@ export async function restoreFromVersion(req) {
     if (!result.success) {
       logFailure(FUNCTION_NAME, 'Failed to restore version', new Error(result.error || 'Failed to restore version'), { versionId });
       logFunction(FUNCTION_NAME, 'END', { success: false });
-      return {
-        success: false,
-        error: result.error || 'Failed to restore version'
-      };
+      return createErrorResponse(
+        ERROR_CODES.STORAGE_WRITE_FAILED,
+        result.error || 'Failed to restore version',
+        { versionId }
+      );
     }
 
     logSuccess(FUNCTION_NAME, `Successfully restored version: ${versionId}`, {
@@ -252,10 +257,11 @@ export async function restoreFromVersion(req) {
   } catch (error) {
     logFailure(FUNCTION_NAME, 'Failed to restore from version', error, { versionId });
     logFunction(FUNCTION_NAME, 'END', { success: false });
-    return {
-      success: false,
-      error: error.message
-    };
+    return createErrorResponse(
+      ERROR_CODES.INTERNAL_ERROR,
+      error.message,
+      { versionId }
+    );
   }
 }
 
@@ -410,10 +416,10 @@ export async function getVersioningStatsResolver() {
     if (!result.success) {
       logFailure(FUNCTION_NAME, 'Failed to get versioning stats', new Error(result.error || 'Failed to get versioning stats'));
       logFunction(FUNCTION_NAME, 'END', { success: false });
-      return {
-        success: false,
-        error: result.error || 'Failed to get versioning stats'
-      };
+      return createErrorResponse(
+        ERROR_CODES.STORAGE_READ_FAILED,
+        result.error || 'Failed to get versioning stats'
+      );
     }
 
     logSuccess(FUNCTION_NAME, 'Retrieved versioning stats', result.stats);
@@ -427,10 +433,10 @@ export async function getVersioningStatsResolver() {
   } catch (error) {
     logFailure(FUNCTION_NAME, 'Failed to get versioning stats', error);
     logFunction(FUNCTION_NAME, 'END', { success: false });
-    return {
-      success: false,
-      error: error.message
-    };
+    return createErrorResponse(
+      ERROR_CODES.INTERNAL_ERROR,
+      error.message
+    );
   }
 }
 

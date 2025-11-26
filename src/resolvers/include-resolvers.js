@@ -27,6 +27,7 @@ import {
   insertInternalNotesInAdf
 } from '../utils/adf-rendering-utils.js';
 import { logPhase, logSuccess, logWarning, logFailure } from '../utils/forge-logger.js';
+import { createErrorResponse, ERROR_CODES } from '../utils/error-codes.js';
 
 /**
  * Save variable values, toggle states, and custom insertions for a specific Include instance
@@ -40,51 +41,57 @@ export async function saveVariableValues(req) {
     // Input validation
     if (!localId || typeof localId !== 'string' || localId.trim() === '') {
       logFailure('saveVariableValues', 'Validation failed: localId is required and must be a non-empty string', new Error('Invalid localId'));
-      return {
-        success: false,
-        error: 'localId is required and must be a non-empty string'
-      };
+      return createErrorResponse(
+        ERROR_CODES.VALIDATION_REQUIRED,
+        'localId is required and must be a non-empty string',
+        { field: 'localId' }
+      );
     }
 
     if (!excerptId || typeof excerptId !== 'string' || excerptId.trim() === '') {
       logFailure('saveVariableValues', 'Validation failed: excerptId is required and must be a non-empty string', new Error('Invalid excerptId'));
-      return {
-        success: false,
-        error: 'excerptId is required and must be a non-empty string'
-      };
+      return createErrorResponse(
+        ERROR_CODES.VALIDATION_REQUIRED,
+        'excerptId is required and must be a non-empty string',
+        { field: 'excerptId' }
+      );
     }
 
     // Validate optional fields if provided
     if (variableValues !== undefined && (typeof variableValues !== 'object' || Array.isArray(variableValues) || variableValues === null)) {
       logFailure('saveVariableValues', 'Validation failed: variableValues must be an object', new Error('Invalid variableValues type'));
-      return {
-        success: false,
-        error: 'variableValues must be an object'
-      };
+      return createErrorResponse(
+        ERROR_CODES.VALIDATION_INVALID_TYPE,
+        'variableValues must be an object',
+        { field: 'variableValues' }
+      );
     }
 
     if (toggleStates !== undefined && (typeof toggleStates !== 'object' || Array.isArray(toggleStates) || toggleStates === null)) {
       logFailure('saveVariableValues', 'Validation failed: toggleStates must be an object', new Error('Invalid toggleStates type'));
-      return {
-        success: false,
-        error: 'toggleStates must be an object'
-      };
+      return createErrorResponse(
+        ERROR_CODES.VALIDATION_INVALID_TYPE,
+        'toggleStates must be an object',
+        { field: 'toggleStates' }
+      );
     }
 
     if (customInsertions !== undefined && !Array.isArray(customInsertions)) {
       logFailure('saveVariableValues', 'Validation failed: customInsertions must be an array', new Error('Invalid customInsertions type'));
-      return {
-        success: false,
-        error: 'customInsertions must be an array'
-      };
+      return createErrorResponse(
+        ERROR_CODES.VALIDATION_INVALID_TYPE,
+        'customInsertions must be an array',
+        { field: 'customInsertions' }
+      );
     }
 
     if (internalNotes !== undefined && !Array.isArray(internalNotes)) {
       logFailure('saveVariableValues', 'Validation failed: internalNotes must be an array', new Error('Invalid internalNotes type'));
-      return {
-        success: false,
-        error: 'internalNotes must be an array'
-      };
+      return createErrorResponse(
+        ERROR_CODES.VALIDATION_INVALID_TYPE,
+        'internalNotes must be an array',
+        { field: 'internalNotes' }
+      );
     }
     
     const key = `macro-vars:${localId}`;
@@ -94,10 +101,11 @@ export async function saveVariableValues(req) {
     const deletedEntry = await storage.get(`macro-vars-deleted:${localId}`);
     if (deletedEntry) {
       logWarning('saveVariableValues', 'Attempted to save variables for soft-deleted embed', { localId, excerptId });
-      return {
-        success: false,
-        error: 'This embed has been soft-deleted and cannot be modified. Please recover it first if needed.'
-      };
+      return createErrorResponse(
+        ERROR_CODES.OPERATION_NOT_ALLOWED,
+        'This embed has been soft-deleted and cannot be modified. Please recover it first if needed.',
+        { localId }
+      );
     }
 
     // OPTIMIZATION: Load excerpt and existing config in parallel (they're independent)
@@ -108,6 +116,29 @@ export async function saveVariableValues(req) {
     
     const syncedContentHash = excerpt?.contentHash || null;
     const syncedContent = excerpt?.content || null;  // Store actual Source ADF for diff view
+
+    // CRITICAL: Create version snapshot BEFORE modifying data
+    // This captures the OLD state before the save, so restore can bring back the previous state
+    if (existingConfig && Object.keys(existingConfig).length > 0) {
+      const versionResult = await saveVersion(
+        storage,
+        key,
+        existingConfig, // OLD state before modification
+        {
+          changeType: 'UPDATE',
+          changedBy: 'saveVariableValues',
+          userAccountId: req.context?.accountId,
+          localId: localId
+        }
+      );
+      if (versionResult.success) {
+        logPhase('saveVariableValues', 'Version snapshot created', { versionId: versionResult.versionId, localId });
+      } else if (versionResult.skipped) {
+        logPhase('saveVariableValues', 'Version snapshot skipped (content unchanged)', { localId });
+      } else {
+        logWarning('saveVariableValues', 'Version snapshot failed', { localId, error: versionResult.error });
+      }
+    }
 
     // Initialize redline fields for new Embeds
     const redlineStatus = existingConfig?.redlineStatus || 'reviewable';
@@ -366,32 +397,9 @@ export async function saveVariableValues(req) {
 
       // Also update lastSynced, syncedContentHash, and syncedContent in macro-vars
       // (This was previously done in saveCachedContent, now consolidated here)
+      // NOTE: Version snapshot was already created above (before the save), so we don't need to create it again here
       const varsKey = `macro-vars:${localId}`;
       const existingVars = await storage.get(varsKey) || {};
-      
-      // Phase 3: Create version snapshot before modification (v7.17.0)
-      if (existingVars && Object.keys(existingVars).length > 0) {
-        const versionStartTime = Date.now();
-        const versionResult = await saveVersion(
-          storage,
-          varsKey,
-          existingVars,
-          {
-            changeType: 'UPDATE',
-            changedBy: 'saveVariableValues',
-            userAccountId: req.context?.accountId,
-            localId: localId
-          }
-        );
-        const versionDuration = Date.now() - versionStartTime;
-        if (versionResult.success) {
-          logSuccess('saveVariableValues', 'Version snapshot created (async)', { versionId: versionResult.versionId, localId, duration: `${versionDuration}ms` });
-        } else if (versionResult.skipped) {
-          logPhase('saveVariableValues', 'Version snapshot skipped (content unchanged, async)', { localId, duration: `${versionDuration}ms` });
-        } else {
-          logWarning('saveVariableValues', 'Version snapshot failed (async)', { localId, error: versionResult.error, duration: `${versionDuration}ms` });
-        }
-      }
 
       existingVars.lastSynced = now;
       if (syncedContentHash !== undefined) {
@@ -435,9 +443,10 @@ export async function saveVariableValues(req) {
       localId: req.payload?.localId,
       duration: `${totalFunctionDuration}ms`
     });
-    return {
-      success: false,
-      error: error.message
-    };
+    return createErrorResponse(
+      ERROR_CODES.INTERNAL_ERROR,
+      error.message,
+      { localId: req.payload?.localId }
+    );
   }
 }
