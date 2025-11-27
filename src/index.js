@@ -146,6 +146,17 @@ import {
   removeChapterFromPage as removeChapterFromPageResolver
 } from './resolvers/injection-resolver.js';
 
+// Import compositor resolver functions
+import {
+  getCompositorConfig as getCompositorConfigResolver,
+  saveCompositorConfig as saveCompositorConfigResolver,
+  getArchetypes as getArchetypesResolver,
+  getArchetypeChapters as getArchetypeChaptersResolver,
+  toggleChapter as toggleChapterResolver,
+  bulkPublishChapters as bulkPublishChaptersResolver,
+  initializePageWithArchetype as initializePageWithArchetypeResolver
+} from './resolvers/compositor-resolvers.js';
+
 // ⚠️ ONE-TIME USE MIGRATION FUNCTIONS - DELETE AFTER PRODUCTION MIGRATION ⚠️
 // Import migration resolver functions (Phase 4 modularization)
 // These are one-time use functions for migrating from MultiExcerpt to Blueprint App
@@ -1023,5 +1034,32 @@ resolver.define('injectPlaceholder', injectPlaceholderResolver);
 
 // Remove a chapter from a page (called when user opts out via Compositor)
 resolver.define('removeChapterFromPage', removeChapterFromPageResolver);
+
+// ============================================================================
+// COMPOSITOR RESOLVERS (Page-Level Blueprint Composition)
+// ============================================================================
+// Functions for archetype selection, chapter management, and bulk publishing.
+// Used by the Compositor modal accessible from the page byline.
+
+// Get Compositor configuration for a page
+resolver.define('getCompositorConfig', getCompositorConfigResolver);
+
+// Save Compositor configuration for a page
+resolver.define('saveCompositorConfig', saveCompositorConfigResolver);
+
+// Get available archetypes
+resolver.define('getArchetypes', getArchetypesResolver);
+
+// Get chapters for an archetype
+resolver.define('getArchetypeChapters', getArchetypeChaptersResolver);
+
+// Toggle a chapter on/off for a page
+resolver.define('toggleChapter', toggleChapterResolver);
+
+// Bulk publish all enabled chapters for a page
+resolver.define('bulkPublishChapters', bulkPublishChaptersResolver);
+
+// Initialize a page with a selected archetype
+resolver.define('initializePageWithArchetype', initializePageWithArchetypeResolver);
 
 export const handler = resolver.getDefinitions();

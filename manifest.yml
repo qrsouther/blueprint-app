@@ -33,6 +33,15 @@ modules:
       resolver:
         function: resolver
 
+  confluence:contentBylineItem:
+    - key: blueprint-compositor
+      title: Blueprint Compositor
+      tooltip: Configure Blueprint page archetype and chapters
+      resource: compositor-byline
+      render: native
+      resolver:
+        function: resolver
+
   consumer:
     - key: check-includes-consumer
       queue: check-includes-queue
@@ -82,6 +91,9 @@ resources:
 
   - key: admin-page
     path: src/admin-page.jsx
+
+  - key: compositor-byline
+    path: src/compositor-byline.jsx
 
   - key: icon-assets
     path: static/icons
