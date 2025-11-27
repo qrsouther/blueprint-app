@@ -35,40 +35,7 @@ function escapeRegex(string) {
   return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
-// Helper function to convert ADF to storage format using Confluence API
-async function convertAdfToStorage(adfContent) {
-  logPhase('convertAdfToStorage', 'Converting ADF to storage format via API', {});
-
-  try {
-    const response = await api.asApp().requestConfluence(
-      route`/wiki/rest/api/contentbody/convert/storage`,
-      {
-        method: 'POST',
-        headers: {
-          'Accept': 'application/json',
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          value: JSON.stringify(adfContent),
-          representation: 'atlas_doc_format'
-        })
-      }
-    );
-
-    if (!response.ok) {
-      const errorText = await response.text();
-      logFailure('convertAdfToStorage', 'ADF conversion failed', new Error(errorText), { status: response.status });
-      return null;
-    }
-
-    const result = await response.json();
-    logSuccess('convertAdfToStorage', 'ADF successfully converted to storage format', {});
-    return result.value; // The converted storage format HTML
-  } catch (error) {
-    logFailure('convertAdfToStorage', 'Error converting ADF', error);
-    return null;
-  }
-}
+// Note: convertAdfToStorage is now imported from storage-format-utils.js
 
 // Helper function to render excerpt content with variable substitution
 async function renderExcerptContent(excerpt, variableValues = {}) {
