@@ -258,17 +258,15 @@ export function EmbedEditMode({
                     {needsRepublish ? 'Changes Pending' : 'Published'}
                   </Lozenge>
                   <Text>
-                    <Em>
-                      {needsRepublish 
-                        ? 'Changes saved but not yet published to page'
-                        : `Last published: ${new Date(publishStatus.publishedAt).toLocaleString()}`}
-                    </Em>
+                    {needsRepublish 
+                      ? 'Changes saved but not yet published to page'
+                      : `Last published: ${publishStatus.publishedAt ? new Date(publishStatus.publishedAt).toLocaleString() : 'Unknown'}`}
                   </Text>
                 </Fragment>
               ) : (
                 <Fragment>
                   <Lozenge appearance="new">Not Published</Lozenge>
-                  <Text><Em>Content not yet on page</Em></Text>
+                  <Text>Content not yet on page</Text>
                 </Fragment>
               )}
             </Inline>
@@ -276,20 +274,14 @@ export function EmbedEditMode({
               appearance={needsRepublish || !publishStatus?.isPublished ? 'primary' : 'default'}
               onClick={onPublish}
               isDisabled={isPublishing || !selectedExcerptId}
-              iconBefore={isPublishing ? undefined : <Text>🚀</Text>}
             >
-              {isPublishing ? (
-                <Fragment>
-                  <Spinner size="small" label="Publishing" />
-                  <Text> Publishing...</Text>
-                </Fragment>
-              ) : needsRepublish ? (
-                'Publish Changes'
-              ) : publishStatus?.isPublished ? (
-                'Republish'
-              ) : (
-                'Publish to Page'
-              )}
+              {isPublishing 
+                ? 'Publishing...' 
+                : needsRepublish 
+                  ? 'Publish Changes' 
+                  : publishStatus?.isPublished 
+                    ? 'Republish' 
+                    : 'Publish to Page'}
             </Button>
           </Inline>
         </Box>

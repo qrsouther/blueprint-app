@@ -1079,15 +1079,11 @@ const App = () => {
 
   // Determine if content needs republishing (has changed since last publish)
   const needsRepublish = (() => {
-    if (!publishStatus?.isPublished || !publishStatus?.publishedContentHash) {
+    if (!publishStatus?.isPublished) {
       return false;
     }
-    
-    // Compare current form values with published hash
-    // If they've changed since last publish, needsRepublish = true
-    // For now, we'll rely on isDirty from React Hook Form as a proxy
-    // A more robust solution would recompute the hash and compare
-    return isDirty && publishStatus.isPublished;
+    // Use isDirty from React Hook Form as a proxy for changes
+    return isDirty;
   })();
 
   // Handler for publishing chapter to page
@@ -1113,17 +1109,13 @@ const App = () => {
       });
 
       if (result.success) {
-        // Update publish status with new data
         setPublishStatus({
           isPublished: true,
           publishedAt: result.publishedAt,
           publishedVersion: result.pageVersion,
-          chapterId: result.chapterId,
-          publishedContentHash: null // Will be updated on next status fetch
+          chapterId: result.chapterId
         });
 
-        // Clear dirty flag since we just published
-        // Note: We don't reset the form, just acknowledge publish succeeded
         logger.saves('[EmbedContainer] Successfully published chapter', {
           localId: effectiveLocalId,
           pageVersion: result.pageVersion
