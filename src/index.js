@@ -138,6 +138,14 @@ import {
   backfillRedlineFields as backfillRedlineFieldsResolver
 } from './resolvers/redline-migration.js';
 
+// Import content injection resolver functions (Compositor + Native Injection)
+import {
+  publishChapter as publishChapterResolver,
+  getPublishStatus as getPublishStatusResolver,
+  injectPlaceholder as injectPlaceholderResolver,
+  removeChapterFromPage as removeChapterFromPageResolver
+} from './resolvers/injection-resolver.js';
+
 // ⚠️ ONE-TIME USE MIGRATION FUNCTIONS - DELETE AFTER PRODUCTION MIGRATION ⚠️
 // Import migration resolver functions (Phase 4 modularization)
 // These are one-time use functions for migrating from MultiExcerpt to Blueprint App
@@ -997,5 +1005,23 @@ resolver.define('startPruneVersions', startPruneVersions);
 
 // Get versioning system statistics
 resolver.define('getVersioningStats', getVersioningStatsResolver);
+
+// ============================================================================
+// CONTENT INJECTION RESOLVERS (Compositor + Native Injection Model)
+// ============================================================================
+// Functions to publish Blueprint content directly into Confluence page storage.
+// Used by the Locked Page model where users edit via Embed UI and app injects.
+
+// Publish a single chapter/Embed to the page (renders and injects content)
+resolver.define('publishChapter', publishChapterResolver);
+
+// Get publish status for an Embed (isPublished, publishedAt, hash, etc.)
+resolver.define('getPublishStatus', getPublishStatusResolver);
+
+// Inject placeholder for unpublished chapter (Under Construction message)
+resolver.define('injectPlaceholder', injectPlaceholderResolver);
+
+// Remove a chapter from a page (called when user opts out via Compositor)
+resolver.define('removeChapterFromPage', removeChapterFromPageResolver);
 
 export const handler = resolver.getDefinitions();

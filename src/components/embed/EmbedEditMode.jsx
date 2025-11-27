@@ -8,6 +8,7 @@
  * - Standard selector dropdown at top
  * - Header with standard name and "View Source" link
  * - Save status indicator (Saving/Saved)
+ * - Publish to Page button (injects content to Confluence page storage)
  * - Three tabs: Toggles, Write (variables), Custom (insertions/notes)
  * - Live preview below tabs (updates as configuration changes)
  * - Preview mode switches based on selected tab (rendered vs raw with markers)
@@ -38,6 +39,10 @@
  * @param {Function} props.setCustomText - Update custom text
  * @param {Function} props.getPreviewContent - Get rendered preview content
  * @param {Function} props.getRawPreviewContent - Get raw preview with markers
+ * @param {Object} props.publishStatus - Publish status data from getPublishStatus resolver
+ * @param {boolean} props.isPublishing - Whether publish is in progress
+ * @param {Function} props.onPublish - Handler for publish button click
+ * @param {boolean} props.needsRepublish - Whether content changed since last publish
  * @returns {JSX.Element} - Edit mode JSX
  */
 
@@ -57,7 +62,9 @@ import {
   Tab,
   TabList,
   TabPanel,
-  AdfRenderer
+  AdfRenderer,
+  Lozenge,
+  SectionMessage
 } from '@forge/react';
 import { router, view } from '@forge/bridge';
 import { VariableConfigPanel } from '../VariableConfigPanel';
@@ -90,7 +97,12 @@ export function EmbedEditMode({
   customText,
   setCustomText,
   getPreviewContent,
-  getRawPreviewContent
+  getRawPreviewContent,
+  // New publish props
+  publishStatus,
+  isPublishing,
+  onPublish,
+  needsRepublish
 }) {
   const [copySuccess, setCopySuccess] = useState(false);
 
@@ -234,6 +246,54 @@ export function EmbedEditMode({
           )}
         </Inline>
       </Inline>
+
+      {/* Publish Status and Button */}
+      {excerpt && onPublish && (
+        <Box padding="space.100">
+          <Inline space="space.200" alignBlock="center" spread="space-between">
+            <Inline space="space.100" alignBlock="center">
+              {publishStatus?.isPublished ? (
+                <Fragment>
+                  <Lozenge appearance={needsRepublish ? 'moved' : 'success'}>
+                    {needsRepublish ? 'Changes Pending' : 'Published'}
+                  </Lozenge>
+                  <Text>
+                    <Em>
+                      {needsRepublish 
+                        ? 'Changes saved but not yet published to page'
+                        : `Last published: ${new Date(publishStatus.publishedAt).toLocaleString()}`}
+                    </Em>
+                  </Text>
+                </Fragment>
+              ) : (
+                <Fragment>
+                  <Lozenge appearance="new">Not Published</Lozenge>
+                  <Text><Em>Content not yet on page</Em></Text>
+                </Fragment>
+              )}
+            </Inline>
+            <Button
+              appearance={needsRepublish || !publishStatus?.isPublished ? 'primary' : 'default'}
+              onClick={onPublish}
+              isDisabled={isPublishing || !selectedExcerptId}
+              iconBefore={isPublishing ? undefined : <Text>🚀</Text>}
+            >
+              {isPublishing ? (
+                <Fragment>
+                  <Spinner size="small" label="Publishing" />
+                  <Text> Publishing...</Text>
+                </Fragment>
+              ) : needsRepublish ? (
+                'Publish Changes'
+              ) : publishStatus?.isPublished ? (
+                'Republish'
+              ) : (
+                'Publish to Page'
+              )}
+            </Button>
+          </Inline>
+        </Box>
+      )}
 
       <Tabs onChange={(index) => setSelectedTabIndex(index)}>
         <TabList>

@@ -1,13 +1,34 @@
 /**
  * Content Injection Resolver
  *
- * Handles manual injection of rendered excerpt content into page storage.
- * Called when user clicks the "Inject Content" button in the Include macro UI.
+ * Handles injection of rendered Blueprint content into Confluence page storage.
+ *
+ * Two main use cases:
+ * 1. Legacy: injectIncludeContent - old-style injection for Include macros
+ * 2. New: publishChapter - chapter-based injection for Compositor model
+ *
+ * The publishChapter function is the primary method for the new Locked Page model
+ * where users edit via Embed UI and the app injects content via asApp().
  */
 
 import api, { route } from '@forge/api';
 import { storage } from '@forge/api';
 import { logFunction, logPhase, logSuccess, logFailure, logWarning } from '../utils/forge-logger.js';
+import {
+  convertAdfToStorage,
+  buildChapterStructure,
+  buildChapterPlaceholder,
+  findChapter,
+  findManagedZone,
+  replaceManagedZone
+} from '../utils/storage-format-utils.js';
+import {
+  filterContentByToggles,
+  substituteVariablesInAdf,
+  insertCustomParagraphsInAdf,
+  insertInternalNotesInAdf
+} from '../utils/adf-rendering-utils.js';
+import { calculateContentHash } from '../utils/hash-utils.js';
 
 // Helper function to escape regex special characters
 function escapeRegex(string) {
@@ -286,5 +307,445 @@ export async function injectIncludeContent(req) {
       success: false,
       error: error.message || 'Unknown error occurred'
     };
+  }
+}
+
+// ============================================================================
+// NEW: Chapter-Based Injection (Compositor Model)
+// ============================================================================
+
+/**
+ * Publish a single chapter/Embed to the page
+ *
+ * Called when user clicks "Publish to Page" in Embed Edit Mode.
+ * Renders content with current config (variables, toggles, custom insertions)
+ * and injects into the locked Confluence page storage.
+ *
+ * @param {Object} req - Request object with payload
+ * @param {string} req.payload.pageId - Confluence page ID
+ * @param {string} req.payload.localId - Embed macro localId
+ * @param {string} req.payload.excerptId - Source excerpt ID
+ * @returns {Promise<Object>} Result with success status and page version
+ */
+export async function publishChapter(req) {
+  const { pageId, localId, excerptId } = req.payload || {};
+
+  logFunction('publishChapter', 'START', { pageId, localId, excerptId });
+
+  try {
+    // Validate required parameters
+    if (!pageId || !localId || !excerptId) {
+      return {
+        success: false,
+        error: 'Missing required parameters: pageId, localId, excerptId'
+      };
+    }
+
+    // 1. Load Source (excerpt)
+    const excerpt = await storage.get(`excerpt:${excerptId}`);
+    if (!excerpt) {
+      logFailure('publishChapter', 'Source not found', new Error('Not found'), { excerptId });
+      return { success: false, error: 'Source not found' };
+    }
+
+    // 2. Load Embed config (variables, toggles, etc.)
+    const embedConfig = await storage.get(`macro-vars:${localId}`) || {};
+    const variableValues = embedConfig.variableValues || {};
+    const toggleStates = embedConfig.toggleStates || {};
+    const customInsertions = embedConfig.customInsertions || [];
+    const internalNotes = embedConfig.internalNotes || [];
+
+    // 3. Render content with all settings applied
+    let renderedAdf = excerpt.content;
+
+    if (renderedAdf && typeof renderedAdf === 'object' && renderedAdf.type === 'doc') {
+      // Apply transformations in correct order
+      renderedAdf = substituteVariablesInAdf(renderedAdf, variableValues);
+      renderedAdf = insertCustomParagraphsInAdf(renderedAdf, customInsertions);
+      renderedAdf = insertInternalNotesInAdf(renderedAdf, internalNotes);
+      renderedAdf = filterContentByToggles(renderedAdf, toggleStates);
+    } else {
+      logWarning('publishChapter', 'Content is not ADF format', { excerptId });
+    }
+
+    // 4. Convert ADF to storage format
+    logPhase('publishChapter', 'Converting ADF to storage format', { excerptId });
+    const storageContent = await convertAdfToStorage(renderedAdf);
+    if (!storageContent) {
+      logFailure('publishChapter', 'ADF conversion failed', new Error('Conversion returned null'));
+      return { success: false, error: 'Failed to convert content to storage format' };
+    }
+
+    // 5. Get current page content
+    logPhase('publishChapter', 'Fetching page content', { pageId });
+    const pageResponse = await api.asApp().requestConfluence(
+      route`/wiki/api/v2/pages/${pageId}?body-format=storage`,
+      { headers: { 'Accept': 'application/json' } }
+    );
+
+    if (!pageResponse.ok) {
+      const errorText = await pageResponse.text();
+      logFailure('publishChapter', 'Failed to get page', new Error(errorText), { status: pageResponse.status });
+      return { success: false, error: `Failed to get page: ${pageResponse.status}` };
+    }
+
+    const pageData = await pageResponse.json();
+    let pageBody = pageData.body.storage.value;
+    const currentVersion = pageData.version.number;
+
+    // 6. Determine chapter ID (use existing or generate from localId)
+    const chapterId = embedConfig.chapterId || `chapter-${localId}`;
+
+    // 7. Check if chapter already exists in page
+    const existingChapter = findChapter(pageBody, chapterId);
+
+    let newPageBody;
+
+    if (existingChapter) {
+      // Update existing chapter - replace managed zone only
+      logPhase('publishChapter', 'Updating existing chapter', { chapterId });
+      newPageBody = replaceManagedZone(pageBody, localId, storageContent);
+
+      if (!newPageBody) {
+        // Managed zone not found - rebuild entire chapter
+        logPhase('publishChapter', 'Rebuilding chapter (zone markers missing)', { chapterId });
+        const chapterHtml = buildChapterStructure({
+          chapterId,
+          localId,
+          heading: excerpt.name || 'Untitled Chapter',
+          bodyContent: storageContent
+        });
+
+        newPageBody =
+          pageBody.substring(0, existingChapter.startIndex) +
+          chapterHtml +
+          pageBody.substring(existingChapter.endIndex);
+      }
+    } else {
+      // New chapter - append to page
+      logPhase('publishChapter', 'Injecting new chapter', { chapterId });
+      const chapterHtml = buildChapterStructure({
+        chapterId,
+        localId,
+        heading: excerpt.name || 'Untitled Chapter',
+        bodyContent: storageContent
+      });
+
+      // Append after existing content with spacing
+      newPageBody = pageBody.trim() + '\n\n' + chapterHtml;
+    }
+
+    // 8. Update page via REST API
+    logPhase('publishChapter', 'Updating page', { pageId, newVersion: currentVersion + 1 });
+    const updateResponse = await api.asApp().requestConfluence(
+      route`/wiki/api/v2/pages/${pageId}`,
+      {
+        method: 'PUT',
+        headers: {
+          'Accept': 'application/json',
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          id: pageId,
+          status: 'current',
+          title: pageData.title,
+          body: {
+            representation: 'storage',
+            value: newPageBody
+          },
+          version: {
+            number: currentVersion + 1,
+            message: `Blueprint: Published "${excerpt.name}"`
+          }
+        })
+      }
+    );
+
+    if (!updateResponse.ok) {
+      const errorText = await updateResponse.text();
+      logFailure('publishChapter', 'Failed to update page', new Error(errorText), { status: updateResponse.status });
+      return { success: false, error: `Failed to update page: ${updateResponse.status}` };
+    }
+
+    const updatedPage = await updateResponse.json();
+
+    // 9. Update Embed config with published state
+    const publishedContentHash = calculateContentHash({
+      content: storageContent,
+      variableValues,
+      toggleStates,
+      customInsertions,
+      internalNotes
+    });
+
+    await storage.set(`macro-vars:${localId}`, {
+      ...embedConfig,
+      chapterId,
+      excerptId,
+      publishedAt: new Date().toISOString(),
+      publishedContentHash,
+      publishedVersion: updatedPage.version.number
+    });
+
+    logSuccess('publishChapter', 'Successfully published', {
+      pageId,
+      localId,
+      chapterId,
+      newVersion: updatedPage.version.number
+    });
+
+    return {
+      success: true,
+      message: 'Chapter published successfully',
+      pageVersion: updatedPage.version.number,
+      publishedAt: new Date().toISOString(),
+      chapterId
+    };
+
+  } catch (error) {
+    logFailure('publishChapter', 'Unexpected error', error, { pageId, localId, excerptId });
+    return {
+      success: false,
+      error: error.message || 'Unknown error occurred'
+    };
+  }
+}
+
+/**
+ * Get publish status for an Embed
+ *
+ * Returns whether the Embed has been published, when, and the content hash.
+ * Used by the UI to show publish status and detect if republish is needed.
+ *
+ * @param {Object} req - Request object with payload
+ * @param {string} req.payload.localId - Embed macro localId
+ * @returns {Promise<Object>} Publish status data
+ */
+export async function getPublishStatus(req) {
+  const { localId } = req.payload || {};
+
+  try {
+    if (!localId) {
+      return { success: false, error: 'Missing required parameter: localId' };
+    }
+
+    const embedConfig = await storage.get(`macro-vars:${localId}`);
+
+    if (!embedConfig) {
+      return {
+        success: true,
+        data: {
+          isPublished: false,
+          publishedAt: null,
+          publishedContentHash: null,
+          publishedVersion: null,
+          chapterId: null
+        }
+      };
+    }
+
+    return {
+      success: true,
+      data: {
+        isPublished: !!embedConfig.publishedAt,
+        publishedAt: embedConfig.publishedAt || null,
+        publishedContentHash: embedConfig.publishedContentHash || null,
+        publishedVersion: embedConfig.publishedVersion || null,
+        chapterId: embedConfig.chapterId || null
+      }
+    };
+  } catch (error) {
+    logFailure('getPublishStatus', 'Error', error, { localId });
+    return { success: false, error: error.message };
+  }
+}
+
+/**
+ * Inject placeholder for unpublished chapter
+ *
+ * Creates an "Under Construction" placeholder when a chapter is added
+ * via Compositor but not yet configured/published.
+ *
+ * @param {Object} req - Request object with payload
+ * @param {string} req.payload.pageId - Confluence page ID
+ * @param {string} req.payload.localId - Embed macro localId
+ * @param {string} req.payload.excerptId - Source excerpt ID
+ * @param {string} req.payload.heading - Chapter heading text
+ * @returns {Promise<Object>} Result with success status
+ */
+export async function injectPlaceholder(req) {
+  const { pageId, localId, excerptId, heading } = req.payload || {};
+
+  logFunction('injectPlaceholder', 'START', { pageId, localId, heading });
+
+  try {
+    if (!pageId || !localId) {
+      return { success: false, error: 'Missing required parameters: pageId, localId' };
+    }
+
+    // Get page content
+    const pageResponse = await api.asApp().requestConfluence(
+      route`/wiki/api/v2/pages/${pageId}?body-format=storage`,
+      { headers: { 'Accept': 'application/json' } }
+    );
+
+    if (!pageResponse.ok) {
+      const errorText = await pageResponse.text();
+      logFailure('injectPlaceholder', 'Failed to get page', new Error(errorText));
+      return { success: false, error: 'Failed to get page' };
+    }
+
+    const pageData = await pageResponse.json();
+    const pageBody = pageData.body.storage.value;
+    const currentVersion = pageData.version.number;
+
+    const chapterId = `chapter-${localId}`;
+
+    // Check if chapter already exists
+    if (findChapter(pageBody, chapterId)) {
+      logPhase('injectPlaceholder', 'Chapter already exists', { chapterId });
+      return { success: true, message: 'Chapter already exists', chapterId };
+    }
+
+    // Build placeholder
+    const placeholderHtml = buildChapterPlaceholder({
+      chapterId,
+      localId,
+      heading: heading || 'New Chapter'
+    });
+
+    const newPageBody = pageBody.trim() + '\n\n' + placeholderHtml;
+
+    // Update page
+    const updateResponse = await api.asApp().requestConfluence(
+      route`/wiki/api/v2/pages/${pageId}`,
+      {
+        method: 'PUT',
+        headers: {
+          'Accept': 'application/json',
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          id: pageId,
+          status: 'current',
+          title: pageData.title,
+          body: {
+            representation: 'storage',
+            value: newPageBody
+          },
+          version: {
+            number: currentVersion + 1,
+            message: 'Blueprint: Added chapter placeholder'
+          }
+        })
+      }
+    );
+
+    if (!updateResponse.ok) {
+      const errorText = await updateResponse.text();
+      logFailure('injectPlaceholder', 'Failed to update page', new Error(errorText));
+      return { success: false, error: 'Failed to update page' };
+    }
+
+    // Save chapter ID in embed config
+    const embedConfig = await storage.get(`macro-vars:${localId}`) || {};
+    await storage.set(`macro-vars:${localId}`, {
+      ...embedConfig,
+      chapterId,
+      excerptId: excerptId || embedConfig.excerptId
+    });
+
+    logSuccess('injectPlaceholder', 'Placeholder injected', { chapterId });
+
+    return { success: true, chapterId };
+
+  } catch (error) {
+    logFailure('injectPlaceholder', 'Error', error, { pageId, localId });
+    return { success: false, error: error.message };
+  }
+}
+
+/**
+ * Remove a chapter from a page
+ *
+ * Removes the chapter content and markers from page storage.
+ * Called when user opts out of a chapter via Compositor.
+ *
+ * @param {Object} req - Request object with payload
+ * @param {string} req.payload.pageId - Confluence page ID
+ * @param {string} req.payload.chapterId - Chapter ID to remove
+ * @returns {Promise<Object>} Result with success status
+ */
+export async function removeChapterFromPage(req) {
+  const { pageId, chapterId } = req.payload || {};
+
+  logFunction('removeChapterFromPage', 'START', { pageId, chapterId });
+
+  try {
+    if (!pageId || !chapterId) {
+      return { success: false, error: 'Missing required parameters: pageId, chapterId' };
+    }
+
+    // Get page content
+    const pageResponse = await api.asApp().requestConfluence(
+      route`/wiki/api/v2/pages/${pageId}?body-format=storage`,
+      { headers: { 'Accept': 'application/json' } }
+    );
+
+    if (!pageResponse.ok) {
+      return { success: false, error: 'Failed to get page' };
+    }
+
+    const pageData = await pageResponse.json();
+    const pageBody = pageData.body.storage.value;
+    const currentVersion = pageData.version.number;
+
+    // Find and remove chapter
+    const chapter = findChapter(pageBody, chapterId);
+    if (!chapter) {
+      return { success: true, message: 'Chapter not found (already removed)' };
+    }
+
+    // Remove the chapter content
+    const before = pageBody.substring(0, chapter.startIndex).trimEnd();
+    const after = pageBody.substring(chapter.endIndex).trimStart();
+    const newPageBody = before + (before && after ? '\n\n' : '') + after;
+
+    // Update page
+    const updateResponse = await api.asApp().requestConfluence(
+      route`/wiki/api/v2/pages/${pageId}`,
+      {
+        method: 'PUT',
+        headers: {
+          'Accept': 'application/json',
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          id: pageId,
+          status: 'current',
+          title: pageData.title,
+          body: {
+            representation: 'storage',
+            value: newPageBody
+          },
+          version: {
+            number: currentVersion + 1,
+            message: `Blueprint: Removed chapter`
+          }
+        })
+      }
+    );
+
+    if (!updateResponse.ok) {
+      return { success: false, error: 'Failed to update page' };
+    }
+
+    logSuccess('removeChapterFromPage', 'Chapter removed', { chapterId });
+
+    return { success: true, message: 'Chapter removed' };
+
+  } catch (error) {
+    logFailure('removeChapterFromPage', 'Error', error, { pageId, chapterId });
+    return { success: false, error: error.message };
   }
 }

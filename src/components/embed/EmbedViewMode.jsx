@@ -5,6 +5,11 @@
  * Shows subtle indicator while checking for updates, then progressive disclosure
  * of update banner when user clicks "Review Update" button.
  *
+ * For the Compositor + Native Injection model:
+ * - When isPublished=true, this component renders nothing by default
+ * - Only becomes visible when staleness is detected
+ * - Shows Update Available banner to allow republishing
+ *
  * Features:
  * - Renders cached ADF or plain text content
  * - Shows subtle "Checking..." indicator during staleness check
@@ -12,6 +17,7 @@
  * - Progressive disclosure: banner only appears when user clicks Review button
  * - Cleans ADF for proper rendering
  * - Handles loading states
+ * - Optional: Hides completely when content is published (isPublished=true)
  *
  * @param {Object} props
  * @param {Object|string} props.content - Cached content to display (ADF or text)
@@ -27,6 +33,8 @@
  * @param {Object} props.toggleStates - Current toggle states
  * @param {Object} props.excerpt - The Source excerpt object with documentationLinks
  * @param {Array} props.internalNotes - Internal notes to apply to content
+ * @param {boolean} props.isPublished - Whether content has been published to page (Compositor model)
+ * @param {Function} props.onRepublish - Handler for republish button when stale (Compositor model)
  * @returns {JSX.Element} - View mode JSX
  */
 
@@ -73,7 +81,10 @@ export function EmbedViewMode({
   redlineStatus,
   approvedBy,
   approvedAt,
-  lastChangedBy
+  lastChangedBy,
+  // Compositor + Native Injection model props
+  isPublished = false,
+  onRepublish
 }) {
   // State for progressive disclosure - only show banner when user clicks Review button
   const [showUpdateBanner, setShowUpdateBanner] = useState(false);
@@ -85,6 +96,57 @@ export function EmbedViewMode({
     setShowDiffView(true);
   };
 
+  // ============================================================================
+  // COMPOSITOR MODEL: Hide Embed UI when content is published natively
+  // ============================================================================
+  // When content has been published to the page (isPublished=true), we don't need
+  // to render the iframe content - it's already on the page natively.
+  // We only become visible when:
+  // 1. Checking for staleness (show spinner)
+  // 2. Staleness detected (show Update Available banner)
+  if (isPublished) {
+    // Still checking - show nothing (page content is already visible)
+    if (isCheckingStaleness) {
+      return null;
+    }
+    
+    // Not stale - content is up-to-date, stay hidden
+    if (!isStale) {
+      return null;
+    }
+    
+    // Stale! Show the Update Available banner only
+    return (
+      <Box xcss={staleBorderWrapperStyle}>
+        <Stack space="space.150">
+          <StalenessCheckIndicator
+            isCheckingStaleness={false}
+            isStale={true}
+            showUpdateBanner={showUpdateBanner}
+            onReviewClick={handleReviewClick}
+          />
+          {showUpdateBanner && (
+            <UpdateAvailableBanner
+              isStale={isStale}
+              showDiffView={showDiffView}
+              setShowDiffView={setShowDiffView}
+              handleUpdateToLatest={onRepublish || handleUpdateToLatest}
+              isUpdating={isUpdating}
+              syncedContent={syncedContent}
+              latestRenderedContent={latestRenderedContent}
+              variableValues={variableValues}
+              toggleStates={toggleStates}
+            />
+          )}
+        </Stack>
+      </Box>
+    );
+  }
+
+  // ============================================================================
+  // LEGACY MODE: Render full iframe content (current behavior)
+  // ============================================================================
+  
   // Loading state
   if (!content) {
     return <Text>Loading content...</Text>;

@@ -247,6 +247,11 @@ const App = () => {
   const [latestRenderedContent, setLatestRenderedContent] = useState(null);
   const [syncedContent, setSyncedContent] = useState(null); // Old Source ADF from last sync for diff comparison
 
+  // Publish state (Compositor + Native Injection model)
+  const [publishStatus, setPublishStatus] = useState(null);
+  const [isPublishing, setIsPublishing] = useState(false);
+  const [publishError, setPublishError] = useState(null);
+
   // Use React Query to fetch excerpt data (enabled in both edit and view modes)
   // We need excerpt metadata (like documentationLinks) in both modes
   const {
@@ -1049,6 +1054,91 @@ const App = () => {
     return () => clearTimeout(timeoutId);
   }, [content, isEditing, selectedExcerptId, effectiveLocalId]);
 
+  // ============================================================================
+  // PUBLISH STATUS: Fetch publish state for Compositor + Native Injection model
+  // ============================================================================
+  useEffect(() => {
+    // Only fetch publish status in edit mode with valid localId
+    if (!isEditing || !effectiveLocalId) {
+      return;
+    }
+
+    const fetchPublishStatus = async () => {
+      try {
+        const result = await invoke('getPublishStatus', { localId: effectiveLocalId });
+        if (result.success) {
+          setPublishStatus(result.data);
+        }
+      } catch (error) {
+        logger.errors('[EmbedContainer] Error fetching publish status:', error);
+      }
+    };
+
+    fetchPublishStatus();
+  }, [isEditing, effectiveLocalId]);
+
+  // Determine if content needs republishing (has changed since last publish)
+  const needsRepublish = (() => {
+    if (!publishStatus?.isPublished || !publishStatus?.publishedContentHash) {
+      return false;
+    }
+    
+    // Compare current form values with published hash
+    // If they've changed since last publish, needsRepublish = true
+    // For now, we'll rely on isDirty from React Hook Form as a proxy
+    // A more robust solution would recompute the hash and compare
+    return isDirty && publishStatus.isPublished;
+  })();
+
+  // Handler for publishing chapter to page
+  const handlePublish = async () => {
+    if (!effectiveLocalId || !selectedExcerptId || isPublishing) {
+      return;
+    }
+
+    setIsPublishing(true);
+    setPublishError(null);
+
+    try {
+      const pageId = context?.contentId || context?.extension?.content?.id;
+      
+      if (!pageId) {
+        throw new Error('Unable to determine page ID');
+      }
+
+      const result = await invoke('publishChapter', {
+        pageId: pageId,
+        localId: effectiveLocalId,
+        excerptId: selectedExcerptId
+      });
+
+      if (result.success) {
+        // Update publish status with new data
+        setPublishStatus({
+          isPublished: true,
+          publishedAt: result.publishedAt,
+          publishedVersion: result.pageVersion,
+          chapterId: result.chapterId,
+          publishedContentHash: null // Will be updated on next status fetch
+        });
+
+        // Clear dirty flag since we just published
+        // Note: We don't reset the form, just acknowledge publish succeeded
+        logger.saves('[EmbedContainer] Successfully published chapter', {
+          localId: effectiveLocalId,
+          pageVersion: result.pageVersion
+        });
+      } else {
+        throw new Error(result.error || 'Publish failed');
+      }
+    } catch (error) {
+      logger.errors('[EmbedContainer] Publish error:', error);
+      setPublishError(error.message);
+    } finally {
+      setIsPublishing(false);
+    }
+  };
+
   // Handler for excerpt selection from Select (must be defined before early returns)
   const handleExcerptSelection = async (selectedOption) => {
     if (!selectedOption || !effectiveLocalId) return;
@@ -1423,26 +1513,31 @@ const App = () => {
           />
         )}
         <EmbedEditMode
-        excerpt={excerpt}
-        availableExcerpts={availableExcerpts}
-        isLoadingExcerpts={isLoadingExcerpts}
-        selectedExcerptId={selectedExcerptId}
-        handleExcerptSelection={handleExcerptSelection}
-        context={context}
-        saveStatus={saveStatus}
-        selectedTabIndex={selectedTabIndex}
-        setSelectedTabIndex={setSelectedTabIndex}
-        control={control}
-        setValue={setValue}
-        insertionType={insertionType}
-        setInsertionType={setInsertionType}
-        selectedPosition={selectedPosition}
-        setSelectedPosition={setSelectedPosition}
-        customText={customText}
-        setCustomText={setCustomText}
-        getPreviewContent={getPreviewContent}
-        getRawPreviewContent={getRawPreviewContent}
-      />
+          excerpt={excerpt}
+          availableExcerpts={availableExcerpts}
+          isLoadingExcerpts={isLoadingExcerpts}
+          selectedExcerptId={selectedExcerptId}
+          handleExcerptSelection={handleExcerptSelection}
+          context={context}
+          saveStatus={saveStatus}
+          selectedTabIndex={selectedTabIndex}
+          setSelectedTabIndex={setSelectedTabIndex}
+          control={control}
+          setValue={setValue}
+          insertionType={insertionType}
+          setInsertionType={setInsertionType}
+          selectedPosition={selectedPosition}
+          setSelectedPosition={setSelectedPosition}
+          customText={customText}
+          setCustomText={setCustomText}
+          getPreviewContent={getPreviewContent}
+          getRawPreviewContent={getRawPreviewContent}
+          // Publish props (Compositor + Native Injection)
+          publishStatus={publishStatus}
+          isPublishing={isPublishing}
+          onPublish={handlePublish}
+          needsRepublish={needsRepublish}
+        />
       </Fragment>
     );
   }
