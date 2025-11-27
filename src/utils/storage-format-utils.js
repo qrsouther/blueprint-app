@@ -92,11 +92,14 @@ export function escapeHtml(text) {
  * Build complete chapter HTML structure with markers
  *
  * Creates the full chapter structure that gets injected into the page:
- * - Chapter start marker
+ * - Hidden div with chapter start marker (data attributes)
  * - H2 heading (native, TOC-readable)
- * - Managed content zone with markers
- * - Chapter divider (HR)
- * - Chapter end marker
+ * - Managed content zone with hidden div markers
+ * - Chapter divider (HR with data attributes)
+ * - Hidden div with chapter end marker
+ *
+ * Uses hidden divs with data attributes instead of HTML comments
+ * for more reliable detection (simple indexOf, no regex needed).
  *
  * @param {Object} options
  * @param {string} options.chapterId - Unique chapter identifier
@@ -112,15 +115,15 @@ export function buildChapterStructure({ chapterId, localId, heading, bodyContent
 
   const escapedHeading = escapeHtml(heading || 'Untitled Chapter');
 
-  return `<!-- BLUEPRINT-CHAPTER-START: ${chapterId} -->
+  return `<div style="display:none" data-blueprint-chapter="${chapterId}" data-marker="start"></div>
 <h2>${escapedHeading}</h2>
 
-<!-- BLUEPRINT-MANAGED-START: ${localId} -->
+<div style="display:none" data-blueprint-managed="${localId}" data-marker="start"></div>
 ${bodyContent || ''}
-<!-- BLUEPRINT-MANAGED-END: ${localId} -->
+<div style="display:none" data-blueprint-managed="${localId}" data-marker="end"></div>
 
 <hr class="blueprint-chapter-divider" data-chapter="${chapterId}" data-local-id="${localId}" />
-<!-- BLUEPRINT-CHAPTER-END: ${chapterId} -->`;
+<div style="display:none" data-blueprint-chapter="${chapterId}" data-marker="end"></div>`;
 }
 
 /**
@@ -128,6 +131,8 @@ ${bodyContent || ''}
  *
  * Creates a "Under Construction" placeholder that appears when a chapter
  * has been added via Compositor but not yet configured/published.
+ *
+ * Uses hidden divs with data attributes for reliable marker detection.
  *
  * @param {Object} options
  * @param {string} options.chapterId - Unique chapter identifier
@@ -149,24 +154,15 @@ export function buildChapterPlaceholder({ chapterId, localId, heading }) {
   </ac:rich-text-body>
 </ac:structured-macro>`;
 
-  return `<!-- BLUEPRINT-CHAPTER-START: ${chapterId} -->
+  return `<div style="display:none" data-blueprint-chapter="${chapterId}" data-marker="start"></div>
 <h2>${escapedHeading}</h2>
 
-<!-- BLUEPRINT-MANAGED-START: ${localId} -->
+<div style="display:none" data-blueprint-managed="${localId}" data-marker="start"></div>
 ${placeholderContent}
-<!-- BLUEPRINT-MANAGED-END: ${localId} -->
+<div style="display:none" data-blueprint-managed="${localId}" data-marker="end"></div>
 
 <hr class="blueprint-chapter-divider" data-chapter="${chapterId}" data-local-id="${localId}" />
-<!-- BLUEPRINT-CHAPTER-END: ${chapterId} -->`;
-}
-
-/**
- * Escape regex special characters
- * @param {string} string - String to escape
- * @returns {string} Escaped string safe for use in RegExp
- */
-function escapeRegex(string) {
-  return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+<div style="display:none" data-blueprint-chapter="${chapterId}" data-marker="end"></div>`;
 }
 
 /**
@@ -175,8 +171,8 @@ function escapeRegex(string) {
  * Locates a chapter by its ID within the page storage content
  * and returns its position and content.
  *
- * Uses flexible regex matching to handle cases where Confluence
- * may add/modify whitespace within HTML comments.
+ * Uses hidden div markers with data attributes for reliable detection.
+ * Simple indexOf matching - no regex needed!
  *
  * @param {string} pageBody - Full page storage content
  * @param {string} chapterId - Chapter ID to find
@@ -185,20 +181,32 @@ function escapeRegex(string) {
 export function findChapter(pageBody, chapterId) {
   if (!pageBody || !chapterId) return null;
 
-  // Use flexible regex to handle potential whitespace variations from Confluence
-  const escapedChapterId = escapeRegex(chapterId);
-  const pattern = new RegExp(
-    `<!--\\s*BLUEPRINT-CHAPTER-START:\\s*${escapedChapterId}\\s*-->[\\s\\S]*?<!--\\s*BLUEPRINT-CHAPTER-END:\\s*${escapedChapterId}\\s*-->`,
-    'g'
-  );
+  // Look for data attribute markers - simple string matching, no regex!
+  const startMarker = `data-blueprint-chapter="${chapterId}" data-marker="start"`;
+  const endMarker = `data-blueprint-chapter="${chapterId}" data-marker="end"`;
 
-  const match = pattern.exec(pageBody);
-  if (!match) return null;
+  const startMarkerIndex = pageBody.indexOf(startMarker);
+  if (startMarkerIndex === -1) return null;
+
+  const endMarkerIndex = pageBody.indexOf(endMarker, startMarkerIndex);
+  if (endMarkerIndex === -1) return null;
+
+  // Find the actual start of the start div (search backwards for '<div')
+  const divSearchStart = Math.max(0, startMarkerIndex - 100); // Look back up to 100 chars
+  const beforeStartMarker = pageBody.substring(divSearchStart, startMarkerIndex);
+  const lastDivIndex = beforeStartMarker.lastIndexOf('<div');
+  if (lastDivIndex === -1) return null;
+  const startIndex = divSearchStart + lastDivIndex;
+
+  // Find the end of the end div (search forward for '</div>')
+  const afterEndMarker = pageBody.indexOf('</div>', endMarkerIndex);
+  if (afterEndMarker === -1) return null;
+  const endIndex = afterEndMarker + '</div>'.length;
 
   return {
-    startIndex: match.index,
-    endIndex: match.index + match[0].length,
-    content: match[0]
+    startIndex,
+    endIndex,
+    content: pageBody.substring(startIndex, endIndex)
   };
 }
 
@@ -208,58 +216,66 @@ export function findChapter(pageBody, chapterId) {
  * Locates the managed zone by localId, which contains the
  * Source-derived content that gets replaced on republish.
  *
- * Uses flexible regex matching to handle cases where Confluence
- * may add/modify whitespace within HTML comments.
+ * Uses hidden div markers with data attributes for reliable detection.
+ * Simple indexOf matching - no regex needed!
  *
  * @param {string} pageBody - Full page storage content
  * @param {string} localId - Embed localId
- * @returns {Object|null} { startIndex, endIndex, startMarkerEnd, endMarkerStart, content } or null
+ * @returns {Object|null} { startIndex, endIndex, contentStart, contentEnd, content } or null
  */
 export function findManagedZone(pageBody, localId) {
   if (!pageBody || !localId) return null;
 
-  // Use flexible regex to handle potential whitespace variations
-  const escapedLocalId = escapeRegex(localId);
-  
-  // Match start marker
-  const startPattern = new RegExp(
-    `<!--\\s*BLUEPRINT-MANAGED-START:\\s*${escapedLocalId}\\s*-->`,
-    'g'
-  );
-  const startMatch = startPattern.exec(pageBody);
-  if (!startMatch) return null;
+  // Look for data attribute markers - simple string matching!
+  const startMarker = `data-blueprint-managed="${localId}" data-marker="start"`;
+  const endMarker = `data-blueprint-managed="${localId}" data-marker="end"`;
 
-  // Match end marker (search from after start marker)
-  const endPattern = new RegExp(
-    `<!--\\s*BLUEPRINT-MANAGED-END:\\s*${escapedLocalId}\\s*-->`,
-    'g'
-  );
-  endPattern.lastIndex = startMatch.index + startMatch[0].length;
-  const endMatch = endPattern.exec(pageBody);
-  if (!endMatch) return null;
+  const startMarkerIndex = pageBody.indexOf(startMarker);
+  if (startMarkerIndex === -1) return null;
 
-  const startIndex = startMatch.index;
-  const startMarkerEnd = startMatch.index + startMatch[0].length;
-  const endMarkerStart = endMatch.index;
-  const endIndex = endMatch.index + endMatch[0].length;
+  const endMarkerIndex = pageBody.indexOf(endMarker, startMarkerIndex);
+  if (endMarkerIndex === -1) return null;
+
+  // Find the actual start of the start div
+  const divSearchStart = Math.max(0, startMarkerIndex - 100);
+  const beforeStartMarker = pageBody.substring(divSearchStart, startMarkerIndex);
+  const lastDivIndex = beforeStartMarker.lastIndexOf('<div');
+  if (lastDivIndex === -1) return null;
+  const startIndex = divSearchStart + lastDivIndex;
+
+  // Find the end of the start div (where content begins)
+  const startDivEnd = pageBody.indexOf('</div>', startMarkerIndex);
+  if (startDivEnd === -1) return null;
+  const contentStart = startDivEnd + '</div>'.length;
+
+  // Find the start of the end div (where content ends)
+  const endDivSearchStart = Math.max(0, endMarkerIndex - 100);
+  const beforeEndMarker = pageBody.substring(endDivSearchStart, endMarkerIndex);
+  const endDivStart = beforeEndMarker.lastIndexOf('<div');
+  if (endDivStart === -1) return null;
+  const contentEnd = endDivSearchStart + endDivStart;
+
+  // Find the full end of the end div
+  const endDivEnd = pageBody.indexOf('</div>', endMarkerIndex);
+  if (endDivEnd === -1) return null;
+  const endIndex = endDivEnd + '</div>'.length;
 
   return {
     startIndex,
     endIndex,
-    startMarkerEnd,
-    endMarkerStart,
-    content: pageBody.substring(startMarkerEnd, endMarkerStart).trim()
+    contentStart,
+    contentEnd,
+    content: pageBody.substring(contentStart, contentEnd).trim()
   };
 }
 
 /**
- * Replace managed zone content, preserving markers
+ * Replace managed zone content, preserving structure
  *
  * Updates the content within a managed zone without affecting
  * the chapter structure or other page content.
  *
- * Rebuilds the markers to ensure consistent format regardless of
- * how Confluence may have modified them.
+ * Uses hidden div markers with data attributes.
  *
  * @param {string} pageBody - Full page storage content
  * @param {string} localId - Embed localId
@@ -272,9 +288,9 @@ export function replaceManagedZone(pageBody, localId, newContent) {
   const zone = findManagedZone(pageBody, localId);
   if (!zone) return null;
 
-  // Rebuild markers in consistent format
-  const startMarker = `<!-- BLUEPRINT-MANAGED-START: ${localId} -->`;
-  const endMarker = `<!-- BLUEPRINT-MANAGED-END: ${localId} -->`;
+  // Build new managed zone with hidden div markers
+  const startMarker = `<div style="display:none" data-blueprint-managed="${localId}" data-marker="start"></div>`;
+  const endMarker = `<div style="display:none" data-blueprint-managed="${localId}" data-marker="end"></div>`;
 
   return (
     pageBody.substring(0, zone.startIndex) +
@@ -326,7 +342,7 @@ export function chapterExists(pageBody, chapterId) {
  * Scans the page for all Blueprint chapter markers and returns
  * their IDs in order of appearance.
  *
- * Uses flexible regex to handle whitespace variations.
+ * Uses simple regex to extract data attribute values.
  *
  * @param {string} pageBody - Full page storage content
  * @returns {string[]} Array of chapter IDs
@@ -334,13 +350,13 @@ export function chapterExists(pageBody, chapterId) {
 export function getAllChapterIds(pageBody) {
   if (!pageBody) return [];
 
-  // Flexible pattern to handle potential whitespace variations
-  const pattern = /<!--\s*BLUEPRINT-CHAPTER-START:\s*([^\s>]+)\s*-->/g;
+  // Match data-blueprint-chapter="X" data-marker="start" pattern
+  const pattern = /data-blueprint-chapter="([^"]+)"\s+data-marker="start"/g;
   const ids = [];
   let match;
 
   while ((match = pattern.exec(pageBody)) !== null) {
-    ids.push(match[1].trim());
+    ids.push(match[1]);
   }
 
   return ids;
