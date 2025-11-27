@@ -161,10 +161,22 @@ ${placeholderContent}
 }
 
 /**
+ * Escape regex special characters
+ * @param {string} string - String to escape
+ * @returns {string} Escaped string safe for use in RegExp
+ */
+function escapeRegex(string) {
+  return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/**
  * Find and extract chapter content from page body
  *
  * Locates a chapter by its ID within the page storage content
  * and returns its position and content.
+ *
+ * Uses flexible regex matching to handle cases where Confluence
+ * may add/modify whitespace within HTML comments.
  *
  * @param {string} pageBody - Full page storage content
  * @param {string} chapterId - Chapter ID to find
@@ -173,21 +185,20 @@ ${placeholderContent}
 export function findChapter(pageBody, chapterId) {
   if (!pageBody || !chapterId) return null;
 
-  const startMarker = `<!-- BLUEPRINT-CHAPTER-START: ${chapterId} -->`;
-  const endMarker = `<!-- BLUEPRINT-CHAPTER-END: ${chapterId} -->`;
+  // Use flexible regex to handle potential whitespace variations from Confluence
+  const escapedChapterId = escapeRegex(chapterId);
+  const pattern = new RegExp(
+    `<!--\\s*BLUEPRINT-CHAPTER-START:\\s*${escapedChapterId}\\s*-->[\\s\\S]*?<!--\\s*BLUEPRINT-CHAPTER-END:\\s*${escapedChapterId}\\s*-->`,
+    'g'
+  );
 
-  const startIndex = pageBody.indexOf(startMarker);
-  if (startIndex === -1) return null;
-
-  const endIndex = pageBody.indexOf(endMarker, startIndex);
-  if (endIndex === -1) return null;
-
-  const fullEndIndex = endIndex + endMarker.length;
+  const match = pattern.exec(pageBody);
+  if (!match) return null;
 
   return {
-    startIndex,
-    endIndex: fullEndIndex,
-    content: pageBody.substring(startIndex, fullEndIndex)
+    startIndex: match.index,
+    endIndex: match.index + match[0].length,
+    content: match[0]
   };
 }
 
@@ -197,30 +208,47 @@ export function findChapter(pageBody, chapterId) {
  * Locates the managed zone by localId, which contains the
  * Source-derived content that gets replaced on republish.
  *
+ * Uses flexible regex matching to handle cases where Confluence
+ * may add/modify whitespace within HTML comments.
+ *
  * @param {string} pageBody - Full page storage content
  * @param {string} localId - Embed localId
- * @returns {Object|null} { startIndex, endIndex, contentStart, contentEnd, content } or null
+ * @returns {Object|null} { startIndex, endIndex, startMarkerEnd, endMarkerStart, content } or null
  */
 export function findManagedZone(pageBody, localId) {
   if (!pageBody || !localId) return null;
 
-  const startMarker = `<!-- BLUEPRINT-MANAGED-START: ${localId} -->`;
-  const endMarker = `<!-- BLUEPRINT-MANAGED-END: ${localId} -->`;
+  // Use flexible regex to handle potential whitespace variations
+  const escapedLocalId = escapeRegex(localId);
+  
+  // Match start marker
+  const startPattern = new RegExp(
+    `<!--\\s*BLUEPRINT-MANAGED-START:\\s*${escapedLocalId}\\s*-->`,
+    'g'
+  );
+  const startMatch = startPattern.exec(pageBody);
+  if (!startMatch) return null;
 
-  const startIndex = pageBody.indexOf(startMarker);
-  if (startIndex === -1) return null;
+  // Match end marker (search from after start marker)
+  const endPattern = new RegExp(
+    `<!--\\s*BLUEPRINT-MANAGED-END:\\s*${escapedLocalId}\\s*-->`,
+    'g'
+  );
+  endPattern.lastIndex = startMatch.index + startMatch[0].length;
+  const endMatch = endPattern.exec(pageBody);
+  if (!endMatch) return null;
 
-  const endIndex = pageBody.indexOf(endMarker, startIndex);
-  if (endIndex === -1) return null;
-
-  const contentStart = startIndex + startMarker.length;
+  const startIndex = startMatch.index;
+  const startMarkerEnd = startMatch.index + startMatch[0].length;
+  const endMarkerStart = endMatch.index;
+  const endIndex = endMatch.index + endMatch[0].length;
 
   return {
     startIndex,
-    endIndex: endIndex + endMarker.length,
-    contentStart,
-    contentEnd: endIndex,
-    content: pageBody.substring(contentStart, endIndex).trim()
+    endIndex,
+    startMarkerEnd,
+    endMarkerStart,
+    content: pageBody.substring(startMarkerEnd, endMarkerStart).trim()
   };
 }
 
@@ -229,6 +257,9 @@ export function findManagedZone(pageBody, localId) {
  *
  * Updates the content within a managed zone without affecting
  * the chapter structure or other page content.
+ *
+ * Rebuilds the markers to ensure consistent format regardless of
+ * how Confluence may have modified them.
  *
  * @param {string} pageBody - Full page storage content
  * @param {string} localId - Embed localId
@@ -241,6 +272,7 @@ export function replaceManagedZone(pageBody, localId, newContent) {
   const zone = findManagedZone(pageBody, localId);
   if (!zone) return null;
 
+  // Rebuild markers in consistent format
   const startMarker = `<!-- BLUEPRINT-MANAGED-START: ${localId} -->`;
   const endMarker = `<!-- BLUEPRINT-MANAGED-END: ${localId} -->`;
 
@@ -294,18 +326,21 @@ export function chapterExists(pageBody, chapterId) {
  * Scans the page for all Blueprint chapter markers and returns
  * their IDs in order of appearance.
  *
+ * Uses flexible regex to handle whitespace variations.
+ *
  * @param {string} pageBody - Full page storage content
  * @returns {string[]} Array of chapter IDs
  */
 export function getAllChapterIds(pageBody) {
   if (!pageBody) return [];
 
-  const pattern = /<!-- BLUEPRINT-CHAPTER-START: ([^>]+) -->/g;
+  // Flexible pattern to handle potential whitespace variations
+  const pattern = /<!--\s*BLUEPRINT-CHAPTER-START:\s*([^\s>]+)\s*-->/g;
   const ids = [];
   let match;
 
   while ((match = pattern.exec(pageBody)) !== null) {
-    ids.push(match[1]);
+    ids.push(match[1].trim());
   }
 
   return ids;
