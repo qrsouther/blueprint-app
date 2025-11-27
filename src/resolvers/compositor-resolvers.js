@@ -20,7 +20,6 @@ import {
   buildChapterStructure,
   buildChapterPlaceholder,
   findChapter,
-  replaceManagedZone,
   convertAdfToStorage
 } from '../utils/storage-format-utils.js';
 import {
@@ -329,36 +328,26 @@ export async function bulkPublishChapters(req) {
           continue;
         }
 
-        // Check if chapter already exists in page
+        // Build the chapter HTML
         const chapterId = `chapter-${localId}`;
+        const chapterHtml = buildChapterStructure({
+          chapterId,
+          localId,
+          heading: chapter.name || excerpt.name,
+          bodyContent: storageContent
+        });
+
+        // Check if chapter already exists in page
         const existingChapter = findChapter(pageBody, chapterId);
 
         if (existingChapter) {
-          // Update existing chapter
-          const updated = replaceManagedZone(pageBody, localId, storageContent);
-          if (updated) {
-            pageBody = updated;
-          } else {
-            // Rebuild entire chapter if zone not found
-            const chapterHtml = buildChapterStructure({
-              chapterId,
-              localId,
-              heading: chapter.name || excerpt.name,
-              bodyContent: storageContent
-            });
-            pageBody =
-              pageBody.substring(0, existingChapter.startIndex) +
-              chapterHtml +
-              pageBody.substring(existingChapter.endIndex);
-          }
+          // Replace existing chapter (entire layout block)
+          pageBody =
+            pageBody.substring(0, existingChapter.startIndex) +
+            chapterHtml +
+            pageBody.substring(existingChapter.endIndex);
         } else {
           // Add new chapter
-          const chapterHtml = buildChapterStructure({
-            chapterId,
-            localId,
-            heading: chapter.name || excerpt.name,
-            bodyContent: storageContent
-          });
           pageBody = pageBody.trim() + '\n\n' + chapterHtml;
         }
 

@@ -255,6 +255,10 @@ const App = () => {
   // This state tracks whether the user has clicked the Edit button on THIS Embed.
   const [isEditingEmbed, setIsEditingEmbed] = useState(false);
 
+  // Combined edit mode check - true if in Confluence's edit mode OR our Locked Page Model edit mode
+  // Used throughout the component to determine if we should show edit UI and behavior
+  const inEditMode = isEditing || isEditingEmbed;
+
   // Publish state (Compositor + Native Injection model)
   const [publishStatus, setPublishStatus] = useState(null);
   const [isPublishing, setIsPublishing] = useState(false);
@@ -284,7 +288,7 @@ const App = () => {
     data: availableExcerpts = [],
     isLoading: isLoadingExcerpts,
     error: excerptsError
-  } = useAvailableExcerpts(isEditing);
+  } = useAvailableExcerpts(inEditMode);
 
   // Use React Query to fetch variable values (always, both edit and view mode)
   const {
@@ -308,7 +312,7 @@ const App = () => {
   );
 
   // Use excerptFromQuery when available (edit mode), fallback to manual state for view mode
-  const excerpt = isEditing ? excerptFromQuery : excerptForViewMode;
+  const excerpt = inEditMode ? excerptFromQuery : excerptForViewMode;
 
   // ============================================================================
   // STATE MANAGEMENT DOCUMENTATION
@@ -396,7 +400,8 @@ const App = () => {
   // is set correctly before content generation.
   useEffect(() => {
     // Only sync in edit mode and when we have data
-    if (!isEditing || !variableValuesData || isLoadingVariableValues || !effectiveLocalId) {
+    // Check both Confluence's edit mode AND our Locked Page Model edit mode
+    if (!inEditMode || !variableValuesData || isLoadingVariableValues || !effectiveLocalId) {
       return;
     }
 
@@ -463,7 +468,7 @@ const App = () => {
         setValue('internalNotes', variableValuesData.internalNotes, { shouldDirty: false });
       }
     }
-  }, [variableValuesData, isEditing, isLoadingVariableValues, effectiveLocalId]);
+  }, [variableValuesData, inEditMode, isLoadingVariableValues, effectiveLocalId]);
 
   // Reset the sync guard flag when switching to a new embed instance
   // This allows initial data to load for new instances while protecting
@@ -471,6 +476,14 @@ const App = () => {
   useEffect(() => {
     hasLoadedInitialDataRef.current = false;
   }, [effectiveLocalId, selectedExcerptId]);
+
+  // Reset the sync guard when user enters edit mode via the Edit button (Locked Page Model)
+  // This allows fresh data to be loaded from storage when reopening the editor
+  useEffect(() => {
+    if (isEditingEmbed) {
+      hasLoadedInitialDataRef.current = false;
+    }
+  }, [isEditingEmbed]);
 
   // CRITICAL: Reset sync guard when variableValuesData changes significantly after initial load
   // This allows restored data to sync to state after a version restore
@@ -613,7 +626,8 @@ const App = () => {
 
       // VIEW MODE: Just set excerptForViewMode and skip expensive processing
       // View Mode uses cached content, so we don't need to regenerate it
-      if (!isEditing) {
+      // Check both Confluence's edit mode AND our Locked Page Model edit mode
+      if (!inEditMode) {
         setExcerptForViewMode(excerptFromQuery);
         return;
       }
@@ -769,7 +783,7 @@ const App = () => {
     };
 
     loadContent();
-  }, [excerptFromQuery, effectiveLocalId, isEditing, isFetchingExcerpt]);
+  }, [excerptFromQuery, effectiveLocalId, inEditMode, isFetchingExcerpt]);
 
   // ============================================================================
   // AUTO-SAVE EFFECT: React Hook Form → Storage (WRITE operation)
@@ -836,7 +850,7 @@ const App = () => {
     // CRITICAL: Only run in edit mode with all required data
     // Check excerptFromQuery exists (but don't include in dependencies to avoid infinite loops)
     // excerptFromQuery changes reference when queries are invalidated, which would retrigger this effect
-    if (!isEditing || !effectiveLocalId || !selectedExcerptId || !excerptFromQuery) {
+    if (!inEditMode || !effectiveLocalId || !selectedExcerptId || !excerptFromQuery) {
       return;
     }
 
@@ -970,7 +984,7 @@ const App = () => {
     // CRITICAL: Use individual watched values instead of watch() to avoid reference changes
     // Only trigger when actual form values change, not when form object reference changes
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [variableValues, toggleStates, customInsertions, internalNotes, isDirty, isEditing, effectiveLocalId, selectedExcerptId]);
+  }, [variableValues, toggleStates, customInsertions, internalNotes, isDirty, inEditMode, effectiveLocalId, selectedExcerptId]);
 
   // Check for staleness in view mode immediately after render, with jitter for performance
   // Starts as soon as content is available, jitter spreads out requests across multiple Embeds
@@ -1066,8 +1080,9 @@ const App = () => {
   // PUBLISH STATUS: Fetch publish state for Compositor + Native Injection model
   // ============================================================================
   useEffect(() => {
-    // Only fetch publish status in edit mode with valid localId
-    if (!isEditing || !effectiveLocalId) {
+    // Fetch publish status in BOTH edit and view modes
+    // View Mode needs this to know whether to hide the iframe content (since it's natively injected)
+    if (!effectiveLocalId) {
       return;
     }
 
@@ -1083,7 +1098,7 @@ const App = () => {
     };
 
     fetchPublishStatus();
-  }, [isEditing, effectiveLocalId]);
+  }, [effectiveLocalId]);
 
   // Determine if content needs republishing (has changed since last publish)
   const needsRepublish = (() => {
@@ -1110,10 +1125,25 @@ const App = () => {
         throw new Error('Unable to determine page ID');
       }
 
+      // Pass current form state directly to publishChapter
+      // This ensures the published content matches what's shown in the preview
+      // No dependency on auto-save or storage - uses live form values
+      logger.saves('[EmbedContainer] Publishing with current form state', {
+        localId: effectiveLocalId,
+        toggleStateKeys: Object.keys(toggleStates || {}),
+        toggleStateValues: toggleStates,
+        variableValueCount: Object.keys(variableValues || {}).length
+      });
+
       const result = await invoke('publishChapter', {
         pageId: pageId,
         localId: effectiveLocalId,
-        excerptId: selectedExcerptId
+        excerptId: selectedExcerptId,
+        // Pass current form values directly - don't rely on storage
+        variableValues: variableValues || {},
+        toggleStates: toggleStates || {},
+        customInsertions: customInsertions || [],
+        internalNotes: internalNotes || []
       });
 
       if (result.success) {
@@ -1123,6 +1153,18 @@ const App = () => {
           publishedVersion: result.pageVersion,
           chapterId: result.chapterId
         });
+
+        // CRITICAL: Update lastSavedValuesRef so we don't lose track of what was saved
+        // This prevents auto-save from thinking values changed after publish
+        lastSavedValuesRef.current = {
+          variableValues: { ...(variableValues || {}) },
+          toggleStates: { ...(toggleStates || {}) },
+          customInsertions: JSON.parse(JSON.stringify(customInsertions || [])),
+          internalNotes: JSON.parse(JSON.stringify(internalNotes || []))
+        };
+
+        // Invalidate React Query cache so fresh data is loaded on next edit
+        await queryClient.invalidateQueries({ queryKey: ['variableValues', effectiveLocalId] });
 
         logger.saves('[EmbedContainer] Successfully published chapter', {
           localId: effectiveLocalId,
@@ -1573,6 +1615,8 @@ const App = () => {
       approvedBy={variableValuesData?.approvedBy}
       approvedAt={variableValuesData?.approvedAt}
       lastChangedBy={variableValuesData?.lastChangedBy}
+      // Compositor + Native Injection: Pass publish status
+      isPublished={publishStatus?.isPublished || false}
       // Locked Page Model: Edit button handler
       onEditClick={() => setIsEditingEmbed(true)}
     />

@@ -89,24 +89,26 @@ export function escapeHtml(text) {
 }
 
 /**
- * Build complete chapter HTML structure with markers
+ * Build complete chapter HTML structure using Confluence Section macro
  *
- * Creates the full chapter structure that gets injected into the page:
- * - Hidden div with chapter start marker (data attributes)
+ * Creates the full chapter structure wrapped in a Section macro:
+ * - Section macro as container with blueprint parameters (these are preserved!)
  * - H2 heading (native, TOC-readable)
- * - Managed content zone with hidden div markers
- * - Chapter divider (HR with data attributes)
- * - Hidden div with chapter end marker
+ * - Body content
+ * - Simple <hr> divider at end for visual separation
  *
- * Uses hidden divs with data attributes instead of HTML comments
- * for more reliable detection (simple indexOf, no regex needed).
+ * Why Section macro:
+ * - Confluence preserves ac:parameter elements on structured macros
+ * - Section renders invisibly (no visual box/border)
+ * - Divider macro doesn't actually support parameters (just renders <hr>)
+ * - data-* attributes, class names, and custom attributes are all stripped
  *
  * @param {Object} options
  * @param {string} options.chapterId - Unique chapter identifier
  * @param {string} options.localId - Embed macro localId
  * @param {string} options.heading - Chapter heading text
  * @param {string} options.bodyContent - Rendered body content (storage format)
- * @returns {string} Complete chapter HTML with markers
+ * @returns {string} Complete chapter HTML wrapped in section macro
  */
 export function buildChapterStructure({ chapterId, localId, heading, bodyContent }) {
   if (!chapterId || !localId) {
@@ -115,15 +117,17 @@ export function buildChapterStructure({ chapterId, localId, heading, bodyContent
 
   const escapedHeading = escapeHtml(heading || 'Untitled Chapter');
 
-  return `<div style="display:none" data-blueprint-chapter="${chapterId}" data-marker="start"></div>
+  // Use Section macro as container - parameters are preserved!
+  // Simple <hr /> for visual separation (no parameters needed on it)
+  return `<ac:structured-macro ac:name="section" ac:schema-version="1">
+<ac:parameter ac:name="blueprint-chapter">${chapterId}</ac:parameter>
+<ac:parameter ac:name="blueprint-local">${localId}</ac:parameter>
+<ac:rich-text-body>
 <h2>${escapedHeading}</h2>
-
-<div style="display:none" data-blueprint-managed="${localId}" data-marker="start"></div>
 ${bodyContent || ''}
-<div style="display:none" data-blueprint-managed="${localId}" data-marker="end"></div>
-
-<hr class="blueprint-chapter-divider" data-chapter="${chapterId}" data-local-id="${localId}" />
-<div style="display:none" data-blueprint-chapter="${chapterId}" data-marker="end"></div>`;
+<hr />
+</ac:rich-text-body>
+</ac:structured-macro>`;
 }
 
 /**
@@ -132,13 +136,13 @@ ${bodyContent || ''}
  * Creates a "Under Construction" placeholder that appears when a chapter
  * has been added via Compositor but not yet configured/published.
  *
- * Uses hidden divs with data attributes for reliable marker detection.
+ * Uses Section macro as container with parameters.
  *
  * @param {Object} options
  * @param {string} options.chapterId - Unique chapter identifier
  * @param {string} options.localId - Embed macro localId
  * @param {string} options.heading - Chapter heading text
- * @returns {string} Placeholder HTML with info macro
+ * @returns {string} Placeholder HTML wrapped in section macro
  */
 export function buildChapterPlaceholder({ chapterId, localId, heading }) {
   if (!chapterId || !localId) {
@@ -148,21 +152,22 @@ export function buildChapterPlaceholder({ chapterId, localId, heading }) {
   const escapedHeading = escapeHtml(heading || 'New Chapter');
 
   const placeholderContent = `<ac:structured-macro ac:name="info" ac:schema-version="1">
-  <ac:rich-text-body>
-    <p><strong>📝 Chapter Under Construction</strong></p>
-    <p>This chapter has not been configured yet. Click the Edit button to set up variables and publish content.</p>
-  </ac:rich-text-body>
+<ac:rich-text-body>
+<p><strong>📝 Chapter Under Construction</strong></p>
+<p>This chapter has not been configured yet. Click the Edit button to set up variables and publish content.</p>
+</ac:rich-text-body>
 </ac:structured-macro>`;
 
-  return `<div style="display:none" data-blueprint-chapter="${chapterId}" data-marker="start"></div>
+  // Use Section macro as container - parameters are preserved!
+  return `<ac:structured-macro ac:name="section" ac:schema-version="1">
+<ac:parameter ac:name="blueprint-chapter">${chapterId}</ac:parameter>
+<ac:parameter ac:name="blueprint-local">${localId}</ac:parameter>
+<ac:rich-text-body>
 <h2>${escapedHeading}</h2>
-
-<div style="display:none" data-blueprint-managed="${localId}" data-marker="start"></div>
 ${placeholderContent}
-<div style="display:none" data-blueprint-managed="${localId}" data-marker="end"></div>
-
-<hr class="blueprint-chapter-divider" data-chapter="${chapterId}" data-local-id="${localId}" />
-<div style="display:none" data-blueprint-chapter="${chapterId}" data-marker="end"></div>`;
+<hr />
+</ac:rich-text-body>
+</ac:structured-macro>`;
 }
 
 /**
@@ -171,134 +176,99 @@ ${placeholderContent}
  * Locates a chapter by its ID within the page storage content
  * and returns its position and content.
  *
- * Uses hidden div markers with data attributes for reliable detection.
- * Simple indexOf matching - no regex needed!
+ * Searches for Section macro with blueprint-chapter parameter matching chapterId.
+ * The entire section macro (from opening to closing tag) is the chapter.
  *
  * @param {string} pageBody - Full page storage content
  * @param {string} chapterId - Chapter ID to find
- * @returns {Object|null} { startIndex, endIndex, content } or null if not found
+ * @returns {Object|null} { startIndex, endIndex, content, localId } or null if not found
  */
 export function findChapter(pageBody, chapterId) {
   if (!pageBody || !chapterId) return null;
 
-  // Look for data attribute markers - simple string matching, no regex!
-  const startMarker = `data-blueprint-chapter="${chapterId}" data-marker="start"`;
-  const endMarker = `data-blueprint-chapter="${chapterId}" data-marker="end"`;
+  // Look for our parameter: <ac:parameter ac:name="blueprint-chapter">{chapterId}</ac:parameter>
+  const paramPattern = `<ac:parameter ac:name="blueprint-chapter">${chapterId}</ac:parameter>`;
+  console.log('[findChapter] DEBUG - searching for pattern:', paramPattern);
+  
+  const paramIndex = pageBody.indexOf(paramPattern);
+  console.log('[findChapter] DEBUG - paramIndex:', paramIndex);
+  
+  if (paramIndex === -1) {
+    // Debug: try to find any blueprint-chapter param to see what's there
+    const anyBlueprintParam = pageBody.indexOf('ac:parameter ac:name="blueprint-chapter"');
+    console.log('[findChapter] DEBUG - any blueprint-chapter param at:', anyBlueprintParam);
+    if (anyBlueprintParam !== -1) {
+      console.log('[findChapter] DEBUG - surrounding content:', pageBody.substring(anyBlueprintParam, anyBlueprintParam + 150));
+    }
+    return null;
+  }
 
-  const startMarkerIndex = pageBody.indexOf(startMarker);
-  if (startMarkerIndex === -1) return null;
+  // Find the opening <ac:structured-macro tag (search backwards from parameter)
+  const beforeParam = pageBody.substring(0, paramIndex);
+  const macroStart = beforeParam.lastIndexOf('<ac:structured-macro');
+  if (macroStart === -1) {
+    console.log('[findChapter] DEBUG - no opening macro tag found');
+    return null;
+  }
 
-  const endMarkerIndex = pageBody.indexOf(endMarker, startMarkerIndex);
-  if (endMarkerIndex === -1) return null;
+  // Verify this is a section macro
+  const macroTagEnd = pageBody.indexOf('>', macroStart);
+  const macroTag = pageBody.substring(macroStart, macroTagEnd + 1);
+  if (!macroTag.includes('ac:name="section"')) {
+    console.log('[findChapter] DEBUG - macro is not a section:', macroTag);
+    return null;
+  }
 
-  // Find the actual start of the start div (search backwards for '<div')
-  const divSearchStart = Math.max(0, startMarkerIndex - 100); // Look back up to 100 chars
-  const beforeStartMarker = pageBody.substring(divSearchStart, startMarkerIndex);
-  const lastDivIndex = beforeStartMarker.lastIndexOf('<div');
-  if (lastDivIndex === -1) return null;
-  const startIndex = divSearchStart + lastDivIndex;
+  // Find the closing </ac:structured-macro> tag
+  // Need to handle nested macros - count opening and closing tags
+  let depth = 1;
+  let searchPos = macroTagEnd + 1;
+  let macroEnd = -1;
+  
+  while (depth > 0 && searchPos < pageBody.length) {
+    const nextOpen = pageBody.indexOf('<ac:structured-macro', searchPos);
+    const nextClose = pageBody.indexOf('</ac:structured-macro>', searchPos);
+    
+    if (nextClose === -1) {
+      console.log('[findChapter] DEBUG - no closing tag found');
+      break;
+    }
+    
+    if (nextOpen !== -1 && nextOpen < nextClose) {
+      // Found another opening tag before the close
+      depth++;
+      searchPos = nextOpen + 1;
+    } else {
+      // Found a closing tag
+      depth--;
+      if (depth === 0) {
+        macroEnd = nextClose + '</ac:structured-macro>'.length;
+      }
+      searchPos = nextClose + 1;
+    }
+  }
+  
+  if (macroEnd === -1) {
+    console.log('[findChapter] DEBUG - could not find matching closing tag');
+    return null;
+  }
 
-  // Find the end of the end div (search forward for '</div>')
-  const afterEndMarker = pageBody.indexOf('</div>', endMarkerIndex);
-  if (afterEndMarker === -1) return null;
-  const endIndex = afterEndMarker + '</div>'.length;
+  // Extract localId from blueprint-local parameter if present
+  const content = pageBody.substring(macroStart, macroEnd);
+  let localId = null;
+  const localParamMatch = content.match(/<ac:parameter ac:name="blueprint-local">([^<]+)<\/ac:parameter>/);
+  if (localParamMatch) {
+    localId = localParamMatch[1];
+  }
 
-  return {
-    startIndex,
-    endIndex,
-    content: pageBody.substring(startIndex, endIndex)
-  };
-}
-
-/**
- * Find managed content zone within a chapter
- *
- * Locates the managed zone by localId, which contains the
- * Source-derived content that gets replaced on republish.
- *
- * Uses hidden div markers with data attributes for reliable detection.
- * Simple indexOf matching - no regex needed!
- *
- * @param {string} pageBody - Full page storage content
- * @param {string} localId - Embed localId
- * @returns {Object|null} { startIndex, endIndex, contentStart, contentEnd, content } or null
- */
-export function findManagedZone(pageBody, localId) {
-  if (!pageBody || !localId) return null;
-
-  // Look for data attribute markers - simple string matching!
-  const startMarker = `data-blueprint-managed="${localId}" data-marker="start"`;
-  const endMarker = `data-blueprint-managed="${localId}" data-marker="end"`;
-
-  const startMarkerIndex = pageBody.indexOf(startMarker);
-  if (startMarkerIndex === -1) return null;
-
-  const endMarkerIndex = pageBody.indexOf(endMarker, startMarkerIndex);
-  if (endMarkerIndex === -1) return null;
-
-  // Find the actual start of the start div
-  const divSearchStart = Math.max(0, startMarkerIndex - 100);
-  const beforeStartMarker = pageBody.substring(divSearchStart, startMarkerIndex);
-  const lastDivIndex = beforeStartMarker.lastIndexOf('<div');
-  if (lastDivIndex === -1) return null;
-  const startIndex = divSearchStart + lastDivIndex;
-
-  // Find the end of the start div (where content begins)
-  const startDivEnd = pageBody.indexOf('</div>', startMarkerIndex);
-  if (startDivEnd === -1) return null;
-  const contentStart = startDivEnd + '</div>'.length;
-
-  // Find the start of the end div (where content ends)
-  const endDivSearchStart = Math.max(0, endMarkerIndex - 100);
-  const beforeEndMarker = pageBody.substring(endDivSearchStart, endMarkerIndex);
-  const endDivStart = beforeEndMarker.lastIndexOf('<div');
-  if (endDivStart === -1) return null;
-  const contentEnd = endDivSearchStart + endDivStart;
-
-  // Find the full end of the end div
-  const endDivEnd = pageBody.indexOf('</div>', endMarkerIndex);
-  if (endDivEnd === -1) return null;
-  const endIndex = endDivEnd + '</div>'.length;
+  console.log('[findChapter] DEBUG - found chapter from', macroStart, 'to', macroEnd);
 
   return {
-    startIndex,
-    endIndex,
-    contentStart,
-    contentEnd,
-    content: pageBody.substring(contentStart, contentEnd).trim()
+    startIndex: macroStart,
+    endIndex: macroEnd,
+    content,
+    localId
   };
-}
-
-/**
- * Replace managed zone content, preserving structure
- *
- * Updates the content within a managed zone without affecting
- * the chapter structure or other page content.
- *
- * Uses hidden div markers with data attributes.
- *
- * @param {string} pageBody - Full page storage content
- * @param {string} localId - Embed localId
- * @param {string} newContent - New content to inject
- * @returns {string|null} Updated page body or null if zone not found
- */
-export function replaceManagedZone(pageBody, localId, newContent) {
-  if (!pageBody || !localId) return null;
-
-  const zone = findManagedZone(pageBody, localId);
-  if (!zone) return null;
-
-  // Build new managed zone with hidden div markers
-  const startMarker = `<div style="display:none" data-blueprint-managed="${localId}" data-marker="start"></div>`;
-  const endMarker = `<div style="display:none" data-blueprint-managed="${localId}" data-marker="end"></div>`;
-
-  return (
-    pageBody.substring(0, zone.startIndex) +
-    startMarker + '\n' +
-    (newContent || '') + '\n' +
-    endMarker +
-    pageBody.substring(zone.endIndex)
-  );
 }
 
 /**
@@ -342,7 +312,7 @@ export function chapterExists(pageBody, chapterId) {
  * Scans the page for all Blueprint chapter markers and returns
  * their IDs in order of appearance.
  *
- * Uses simple regex to extract data attribute values.
+ * Looks for section macros with blueprint-chapter parameter.
  *
  * @param {string} pageBody - Full page storage content
  * @returns {string[]} Array of chapter IDs
@@ -350,13 +320,17 @@ export function chapterExists(pageBody, chapterId) {
 export function getAllChapterIds(pageBody) {
   if (!pageBody) return [];
 
-  // Match data-blueprint-chapter="X" data-marker="start" pattern
-  const pattern = /data-blueprint-chapter="([^"]+)"\s+data-marker="start"/g;
+  // Match <ac:parameter ac:name="blueprint-chapter">{chapterId}</ac:parameter>
+  // Only match those within section macros (not other macro types)
   const ids = [];
+  const pattern = /<ac:parameter ac:name="blueprint-chapter">([^<]+)<\/ac:parameter>/g;
   let match;
 
   while ((match = pattern.exec(pageBody)) !== null) {
-    ids.push(match[1]);
+    const chapterId = match[1];
+    if (!ids.includes(chapterId)) {
+      ids.push(chapterId);
+    }
   }
 
   return ids;

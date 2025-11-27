@@ -18,9 +18,7 @@ import {
   convertAdfToStorage,
   buildChapterStructure,
   buildChapterPlaceholder,
-  findChapter,
-  findManagedZone,
-  replaceManagedZone
+  findChapter
 } from '../utils/storage-format-utils.js';
 import {
   filterContentByToggles,
@@ -295,7 +293,16 @@ export async function injectIncludeContent(req) {
  * @returns {Promise<Object>} Result with success status and page version
  */
 export async function publishChapter(req) {
-  const { pageId, localId, excerptId } = req.payload || {};
+  const { 
+    pageId, 
+    localId, 
+    excerptId,
+    // Accept form values directly from frontend - no dependency on storage!
+    variableValues: passedVariableValues,
+    toggleStates: passedToggleStates,
+    customInsertions: passedCustomInsertions,
+    internalNotes: passedInternalNotes
+  } = req.payload || {};
 
   logFunction('publishChapter', 'START', { pageId, localId, excerptId });
 
@@ -315,22 +322,49 @@ export async function publishChapter(req) {
       return { success: false, error: 'Source not found' };
     }
 
-    // 2. Load Embed config (variables, toggles, etc.)
+    // 2. Use values passed from frontend (matches preview exactly)
+    // Fall back to storage only if not passed (backward compatibility)
     const embedConfig = await storage.get(`macro-vars:${localId}`) || {};
-    const variableValues = embedConfig.variableValues || {};
-    const toggleStates = embedConfig.toggleStates || {};
-    const customInsertions = embedConfig.customInsertions || [];
-    const internalNotes = embedConfig.internalNotes || [];
+    
+    const variableValues = passedVariableValues || embedConfig.variableValues || {};
+    const toggleStates = passedToggleStates || embedConfig.toggleStates || {};
+    const customInsertions = passedCustomInsertions || embedConfig.customInsertions || [];
+    const internalNotes = passedInternalNotes || embedConfig.internalNotes || [];
+    
+    logPhase('publishChapter', 'Using form values', {
+      toggleStateKeys: Object.keys(toggleStates),
+      toggleStateValues: toggleStates,
+      variableValueKeys: Object.keys(variableValues),
+      customInsertionsCount: customInsertions.length,
+      internalNotesCount: Array.isArray(internalNotes) ? internalNotes.length : 0,
+      chapterId: embedConfig.chapterId,
+      usedPassedValues: !!passedToggleStates
+    });
 
     // 3. Render content with all settings applied
     let renderedAdf = excerpt.content;
 
     if (renderedAdf && typeof renderedAdf === 'object' && renderedAdf.type === 'doc') {
+      // Log content stats before filtering
+      const beforeContentLength = JSON.stringify(renderedAdf).length;
+      logPhase('publishChapter', 'Before toggle filtering', { 
+        contentLength: beforeContentLength,
+        toggleStates: toggleStates,
+        hasToggles: JSON.stringify(renderedAdf).includes('{{toggle:')
+      });
+      
       // Apply transformations in correct order
       renderedAdf = substituteVariablesInAdf(renderedAdf, variableValues);
       renderedAdf = insertCustomParagraphsInAdf(renderedAdf, customInsertions);
       renderedAdf = insertInternalNotesInAdf(renderedAdf, internalNotes);
       renderedAdf = filterContentByToggles(renderedAdf, toggleStates);
+      
+      // Log content stats after filtering
+      const afterContentLength = JSON.stringify(renderedAdf).length;
+      logPhase('publishChapter', 'After toggle filtering', { 
+        contentLength: afterContentLength,
+        contentReduction: beforeContentLength - afterContentLength
+      });
     } else {
       logWarning('publishChapter', 'Content is not ADF format', { excerptId });
     }
@@ -362,43 +396,42 @@ export async function publishChapter(req) {
 
     // 6. Determine chapter ID (use existing or generate from localId)
     const chapterId = embedConfig.chapterId || `chapter-${localId}`;
+    console.log('[publishChapter] DEBUG - chapterId:', chapterId);
+    console.log('[publishChapter] DEBUG - embedConfig.chapterId:', embedConfig.chapterId);
 
     // 7. Check if chapter already exists in page
+    console.log('[publishChapter] DEBUG - searching for chapter in page body');
+    console.log('[publishChapter] DEBUG - page body length:', pageBody.length);
+    console.log('[publishChapter] DEBUG - page body contains blueprint-chapter param:', pageBody.includes('ac:parameter ac:name="blueprint-chapter"'));
+    
     const existingChapter = findChapter(pageBody, chapterId);
+    console.log('[publishChapter] DEBUG - existingChapter found:', existingChapter !== null);
+    if (existingChapter) {
+      console.log('[publishChapter] DEBUG - existingChapter.startIndex:', existingChapter.startIndex);
+      console.log('[publishChapter] DEBUG - existingChapter.endIndex:', existingChapter.endIndex);
+    }
 
     let newPageBody;
 
+    // Build the chapter HTML (same structure for new or update)
+    const chapterHtml = buildChapterStructure({
+      chapterId,
+      localId,
+      heading: excerpt.name || 'Untitled Chapter',
+      bodyContent: storageContent
+    });
+
     if (existingChapter) {
-      // Update existing chapter - replace managed zone only
-      logPhase('publishChapter', 'Updating existing chapter', { chapterId });
-      newPageBody = replaceManagedZone(pageBody, localId, storageContent);
-
-      if (!newPageBody) {
-        // Managed zone not found - rebuild entire chapter
-        logPhase('publishChapter', 'Rebuilding chapter (zone markers missing)', { chapterId });
-        const chapterHtml = buildChapterStructure({
-          chapterId,
-          localId,
-          heading: excerpt.name || 'Untitled Chapter',
-          bodyContent: storageContent
-        });
-
-        newPageBody =
-          pageBody.substring(0, existingChapter.startIndex) +
-          chapterHtml +
-          pageBody.substring(existingChapter.endIndex);
-      }
+      // Update existing chapter - replace entire layout block
+      // (With Locked Page Model, the whole chapter IS the managed content)
+      logPhase('publishChapter', 'Replacing existing chapter', { chapterId });
+      newPageBody =
+        pageBody.substring(0, existingChapter.startIndex) +
+        chapterHtml +
+        pageBody.substring(existingChapter.endIndex);
     } else {
       // New chapter - append to page
       logPhase('publishChapter', 'Injecting new chapter', { chapterId });
-      const chapterHtml = buildChapterStructure({
-        chapterId,
-        localId,
-        heading: excerpt.name || 'Untitled Chapter',
-        bodyContent: storageContent
-      });
-
-      // Append after existing content with spacing
       newPageBody = pageBody.trim() + '\n\n' + chapterHtml;
     }
 
@@ -445,13 +478,24 @@ export async function publishChapter(req) {
       internalNotes
     });
 
+    // Save the ACTUAL values used for publishing (not the old embedConfig values)
+    // This ensures the form state is persisted correctly
     await storage.set(`macro-vars:${localId}`, {
+      // Preserve existing fields from embedConfig that we don't override
       ...embedConfig,
+      // Save the values that were actually used for publishing
+      variableValues,
+      toggleStates,
+      customInsertions,
+      internalNotes,
+      // Publish metadata
       chapterId,
       excerptId,
       publishedAt: new Date().toISOString(),
       publishedContentHash,
-      publishedVersion: updatedPage.version.number
+      publishedVersion: updatedPage.version.number,
+      // Update sync timestamp
+      lastSynced: new Date().toISOString()
     });
 
     logSuccess('publishChapter', 'Successfully published', {

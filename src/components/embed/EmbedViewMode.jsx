@@ -109,35 +109,34 @@ export function EmbedViewMode({
   };
 
   // ============================================================================
-  // COMPOSITOR MODEL: Hide Embed UI when content is published natively
+  // COMPOSITOR MODEL: Minimal UI when content is published natively
   // ============================================================================
   // When content has been published to the page (isPublished=true), we don't need
-  // to render the iframe content - it's already on the page natively.
-  // We only become visible when:
-  // 1. Checking for staleness (show spinner)
-  // 2. Staleness detected (show Update Available banner)
+  // to render the preview content - it's already on the page natively.
+  // We only show:
+  // 1. Edit button (always, for Locked Page Model)
+  // 2. Update Available banner (only when stale, with Review button)
   if (isPublished) {
-    // Still checking - show nothing (page content is already visible)
-    if (isCheckingStaleness) {
-      return null;
-    }
-    
-    // Not stale - content is up-to-date, stay hidden
-    if (!isStale) {
-      return null;
-    }
-    
-    // Stale! Show the Update Available banner only
     return (
-      <Box xcss={staleBorderWrapperStyle}>
-        <Stack space="space.150">
-          <StalenessCheckIndicator
-            isCheckingStaleness={false}
-            isStale={true}
-            showUpdateBanner={showUpdateBanner}
-            onReviewClick={handleReviewClick}
-          />
-          {showUpdateBanner && (
+      <Box xcss={xcss({ padding: 'space.050' })}>
+        {/* Edit button - always visible in Locked Page Model */}
+        {onEditClick && (
+          <Inline space="space.100" alignBlock="center">
+            <Button appearance="subtle" onClick={onEditClick}>
+              Edit ✏️
+            </Button>
+            {/* Show subtle "Update Available" indicator when stale */}
+            {isStale && !isCheckingStaleness && !showUpdateBanner && (
+              <Button appearance="warning" onClick={handleReviewClick}>
+                Update Available
+              </Button>
+            )}
+          </Inline>
+        )}
+        
+        {/* Full Update banner - only shown after clicking "Update Available" */}
+        {showUpdateBanner && isStale && (
+          <Box xcss={xcss({ marginTop: 'space.100' })}>
             <UpdateAvailableBanner
               isStale={isStale}
               showDiffView={showDiffView}
@@ -149,8 +148,8 @@ export function EmbedViewMode({
               variableValues={variableValues}
               toggleStates={toggleStates}
             />
-          )}
-        </Stack>
+          </Box>
+        )}
       </Box>
     );
   }

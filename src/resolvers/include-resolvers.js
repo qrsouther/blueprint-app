@@ -151,6 +151,7 @@ export async function saveVariableValues(req) {
     const existingPageTitle = existingConfig?.pageTitle || null;
 
     // Build the new config object
+    // CRITICAL: Preserve publish metadata from existing config (chapterId, publishedAt, etc.)
     const newConfig = {
       excerptId,
       variableValues,
@@ -169,7 +170,13 @@ export async function saveVariableValues(req) {
       approvedAt,
       statusHistory,
       pageId: explicitPageId || req.context?.extension?.content?.id,  // Store for redline queue
-      pageTitle: existingPageTitle  // Preserve existing, will be updated async if available
+      pageTitle: existingPageTitle,  // Preserve existing, will be updated async if available
+      
+      // Preserve publish metadata from existing config (added by publishChapter)
+      chapterId: existingConfig?.chapterId,
+      publishedAt: existingConfig?.publishedAt,
+      publishedContentHash: existingConfig?.publishedContentHash,
+      publishedVersion: existingConfig?.publishedVersion
     };
 
     await storage.set(key, newConfig);
