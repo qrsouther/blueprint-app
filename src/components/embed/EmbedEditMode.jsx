@@ -43,6 +43,7 @@
  * @param {boolean} props.isPublishing - Whether publish is in progress
  * @param {Function} props.onPublish - Handler for publish button click
  * @param {boolean} props.needsRepublish - Whether content changed since last publish
+ * @param {Function} props.onClose - Handler for close button (Locked Page Model - null if in Confluence edit mode)
  * @returns {JSX.Element} - Edit mode JSX
  */
 
@@ -102,7 +103,9 @@ export function EmbedEditMode({
   publishStatus,
   isPublishing,
   onPublish,
-  needsRepublish
+  needsRepublish,
+  // Locked Page Model props
+  onClose
 }) {
   const [copySuccess, setCopySuccess] = useState(false);
 
@@ -243,6 +246,12 @@ export function EmbedEditMode({
               <Icon glyph="check-circle" color="success" size="small" label="Saved" />
               <Text><Em>Saved</Em></Text>
             </Fragment>
+          )}
+          {/* Done button for Locked Page Model (when editing via View Mode) */}
+          {onClose && (
+            <Button appearance="primary" onClick={onClose}>
+              Done
+            </Button>
           )}
         </Inline>
       </Inline>

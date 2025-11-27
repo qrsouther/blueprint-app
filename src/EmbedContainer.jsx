@@ -247,6 +247,14 @@ const App = () => {
   const [latestRenderedContent, setLatestRenderedContent] = useState(null);
   const [syncedContent, setSyncedContent] = useState(null); // Old Source ADF from last sync for diff comparison
 
+  // ============================================================================
+  // LOCKED PAGE MODEL: Local edit state (independent of Confluence's page edit mode)
+  // ============================================================================
+  // In the Locked Page Model, users cannot access Confluence's page Edit Mode.
+  // Instead, each Embed has its own Edit button that opens the edit UI.
+  // This state tracks whether the user has clicked the Edit button on THIS Embed.
+  const [isEditingEmbed, setIsEditingEmbed] = useState(false);
+
   // Publish state (Compositor + Native Injection model)
   const [publishStatus, setPublishStatus] = useState(null);
   const [isPublishing, setIsPublishing] = useState(false);
@@ -1473,8 +1481,15 @@ const App = () => {
     }
   };
 
+  // ============================================================================
   // EDIT MODE: Show variable inputs and preview
-  if (isEditing) {
+  // ============================================================================
+  // Show edit mode when:
+  // 1. Confluence's page is in edit mode (isEditing - backward compatibility), OR
+  // 2. User clicked the Embed's Edit button (isEditingEmbed - Locked Page Model)
+  const showEditMode = isEditing || isEditingEmbed;
+  
+  if (showEditMode) {
     const pageId = context?.contentId || context?.extension?.content?.id;
     
     return (
@@ -1529,12 +1544,16 @@ const App = () => {
           isPublishing={isPublishing}
           onPublish={handlePublish}
           needsRepublish={needsRepublish}
+          // Close handler for Locked Page Model (exit edit mode without saving)
+          onClose={isEditingEmbed ? () => setIsEditingEmbed(false) : null}
         />
       </Fragment>
     );
   }
 
+  // ============================================================================
   // VIEW MODE: Show content with update notification if stale
+  // ============================================================================
   return (
     <EmbedViewMode
       content={content}
@@ -1554,6 +1573,8 @@ const App = () => {
       approvedBy={variableValuesData?.approvedBy}
       approvedAt={variableValuesData?.approvedAt}
       lastChangedBy={variableValuesData?.lastChangedBy}
+      // Locked Page Model: Edit button handler
+      onEditClick={() => setIsEditingEmbed(true)}
     />
   );
 };

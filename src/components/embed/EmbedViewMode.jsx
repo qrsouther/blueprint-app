@@ -35,6 +35,7 @@
  * @param {Array} props.internalNotes - Internal notes to apply to content
  * @param {boolean} props.isPublished - Whether content has been published to page (Compositor model)
  * @param {Function} props.onRepublish - Handler for republish button when stale (Compositor model)
+ * @param {Function} props.onEditClick - Handler for Edit button (Locked Page Model)
  * @returns {JSX.Element} - View mode JSX
  */
 
@@ -47,7 +48,8 @@ import {
   Lozenge,
   Inline,
   xcss,
-  Heading
+  Heading,
+  Button
 } from '@forge/react';
 
 // Subtle border wrapper that appears only when stale
@@ -63,6 +65,14 @@ import { UpdateAvailableBanner } from './UpdateAvailableBanner';
 import { DocumentationLinksDisplay } from './DocumentationLinksDisplay';
 import { StalenessCheckIndicator } from './StalenessCheckIndicator';
 import { adfContentContainerStyle } from '../../styles/embed-styles';
+
+// Style for the Edit button container (positioned at top-right)
+const editButtonContainerStyle = xcss({
+  position: 'absolute',
+  top: 'space.100',
+  right: 'space.100',
+  zIndex: 'layer'
+});
 
 export function EmbedViewMode({
   content,
@@ -84,7 +94,9 @@ export function EmbedViewMode({
   lastChangedBy,
   // Compositor + Native Injection model props
   isPublished = false,
-  onRepublish
+  onRepublish,
+  // Locked Page Model props
+  onEditClick
 }) {
   // State for progressive disclosure - only show banner when user clicks Review button
   const [showUpdateBanner, setShowUpdateBanner] = useState(false);
@@ -201,6 +213,14 @@ export function EmbedViewMode({
 
     return wrapperContent(
       <Box xcss={xcss({ position: 'relative', width: '100%' })}>
+        {/* Edit button for Locked Page Model */}
+        {onEditClick && (
+          <Box xcss={editButtonContainerStyle}>
+            <Button appearance="subtle" onClick={onEditClick}>
+              Edit ✏️
+            </Button>
+          </Box>
+        )}
         {/* Only show Review Update button when stale (not when just checking) */}
         {isStale && !isCheckingStaleness && (
           <StalenessCheckIndicator
@@ -248,6 +268,14 @@ export function EmbedViewMode({
   // Plain text content
   return wrapperContent(
     <Box xcss={xcss({ position: 'relative', width: '100%' })}>
+      {/* Edit button for Locked Page Model */}
+      {onEditClick && (
+        <Box xcss={editButtonContainerStyle}>
+          <Button appearance="subtle" onClick={onEditClick}>
+            Edit ✏️
+          </Button>
+        </Box>
+      )}
       {/* Only show Review Update button when stale (not when just checking) */}
       {isStale && !isCheckingStaleness && (
         <StalenessCheckIndicator
