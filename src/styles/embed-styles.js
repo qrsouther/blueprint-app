@@ -75,6 +75,11 @@ export const sectionContentStyle = xcss({
 export const adfContentContainerStyle = xcss({
   width: '100%',
   maxWidth: '100%',
+  paddingTop: 'space.050',
+  paddingBottom: 'space.100',
+  paddingLeft: 'space.150',
+  paddingRight: 'space.150',
+  margin: 'space.0',
   overflow: 'hidden'
 });
 
@@ -94,4 +99,17 @@ export const excerptSelectorStyle = xcss({
  */
 export const textfieldWrapperStyle = xcss({
   caretColor: 'color.text'
+});
+
+/**
+ * Edit button border container styling
+ * Top border container for Edit buttons in all states (loading, active, etc.)
+ * Used by: EmbedViewMode, EmbedContainer
+ */
+export const editButtonBorderContainerStyle = xcss({
+  borderTopWidth: '1px',
+  borderTopStyle: 'solid',
+  borderTopColor: 'color.border',
+  paddingTop: 'space.100',
+  marginTop: '-space.050' // pull border to edge of container
 });

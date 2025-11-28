@@ -120,7 +120,8 @@ import {
   updateBannerStyle,
   sectionContentStyle,
   adfContentContainerStyle,
-  excerptSelectorStyle
+  excerptSelectorStyle,
+  editButtonBorderContainerStyle
 } from './styles/embed-styles';
 
 // Import logger for structured error logging
@@ -185,6 +186,8 @@ const App = () => {
 
   // NEW: Inline excerpt selection state (will be loaded from backend storage)
   const [selectedExcerptId, setSelectedExcerptId] = useState(null);
+  // Track original excerpt ID (for Reset button)
+  const [originalExcerptId, setOriginalExcerptId] = useState(null);
   // availableExcerpts state removed - now managed by React Query
   const [isInitializing, setIsInitializing] = useState(true);
 
@@ -294,7 +297,8 @@ const App = () => {
   const {
     data: variableValuesData,
     isLoading: isLoadingVariableValues,
-    error: variableValuesError
+    error: variableValuesError,
+    refetch: refetchVariableValues
   } = useVariableValues(effectiveLocalId, true);
 
   // Use React Query to fetch cached content (view mode only)
@@ -374,11 +378,17 @@ const App = () => {
   useEffect(() => {
     if (variableValuesData && variableValuesData.excerptId) {
       setSelectedExcerptId(variableValuesData.excerptId);
+      // Set original excerpt ID from storage ONLY on initial load (if not already set)
+      // This preserves the original even when source changes
+      // The original is either the published excerptId (if published) or the initial one
+      if (!originalExcerptId) {
+        setOriginalExcerptId(variableValuesData.excerptId);
+      }
     }
     if (!isLoadingVariableValues) {
       setIsInitializing(false);
     }
-  }, [variableValuesData, isLoadingVariableValues]);
+  }, [variableValuesData?.excerptId, isLoadingVariableValues]);
 
   // ============================================================================
   // SYNC EFFECT: React Query → Component State (READ operation)
@@ -444,7 +454,17 @@ const App = () => {
       // Only sync if values actually differ (prevents overwriting user edits with stale data)
       if (valuesDiffer) {
         const normalizedValues = normalizeVariableValues(variableValuesData.variableValues);
+        logger.saves('[EmbedContainer] Syncing variable values from storage', {
+          localId: effectiveLocalId,
+          keys: newKeys,
+          normalizedValues
+        });
         setValue('variableValues', normalizedValues, { shouldDirty: false });
+      } else {
+        logger.saves('[EmbedContainer] Skipping variable values sync - values match', {
+          localId: effectiveLocalId,
+          keys: newKeys
+        });
       }
     }
     if (variableValuesData.toggleStates && Object.keys(variableValuesData.toggleStates).length > 0) {
@@ -480,10 +500,24 @@ const App = () => {
   // Reset the sync guard when user enters edit mode via the Edit button (Locked Page Model)
   // This allows fresh data to be loaded from storage when reopening the editor
   useEffect(() => {
-    if (isEditingEmbed) {
+    if (isEditingEmbed && variableValuesData && !isLoadingVariableValues) {
       hasLoadedInitialDataRef.current = false;
+      // Explicitly reset the form with fresh data from storage
+      // This ensures the form shows the correct values that were saved (e.g., after publish)
+      reset({
+        variableValues: normalizeVariableValues(variableValuesData.variableValues || {}),
+        toggleStates: variableValuesData.toggleStates || {},
+        customInsertions: variableValuesData.customInsertions || [],
+        internalNotes: variableValuesData.internalNotes || []
+      }, { keepDefaultValues: false });
+      // Mark as synced to prevent the sync effect from overwriting
+      hasLoadedInitialDataRef.current = true;
+    } else if (isEditingEmbed) {
+      // If data isn't loaded yet, reset the guard and refetch
+      hasLoadedInitialDataRef.current = false;
+      refetchVariableValues();
     }
-  }, [isEditingEmbed]);
+  }, [isEditingEmbed, variableValuesData, isLoadingVariableValues, refetchVariableValues, reset]);
 
   // CRITICAL: Reset sync guard when variableValuesData changes significantly after initial load
   // This allows restored data to sync to state after a version restore
@@ -742,7 +776,8 @@ const App = () => {
       // Insert custom paragraphs and internal notes into original content (before toggle filtering)
       freshContent = substituteVariablesInAdf(freshContent, loadedVariableValues);
       freshContent = insertCustomParagraphsInAdf(freshContent, loadedCustomInsertions);
-      freshContent = insertInternalNotesInAdf(freshContent, loadedInternalNotes);
+      // Pass customInsertions to adjust internal note positions
+      freshContent = insertInternalNotesInAdf(freshContent, loadedInternalNotes, loadedCustomInsertions);
       // Then filter toggles (this will preserve insertions inside enabled toggles)
       freshContent = filterContentByToggles(freshContent, loadedToggleStates);
         } else {
@@ -1110,7 +1145,7 @@ const App = () => {
   })();
 
   // Handler for publishing chapter to page
-  const handlePublish = async () => {
+  const handlePublish = async (customHeading) => {
     if (!effectiveLocalId || !selectedExcerptId || isPublishing) {
       return;
     }
@@ -1125,20 +1160,27 @@ const App = () => {
         throw new Error('Unable to determine page ID');
       }
 
+      // Use custom heading or fall back to excerpt name
+      const heading = customHeading || excerpt?.name || 'Untitled Chapter';
+
       // Pass current form state directly to publishChapter
       // This ensures the published content matches what's shown in the preview
       // No dependency on auto-save or storage - uses live form values
       logger.saves('[EmbedContainer] Publishing with current form state', {
         localId: effectiveLocalId,
+        heading: heading,
         toggleStateKeys: Object.keys(toggleStates || {}),
         toggleStateValues: toggleStates,
-        variableValueCount: Object.keys(variableValues || {}).length
+        variableValueCount: Object.keys(variableValues || {}).length,
+        variableValues: variableValues || {},
+        sampleVariableKeys: Object.keys(variableValues || {}).slice(0, 5)
       });
 
       const result = await invoke('publishChapter', {
         pageId: pageId,
         localId: effectiveLocalId,
         excerptId: selectedExcerptId,
+        heading: heading,
         // Pass current form values directly - don't rely on storage
         variableValues: variableValues || {},
         toggleStates: toggleStates || {},
@@ -1153,6 +1195,9 @@ const App = () => {
           publishedVersion: result.pageVersion,
           chapterId: result.chapterId
         });
+        
+        // Update original excerpt ID to the one that was just published
+        setOriginalExcerptId(selectedExcerptId);
 
         // CRITICAL: Update lastSavedValuesRef so we don't lose track of what was saved
         // This prevents auto-save from thinking values changed after publish
@@ -1170,6 +1215,45 @@ const App = () => {
           localId: effectiveLocalId,
           pageVersion: result.pageVersion
         });
+
+        // Navigate to heading anchor after successful publish
+        try {
+          const heading = customHeading || excerpt?.name || 'Untitled Chapter';
+          // Convert heading to anchor format (spaces to hyphens, lowercase)
+          const headingAnchor = heading.replace(/\s+/g, '-').toLowerCase();
+          
+          // Get current page URL from context
+          const spaceKey = context?.extension?.space?.key || context?.spaceKey;
+          const currentPageId = context?.contentId || context?.extension?.content?.id;
+          
+          if (spaceKey && currentPageId) {
+            // Build URL with heading anchor
+            const url = `/wiki/spaces/${spaceKey}/pages/${currentPageId}#${headingAnchor}`;
+            // Use router.open to navigate (this will refresh the page and scroll to anchor)
+            await router.open(url);
+          } else if (currentPageId) {
+            // Fallback: try to get URL from view API
+            try {
+              const contentLink = await view.createContentLink({
+                contentType: 'page',
+                contentId: currentPageId
+              });
+              const url = `${contentLink}#${headingAnchor}`;
+              await router.open(url);
+            } catch (navError) {
+              logger.errors('[EmbedContainer] Navigation error:', navError);
+              // If navigation fails, just refresh the page - user can manually scroll
+              window.location.reload();
+            }
+          } else {
+            // Last resort: reload current page
+            window.location.reload();
+          }
+        } catch (navError) {
+          logger.errors('[EmbedContainer] Navigation error after publish:', navError);
+          // If navigation fails, reload the page
+          window.location.reload();
+        }
       } else {
         throw new Error(result.error || 'Publish failed');
       }
@@ -1187,6 +1271,7 @@ const App = () => {
 
     // Select component passes the entire option object
     const newExcerptId = selectedOption.value;
+    const oldExcerptId = selectedExcerptId;
 
     // Block auto-save during excerpt transition to prevent duplicate version history
     isLoadingInitialDataRef.current = true;
@@ -1197,11 +1282,49 @@ const App = () => {
     // Save to backend storage
     const pageId = context?.contentId || context?.extension?.content?.id;
 
-    // Use mutation to save the selection
+    // Preserve variable values that exist in both old and new sources
+    // Get current form values before resetting
+    const currentVariableValues = variableValues || {};
+    const currentToggleStates = toggleStates || {};
+    
+    // Get new excerpt to check which variables it has
+    const newExcerptResult = await invoke('getExcerpt', { excerptId: newExcerptId });
+    const newExcerpt = newExcerptResult.success && newExcerptResult.data?.excerpt;
+    
+    // Preserve variable values that match between old and new sources
+    const preservedVariableValues = {};
+    if (newExcerpt?.variables && oldExcerptId) {
+      // Get old excerpt to compare variable names
+      const oldExcerptResult = await invoke('getExcerpt', { excerptId: oldExcerptId });
+      const oldExcerpt = oldExcerptResult.success && oldExcerptResult.data?.excerpt;
+      
+      if (oldExcerpt?.variables) {
+        // Create a map of old variable names
+        const oldVariableNames = new Set(oldExcerpt.variables.map(v => v.name));
+        
+        // Preserve values for variables that exist in both sources
+        newExcerpt.variables.forEach(variable => {
+          if (oldVariableNames.has(variable.name) && currentVariableValues[variable.name] !== undefined && currentVariableValues[variable.name] !== '') {
+            preservedVariableValues[variable.name] = currentVariableValues[variable.name];
+          }
+        });
+      }
+    }
+
+    // Update form directly with preserved values (before saving to storage)
+    // This ensures the form has the values immediately
+    if (Object.keys(preservedVariableValues).length > 0) {
+      const normalizedPreserved = normalizeVariableValues(preservedVariableValues);
+      Object.keys(normalizedPreserved).forEach(key => {
+        setValue(`variableValues.${key}`, normalizedPreserved[key], { shouldDirty: false });
+      });
+    }
+
+    // Use mutation to save the selection with preserved variable values
     saveVariableValuesMutation({
       localId: effectiveLocalId,
       excerptId: newExcerptId,
-      variableValues: {},
+      variableValues: preservedVariableValues,
       toggleStates: {},
       customInsertions: [],
       internalNotes: []
@@ -1223,7 +1346,28 @@ const App = () => {
 
   // View mode with no selectedExcerptId
   if (!selectedExcerptId && !isEditing) {
-    return <Text>No standard selected. Edit this macro to choose one.</Text>;
+    // Show Edit button disabled (always loading in this state) - match isLoading styling exactly
+    return (
+      <Box xcss={xcss({ padding: 'space.050' })}>
+        <Box xcss={editButtonBorderContainerStyle}>
+          <Inline
+            space="space.100"
+            alignBlock="center"
+          >
+            <Button
+              appearance="default"
+              onClick={undefined}
+              shouldFitContainer={true}
+              iconAfter="chevron-down"
+              spacing="compact"
+              isDisabled={true}
+            >
+              Loading Editor...
+            </Button>
+          </Inline>
+        </Box>
+      </Box>
+    );
   }
   
   // Note: We no longer have an early return for edit mode with no selectedExcerptId
@@ -1274,9 +1418,30 @@ const App = () => {
   // NOTE: Automatic recovery UI removed - replaced with user-controlled DeactivatedEmbedsSelector
   // The isRecovering state is kept for backwards compatibility but is no longer used
 
-  // Show spinner while loading in view mode
+  // Show Edit button disabled while loading in view mode
   if (!content && !isEditing) {
-    return <Spinner />;
+    const isLoading = isLoadingCachedContent || isLoadingExcerpt;
+    return (
+      <Box xcss={xcss({ padding: 'space.050' })}>
+        <Box xcss={editButtonBorderContainerStyle}>
+          <Inline 
+            space="space.100" 
+            alignBlock="center"
+          >
+            <Button 
+              appearance="default" 
+              onClick={isLoading ? undefined : () => setIsEditingEmbed(true)}
+              shouldFitContainer={true}
+              iconAfter="chevron-down"
+              isDisabled={isLoading}
+              spacing="compact"
+            >
+              Loading Editor...
+            </Button>
+          </Inline>
+        </Box>
+      </Box>
+    );
   }
 
   // Helper function to get preview content with current variable and toggle values
@@ -1300,7 +1465,8 @@ const App = () => {
       // Insert custom paragraphs and internal notes into original content (before toggle filtering)
       previewContent = substituteVariablesInAdf(previewContent, variableValues);
       previewContent = insertCustomParagraphsInAdf(previewContent, customInsertions);
-      previewContent = insertInternalNotesInAdf(previewContent, internalNotes);
+      // Pass customInsertions to adjust internal note positions
+      previewContent = insertInternalNotesInAdf(previewContent, internalNotes, customInsertions);
       // Then filter toggles (this will preserve insertions inside enabled toggles)
       previewContent = filterContentByToggles(previewContent, toggleStates);
       return cleanAdfForRenderer(previewContent);
@@ -1345,7 +1511,8 @@ const App = () => {
       // Insert custom paragraphs and internal notes into original content (before toggle filtering)
       previewContent = substituteVariablesInAdf(previewContent, variableValues);
       previewContent = insertCustomParagraphsInAdf(previewContent, customInsertions);
-      previewContent = insertInternalNotesInAdf(previewContent, internalNotes);
+      // Pass customInsertions to adjust internal note positions
+      previewContent = insertInternalNotesInAdf(previewContent, internalNotes, customInsertions);
       // Then filter toggles (removes disabled content) but DON'T strip markers
       previewContent = filterContentByToggles(previewContent, toggleStates);
       return cleanAdfForRenderer(previewContent);
@@ -1584,8 +1751,10 @@ const App = () => {
           // Publish props (Compositor + Native Injection)
           publishStatus={publishStatus}
           isPublishing={isPublishing}
+          publishError={publishError}
           onPublish={handlePublish}
           needsRepublish={needsRepublish}
+          originalExcerptId={originalExcerptId}
           // Close handler for Locked Page Model (exit edit mode without saving)
           onClose={isEditingEmbed ? () => setIsEditingEmbed(false) : null}
         />

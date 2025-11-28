@@ -350,7 +350,8 @@ export async function saveVariableValues(req) {
           try {
             previewContent = substituteVariablesInAdf(previewContent, variableValues || {});
             previewContent = insertCustomParagraphsInAdf(previewContent, customInsertions || []);
-            previewContent = insertInternalNotesInAdf(previewContent, internalNotes || []);
+            // Pass customInsertions to adjust internal note positions
+            previewContent = insertInternalNotesInAdf(previewContent, internalNotes || [], customInsertions || []);
             // Then filter toggles (this will preserve insertions inside enabled toggles)
             previewContent = filterContentByToggles(previewContent, toggleStates || {});
             previewContent = cleanAdfForRenderer(previewContent);

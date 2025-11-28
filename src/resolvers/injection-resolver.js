@@ -297,6 +297,7 @@ export async function publishChapter(req) {
     pageId, 
     localId, 
     excerptId,
+    heading: passedHeading,
     // Accept form values directly from frontend - no dependency on storage!
     variableValues: passedVariableValues,
     toggleStates: passedToggleStates,
@@ -356,7 +357,9 @@ export async function publishChapter(req) {
       // Apply transformations in correct order
       renderedAdf = substituteVariablesInAdf(renderedAdf, variableValues);
       renderedAdf = insertCustomParagraphsInAdf(renderedAdf, customInsertions);
-      renderedAdf = insertInternalNotesInAdf(renderedAdf, internalNotes);
+      // Pass customInsertions to insertInternalNotesInAdf so it can adjust positions
+      // (internal note positions are based on original content, but custom paragraphs are already inserted)
+      renderedAdf = insertInternalNotesInAdf(renderedAdf, internalNotes, customInsertions);
       renderedAdf = filterContentByToggles(renderedAdf, toggleStates);
       
       // Log content stats after filtering
@@ -414,10 +417,12 @@ export async function publishChapter(req) {
     let newPageBody;
 
     // Build the chapter HTML (same structure for new or update)
+    // Use passed heading or fall back to excerpt name
+    const heading = passedHeading || excerpt.name || 'Untitled Chapter';
     const chapterHtml = buildChapterStructure({
       chapterId,
       localId,
-      heading: excerpt.name || 'Untitled Chapter',
+      heading: heading,
       bodyContent: storageContent
     });
 

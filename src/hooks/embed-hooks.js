@@ -282,7 +282,8 @@ export const useCachedContent = (
           // Insert custom paragraphs and internal notes into original content (before toggle filtering)
           freshContent = substituteVariablesInAdf(freshContent, loadedVariableValues);
           freshContent = insertCustomParagraphsInAdf(freshContent, loadedCustomInsertions);
-          freshContent = insertInternalNotesInAdf(freshContent, loadedInternalNotes);
+          // Pass customInsertions to adjust internal note positions
+          freshContent = insertInternalNotesInAdf(freshContent, loadedInternalNotes, loadedCustomInsertions);
           // Then filter toggles (this will preserve insertions inside enabled toggles)
           freshContent = filterContentByToggles(freshContent, loadedToggleStates);
           

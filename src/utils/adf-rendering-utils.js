@@ -471,19 +471,31 @@ export const insertCustomParagraphsInAdf = (adfNode, customInsertions) => {
 /**
  * Insert internal note markers inline in ADF content
  *
- * Uses footnote-style numbering with content collected at the bottom.
+ * Uses footnote-style numbering with content collected at the bottom in an Expand macro.
  * Recursively traverses nested structures (panels, tables, etc.) to match
  * how extractParagraphsFromAdf counts paragraphs.
  *
- * All internal note elements use distinctive gray color (#2B2C2E) for:
- * 1. CSS styling in Confluence (distinctive appearance)
- * 2. External filtering (hide from external users)
+ * CRITICAL: Internal note positions are based on ORIGINAL content (before custom paragraphs).
+ * This function receives content that may already have custom paragraphs inserted.
+ * We adjust positions to account for custom paragraphs inserted before each internal note.
  *
- * @param {Object} adfNode - ADF node to process
- * @param {Array} internalNotes - Array of {position: number, content: string}
+ * Inline markers use native Confluence superscript formatting (subsup mark type)
+ * which converts to <sup> tags in storage format for proper rendering and indexing.
+ *
+ * All internal note elements use distinctive gray color (#505258) for:
+ * 1. Visual distinction from regular content
+ * 2. External filtering (hide from external users if needed)
+ *
+ * Format:
+ * - Inline: Regular number with superscript mark (renders as ¹, ², ³...)
+ * - Expand macro: [Superscript number] | [Note text]
+ *
+ * @param {Object} adfNode - ADF node to process (may already have custom paragraphs inserted)
+ * @param {Array} internalNotes - Array of {position: number, content: string} (positions based on original content)
+ * @param {Array} customInsertions - Array of {position: number, text: string} (for position adjustment)
  * @returns {Object} ADF node with internal notes inserted
  */
-export const insertInternalNotesInAdf = (adfNode, internalNotes) => {
+export const insertInternalNotesInAdf = (adfNode, internalNotes, customInsertions = []) => {
   if (!adfNode || !adfNode.content || !internalNotes || internalNotes.length === 0) {
     return adfNode;
   }
@@ -491,17 +503,25 @@ export const insertInternalNotesInAdf = (adfNode, internalNotes) => {
   // Sort notes by position to assign sequential footnote numbers
   const sortedNotes = [...internalNotes].sort((a, b) => a.position - b.position);
 
-  // Create a map of position -> footnote number
-  const positionToNumber = {};
+  // CRITICAL FIX: Adjust internal note positions to account for custom paragraphs
+  // Internal note positions are based on ORIGINAL content, but we're processing
+  // content that already has custom paragraphs inserted.
+  // For each internal note at original position P, we need to find it at position
+  // P + (count of custom paragraphs inserted at positions <= P) in the modified content.
+  const adjustedPositionToNumber = {};
   sortedNotes.forEach((note, index) => {
-    positionToNumber[note.position] = index + 1;
+    const originalPosition = note.position;
+    // Count how many custom paragraphs were inserted at positions <= originalPosition
+    const customParagraphsBefore = customInsertions.filter(
+      ins => ins.position <= originalPosition
+    ).length;
+    // Adjusted position in content that already has custom paragraphs
+    const adjustedPosition = originalPosition + customParagraphsBefore;
+    adjustedPositionToNumber[adjustedPosition] = index + 1;
   });
 
-  // Unicode superscript numbers
-  const superscriptNumbers = ['⁰', '¹', '²', '³', '⁴', '⁵', '⁶', '⁷', '⁸', '⁹'];
-  const toSuperscript = (num) => {
-    return num.toString().split('').map(digit => superscriptNumbers[parseInt(digit)]).join('');
-  };
+  // Create a map of position -> footnote number (using adjusted positions)
+  const positionToNumber = adjustedPositionToNumber;
 
   // Use a shared counter object so it persists across recursive calls
   const paragraphIndex = { value: 0 };
@@ -533,11 +553,18 @@ export const insertInternalNotesInAdf = (adfNode, internalNotes) => {
         // Use processedNode.content (already processed children) instead of node.content
         const paragraphContent = [...(processedNode.content || [])];
 
-        // Add inline marker with distinctive color for internal notes
+        // Add inline marker with native Confluence superscript formatting
+        // This converts to <sup> tags in storage format for proper rendering
         paragraphContent.push({
           type: 'text',
-          text: toSuperscript(noteNumber),
+          text: noteNumber.toString(), // Regular number (1, 2, 3...) - will be rendered as superscript
           marks: [
+            {
+              type: 'subsup',
+              attrs: {
+                type: 'sup' // Native Confluence superscript
+              }
+            },
             {
               type: 'textColor',
               attrs: {
@@ -564,31 +591,13 @@ export const insertInternalNotesInAdf = (adfNode, internalNotes) => {
   const newContent = [...processedAdf.content];
 
   // Add footnotes section at the bottom wrapped in an expand node
+  // NOTE: This Expand macro will be nested inside the Section macro (for redlining boundaries)
+  // This may trigger a "Legacy Content" warning in Confluence, but the content works correctly.
+  // The warning is informational only - nested macros are preserved and functional.
   if (sortedNotes.length > 0) {
-    // Wrap entire footnotes section in an expandable/collapsible section
-    // External filtering app will hide all expand nodes
     const footnotesContent = [];
 
-    // Add "Internal Notes" heading with lock icon
-    footnotesContent.push({
-      type: 'paragraph',
-      content: [
-        {
-          type: 'text',
-          text: '🔏 Internal Notes',
-          marks: [
-            {
-              type: 'strong'
-            },
-            {
-              type: 'em'
-            }
-          ]
-        }
-      ]
-    });
-
-    // Add each footnote with its number
+    // Add each footnote with its number in format: [Superscript number] | [Note text]
     sortedNotes.forEach((note, index) => {
       const footnoteNumber = index + 1;
       footnotesContent.push({
@@ -596,8 +605,14 @@ export const insertInternalNotesInAdf = (adfNode, internalNotes) => {
         content: [
           {
             type: 'text',
-            text: `${toSuperscript(footnoteNumber)} `,
+            text: footnoteNumber.toString(), // Regular number - will be rendered as superscript
             marks: [
+              {
+                type: 'subsup',
+                attrs: {
+                  type: 'sup' // Native Confluence superscript
+                }
+              },
               {
                 type: 'strong'
               }
@@ -605,26 +620,25 @@ export const insertInternalNotesInAdf = (adfNode, internalNotes) => {
           },
           {
             type: 'text',
-            text: note.content,
-            marks: [
-              {
-                type: 'em'
-              }
-            ]
+            text: ' | ' // Pipe separator
+          },
+          {
+            type: 'text',
+            text: note.content
           }
         ]
       });
     });
 
     // Use an expand (collapsible section) for internal notes
-    // This gives us a cleaner appearance without forced panel icons
+    // Nested inside Section macro to keep it within chapter boundaries for redlining
     // External filtering app should hide expand nodes with title '🔏 Internal Notes'
     newContent.push({
       type: 'expand',
       attrs: {
         title: '🔏 Internal Notes'
       },
-      content: footnotesContent.slice(1) // Skip the heading since expand already has a title
+      content: footnotesContent
     });
   }
 

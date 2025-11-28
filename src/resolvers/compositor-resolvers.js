@@ -317,7 +317,8 @@ export async function bulkPublishChapters(req) {
         if (renderedAdf && typeof renderedAdf === 'object' && renderedAdf.type === 'doc') {
           renderedAdf = substituteVariablesInAdf(renderedAdf, variableValues);
           renderedAdf = insertCustomParagraphsInAdf(renderedAdf, customInsertions);
-          renderedAdf = insertInternalNotesInAdf(renderedAdf, internalNotes);
+          // Pass customInsertions to adjust internal note positions
+          renderedAdf = insertInternalNotesInAdf(renderedAdf, internalNotes, customInsertions);
           renderedAdf = filterContentByToggles(renderedAdf, toggleStates);
         }
 

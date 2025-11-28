@@ -53,7 +53,11 @@ export const ToggleConfigPanel = ({ excerpt, control, setValue }) => {
   
   // If no toggles defined, show empty state
   if (!excerpt.toggles || excerpt.toggles.length === 0) {
-    return <Text>No toggles defined for this standard.</Text>;
+    return (
+      <Box paddingTop="space.10" paddingBottom="space.100">
+        <Text as="em">No Toggles defined for this Source.</Text>
+      </Box>
+    );
   }
 
   return (

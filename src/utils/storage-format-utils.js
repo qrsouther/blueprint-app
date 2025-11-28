@@ -118,14 +118,13 @@ export function buildChapterStructure({ chapterId, localId, heading, bodyContent
   const escapedHeading = escapeHtml(heading || 'Untitled Chapter');
 
   // Use Section macro as container - parameters are preserved!
-  // Simple <hr /> for visual separation (no parameters needed on it)
+  // Section macro itself forms the boundary, no need for <hr />
   return `<ac:structured-macro ac:name="section" ac:schema-version="1">
 <ac:parameter ac:name="blueprint-chapter">${chapterId}</ac:parameter>
 <ac:parameter ac:name="blueprint-local">${localId}</ac:parameter>
 <ac:rich-text-body>
 <h2>${escapedHeading}</h2>
 ${bodyContent || ''}
-<hr />
 </ac:rich-text-body>
 </ac:structured-macro>`;
 }

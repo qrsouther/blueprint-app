@@ -41,13 +41,15 @@
  * @param {Function} props.getRawPreviewContent - Get raw preview with markers
  * @param {Object} props.publishStatus - Publish status data from getPublishStatus resolver
  * @param {boolean} props.isPublishing - Whether publish is in progress
+ * @param {string} props.publishError - Error message if publish failed
  * @param {Function} props.onPublish - Handler for publish button click
  * @param {boolean} props.needsRepublish - Whether content changed since last publish
+ * @param {string} props.originalExcerptId - Original excerpt ID (for Reset button - either published or initial)
  * @param {Function} props.onClose - Handler for close button (Locked Page Model - null if in Confluence edit mode)
  * @returns {JSX.Element} - Edit mode JSX
  */
 
-import React, { Fragment, useState } from 'react';
+import React, { Fragment, useState, useEffect, useRef } from 'react';
 import {
   Text,
   Em,
@@ -65,7 +67,12 @@ import {
   TabPanel,
   AdfRenderer,
   Lozenge,
-  SectionMessage
+  SectionMessage,
+  InlineEdit,
+  ButtonGroup,
+  Textfield,
+  Tooltip,
+  xcss
 } from '@forge/react';
 import { router, view } from '@forge/bridge';
 import { VariableConfigPanel } from '../VariableConfigPanel';
@@ -102,15 +109,43 @@ export function EmbedEditMode({
   // New publish props
   publishStatus,
   isPublishing,
+  publishError,
   onPublish,
   needsRepublish,
+  originalExcerptId,
   // Locked Page Model props
   onClose
 }) {
   const [copySuccess, setCopySuccess] = useState(false);
+  const [customHeading, setCustomHeading] = useState(excerpt?.name || 'Untitled Chapter');
+  const previousExcerptNameRef = useRef(excerpt?.name);
 
   // Get localId from context
   const localId = context?.localId || context?.extension?.localId;
+
+  // Sync custom heading with excerpt name when excerpt changes
+  // Only update if the heading hasn't been customized (still matches previous excerpt name)
+  useEffect(() => {
+    const currentExcerptName = excerpt?.name || 'Untitled Chapter';
+    const previousExcerptName = previousExcerptNameRef.current || 'Untitled Chapter';
+    
+    // If excerpt name changed
+    if (currentExcerptName !== previousExcerptName) {
+      // Only update customHeading if it still matches the previous excerpt name
+      // (meaning user hasn't customized it yet)
+      if (customHeading === previousExcerptName || 
+          (previousExcerptName === 'Untitled Chapter' && customHeading === 'Untitled Chapter')) {
+        setCustomHeading(currentExcerptName);
+      }
+      
+      // Update the ref to track the new excerpt name
+      previousExcerptNameRef.current = currentExcerptName;
+    } else if (!previousExcerptNameRef.current && excerpt?.name) {
+      // First time setting excerpt name
+      setCustomHeading(excerpt.name);
+      previousExcerptNameRef.current = excerpt.name;
+    }
+  }, [excerpt?.name]);
 
   // Handler for copying UUID to clipboard using native Clipboard API
   const handleCopyUuid = async () => {
@@ -169,138 +204,158 @@ export function EmbedEditMode({
     : getPreviewContent();
   const isAdf = previewContent && typeof previewContent === 'object' && previewContent.type === 'doc';
 
+  // Check if toggles are defined
+  const hasToggles = excerpt?.toggles && excerpt.toggles.length > 0;
+
+  // Wrapper function for publish that includes custom heading
+  const handlePublishWithHeading = () => {
+    if (onPublish) {
+      onPublish(customHeading);
+    }
+  };
+
+  // Handler for Reset button - resets to original source
+  const handleReset = () => {
+    if (originalExcerptId && handleExcerptSelection) {
+      // Find the original excerpt to get its name for heading reset
+      const originalExcerpt = availableExcerpts.find(ex => ex.id === originalExcerptId);
+      if (originalExcerpt) {
+        // Reset heading to original source name
+        setCustomHeading(originalExcerpt.name);
+      }
+      // Reset source selection
+      handleExcerptSelection({ value: originalExcerptId });
+    }
+  };
+
   return (
     <Stack space="space.100">
-      {/* Excerpt Selector - always visible at top of edit mode */}
-      <Box xcss={excerptSelectorStyle}>
-        {isLoadingExcerpts ? (
-          <Spinner size="small" label="Loading..." />
-        ) : (
+      {/* Top Section - Single Inline with Source Selector, Status, and ButtonGroup */}
+      <Inline space="space.100" alignBlock="center" spread="space-between">
+        {/* Source Selector - 50% width */}
+        <Box xcss={[excerptSelectorStyle, xcss({ width: '100%' })]}>
           <Select
-            options={availableExcerpts.map(ex => ({
+            options={isLoadingExcerpts ? [] : availableExcerpts.map(ex => ({
               label: `${ex.name}${ex.category ? ` (${ex.category})` : ''}`,
               value: ex.id
             }))}
-            value={availableExcerpts.map(ex => ({
+            value={isLoadingExcerpts ? undefined : availableExcerpts.map(ex => ({
               label: `${ex.name}${ex.category ? ` (${ex.category})` : ''}`,
               value: ex.id
             })).find(opt => opt.value === selectedExcerptId)}
-            onChange={handleExcerptSelection}
-            placeholder="Select a Source to Embed..."
+            onChange={isLoadingExcerpts ? undefined : handleExcerptSelection}
+            placeholder="Loading..."
+            isDisabled={isLoadingExcerpts}
           />
-        )}
-      </Box>
+        </Box>
 
-      <Inline space="space.300" alignBlock="center" spread="space-between">
+        {/* Status Indicators and ButtonGroup */}
         <Inline space="space.100" alignBlock="center">
-          <Heading size="large">{excerpt?.name || 'Select a Source'}</Heading>
-          {/* // Hidden for now as Embed workflow doesn't need this, but wired up for future use
-          <Button
-            appearance="link"
-            onClick={async () => {
-              try {
-                // Navigate to the source page where this excerpt is defined
-                const pageId = excerpt.sourcePageId || excerpt.pageId;
-                // Use excerpt's space key, or fallback to current space key
-                const spaceKey = excerpt.sourceSpaceKey || context?.extension?.space?.key || context?.spaceKey;
-
-                if (pageId && spaceKey) {
-                  // Build the URL manually since we have both pageId and spaceKey
-                  const url = `/wiki/spaces/${spaceKey}/pages/${pageId}`;
-                  await router.open(url);
-                } else if (pageId) {
-                  // Fallback: Try using view.createContentLink if we only have pageId
-                  const contentLink = await view.createContentLink({
-                    contentType: 'page',
-                    contentId: pageId
-                  });
-                  await router.open(contentLink);
-                }
-              } catch (err) {
-                logger.errors('[VIEW-SOURCE] Navigation error:', err);
-              }
-            }}
-          >
-            View Source
-          </Button>
-          */}
-          {localId && (
-            <Button
-              appearance="subtle"
-              onClick={handleCopyUuid}
-              iconBefore={copySuccess ? undefined : <Text>📋</Text>}
-            >
-              {copySuccess ? '✓ Copied!' : `${localId.substring(0, 8)}...`}
-            </Button>
+          {/* Last published timestamp */}
+          {publishStatus?.isPublished && !needsRepublish && publishStatus.publishedAt && (
+            <Text size="small" color="color.text.subtle">
+              Last published: {new Date(publishStatus.publishedAt).toLocaleString()}
+            </Text>
           )}
-        </Inline>
-        <Inline space="space.100" alignBlock="center">
+
+          {/* Saving/Saved indicator */}
           {saveStatus === 'saving' && (
             <Fragment>
               <Spinner size="small" label="Saving" />
-              <Text><Em>Saving...</Em></Text>
+              <Text size="small"><Em>Saving...</Em></Text>
             </Fragment>
           )}
           {saveStatus === 'saved' && (
             <Fragment>
               <Icon glyph="check-circle" color="success" size="small" label="Saved" />
-              <Text><Em>Saved</Em></Text>
+              <Text size="small"><Em>Saved</Em></Text>
             </Fragment>
           )}
-          {/* Done button for Locked Page Model (when editing via View Mode) */}
-          {onClose && (
-            <Button appearance="primary" onClick={onClose}>
-              Done
-            </Button>
-          )}
+
+          {/* ButtonGroup: GUID copy, Exit, Reset, Publish */}
+          <ButtonGroup>
+            {/* GUID copy button */}
+            {localId && (
+              <Button
+                appearance="default"
+                onClick={handleCopyUuid}
+                iconBefore="angle-brackets"
+                alignBlock="center"
+              >
+                {copySuccess ? 'Copied!' : ''}
+              </Button>
+            )}
+            {/* Exit button (renamed from Done) */}
+            {onClose && (
+              <Button appearance="default" onClick={onClose}>
+                Exit
+              </Button>
+            )}
+            {/* Reset button - only show if original excerpt exists and current is different */}
+            {originalExcerptId && originalExcerptId !== selectedExcerptId && (
+              <Button 
+                appearance="default" 
+                onClick={handleReset}
+                isDisabled={isLoadingExcerpts}
+              >
+                Reset
+              </Button>
+            )}
+            {/* Publish button */}
+            {excerpt && onPublish && (
+              <Button
+                appearance="primary"
+                onClick={handlePublishWithHeading}
+                isDisabled={isPublishing || !selectedExcerptId}
+              >
+                {isPublishing 
+                  ? 'Publishing...' 
+                  : needsRepublish 
+                    ? 'Publish Changes' 
+                    : publishStatus?.isPublished 
+                      ? 'Republish' 
+                      : 'Publish to Page'}
+              </Button>
+            )}
+          </ButtonGroup>
         </Inline>
       </Inline>
 
-      {/* Publish Status and Button */}
-      {excerpt && onPublish && (
-        <Box padding="space.100">
-          <Inline space="space.200" alignBlock="center" spread="space-between">
-            <Inline space="space.100" alignBlock="center">
-              {publishStatus?.isPublished ? (
-                <Fragment>
-                  <Lozenge appearance={needsRepublish ? 'moved' : 'success'}>
-                    {needsRepublish ? 'Changes Pending' : 'Published'}
-                  </Lozenge>
-                  <Text>
-                    {needsRepublish 
-                      ? 'Changes saved but not yet published to page'
-                      : `Last published: ${publishStatus.publishedAt ? new Date(publishStatus.publishedAt).toLocaleString() : 'Unknown'}`}
-                  </Text>
-                </Fragment>
-              ) : (
-                <Fragment>
-                  <Lozenge appearance="new">Not Published</Lozenge>
-                  <Text>Content not yet on page</Text>
-                </Fragment>
-              )}
-            </Inline>
-            <Button
-              appearance={needsRepublish || !publishStatus?.isPublished ? 'primary' : 'default'}
-              onClick={onPublish}
-              isDisabled={isPublishing || !selectedExcerptId}
-            >
-              {isPublishing 
-                ? 'Publishing...' 
-                : needsRepublish 
-                  ? 'Publish Changes' 
-                  : publishStatus?.isPublished 
-                    ? 'Republish' 
-                    : 'Publish to Page'}
-            </Button>
-          </Inline>
-        </Box>
+      {/* Publish Error Message */}
+      {publishError && (
+        <SectionMessage appearance="error" title="Publish Failed">
+          <Text>{publishError}</Text>
+          <Text size="small" color="color.text.subtle">
+            If you recently changed the Source, try refreshing the page and publishing again.
+          </Text>
+        </SectionMessage>
       )}
 
-      <Tabs onChange={(index) => setSelectedTabIndex(index)}>
+      <Tabs 
+        onChange={(index) => setSelectedTabIndex(index)}
+        defaultSelected={hasToggles ? 0 : 1}
+        id="embed-edit-tabs"
+      >
         <TabList>
-          <Tab>Toggles</Tab>
-          <Tab>Write</Tab>
-          <Tab>Custom</Tab>
+          {hasToggles ? (
+            <Tab>
+              <Heading size="medium" color="color.text.subtler">Toggles
+              </Heading>
+            </Tab>
+          ) : (
+            <Tooltip content="No Toggles defined for this Source.">
+              <Tab>
+                <Heading size="medium" color="color.text.subtle">Toggles</Heading>
+              </Tab>
+            </Tooltip>
+          )}
+          <Tab>
+            <Heading size="medium" color="color.text.subtle">Write</Heading>
+          </Tab>
+          <Tab>
+            <Heading size="medium" color="color.text.subtle">Custom
+            </Heading>
+          </Tab>
         </TabList>
         {/* Toggles Tab */}
         <TabPanel>
@@ -336,16 +391,50 @@ export function EmbedEditMode({
       </Tabs>
 
       {/* Preview - Always visible below tabs */}
-      <Stack space="space.100">
+      <Stack space="space.0">
         <DocumentationLinksDisplay documentationLinks={excerpt?.documentationLinks} />
-        <Box xcss={previewBoxStyle}>
-          {isAdf ? (
-            <Box xcss={adfContentContainerStyle}>
-              <AdfRenderer document={previewContent} />
-            </Box>
-          ) : (
-            <Text>{previewContent || 'No content'}</Text>
-          )}
+        <Box xcss={xcss({
+          borderColor: 'color.border',
+          borderWidth: 'border.width',
+          borderStyle: 'solid',
+          borderRadius: 'border.radius',
+          paddingTop: 'space.0',
+          paddingBottom: 'space.0'
+        })}>
+          <Stack space="space.0">
+            {/* Chapter Heading - Editable above Preview */}
+            {excerpt && (
+              <Box xcss={xcss({ 
+                margin: 'space.0',
+                paddingLeft: 'space.150'
+                })}
+                >
+                <Inline space="space.025" alignBlock="baseline" alignInline="start">
+                  <Icon glyph="edit" label="Edit heading" size="medium" />
+                  <InlineEdit
+                    defaultValue={customHeading || excerpt?.name || 'Untitled Chapter'}
+                    editView={({ errorMessage, ...fieldProps }) => (
+                      <Textfield {...fieldProps} autoFocus placeholder="Enter chapter heading..." />
+                    )}
+                    readView={() => (
+                      <Box xcss={xcss({ padding: 'space.0', margin: 'space.0' })}>
+                        <Heading size="large">{customHeading || excerpt?.name || 'Untitled Chapter'}</Heading>
+                      </Box>
+                    )}
+                    onConfirm={(value) => setCustomHeading(value || excerpt?.name || 'Untitled Chapter')}
+                  />
+                </Inline>
+              </Box>
+            )}
+            {/* Preview Content */}
+            {isAdf ? (
+              <Box xcss={adfContentContainerStyle}>
+                <AdfRenderer document={previewContent} />
+              </Box>
+            ) : (
+              <Text>{previewContent || 'No content'}</Text>
+            )}
+          </Stack>
         </Box>
       </Stack>
     </Stack>

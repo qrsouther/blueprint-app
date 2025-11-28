@@ -49,7 +49,9 @@ import {
   Inline,
   xcss,
   Heading,
-  Button
+  Button,
+  Icon,
+  Spinner
 } from '@forge/react';
 
 // Subtle border wrapper that appears only when stale
@@ -64,7 +66,7 @@ import { cleanAdfForRenderer, insertInternalNotesInAdf } from '../../utils/adf-r
 import { UpdateAvailableBanner } from './UpdateAvailableBanner';
 import { DocumentationLinksDisplay } from './DocumentationLinksDisplay';
 import { StalenessCheckIndicator } from './StalenessCheckIndicator';
-import { adfContentContainerStyle } from '../../styles/embed-styles';
+import { adfContentContainerStyle, editButtonBorderContainerStyle } from '../../styles/embed-styles';
 
 // Style for the Edit button container (positioned at top-right)
 const editButtonContainerStyle = xcss({
@@ -73,6 +75,17 @@ const editButtonContainerStyle = xcss({
   right: 'space.100',
   zIndex: 'layer'
 });
+
+// Compact Edit button style - full width with light gray border
+const compactEditButtonStyle = xcss({
+  lineHeight: '1',
+  padding: 'space.0',
+  width: '100%',
+  borderWidth: 'border.width',
+  borderStyle: 'solid',
+  borderColor: 'color.border'
+});
+
 
 export function EmbedViewMode({
   content,
@@ -121,9 +134,19 @@ export function EmbedViewMode({
       <Box xcss={xcss({ padding: 'space.050' })}>
         {/* Edit button - always visible in Locked Page Model */}
         {onEditClick && (
-          <Inline space="space.100" alignBlock="center">
-            <Button appearance="subtle" onClick={onEditClick}>
-              Edit ✏️
+          <Box xcss={editButtonBorderContainerStyle}>
+            <Inline 
+              space="space.100" 
+              alignBlock="center"
+            >
+            <Button 
+              appearance="default" 
+              onClick={onEditClick}
+              shouldFitContainer={true}
+              iconAfter="chevron-down"
+              spacing="compact"
+            >
+              Edit the Chapter below
             </Button>
             {/* Show subtle "Update Available" indicator when stale */}
             {isStale && !isCheckingStaleness && !showUpdateBanner && (
@@ -132,6 +155,7 @@ export function EmbedViewMode({
               </Button>
             )}
           </Inline>
+          </Box>
         )}
         
         {/* Full Update banner - only shown after clicking "Update Available" */}
@@ -158,9 +182,31 @@ export function EmbedViewMode({
   // LEGACY MODE: Render full iframe content (current behavior)
   // ============================================================================
   
-  // Loading state
-  if (!content) {
-    return <Text>Loading content...</Text>;
+  // Loading state - show Edit button disabled while loading
+  const isLoading = !content;
+  
+  if (isLoading) {
+    return (
+      <Box xcss={xcss({ padding: 'space.050' })}>
+        <Box xcss={editButtonBorderContainerStyle}>
+          <Inline 
+            space="space.100" 
+            alignBlock="center"
+          >
+            <Button 
+              appearance="default" 
+              onClick={onEditClick}
+              shouldFitContainer={true}
+              iconAfter="chevron-down"
+              spacing="compact"
+              isDisabled={true}
+            >
+              Loading Editor...
+            </Button>
+          </Inline>
+        </Box>
+      </Box>
+    );
   }
 
   const isAdf = content && typeof content === 'object' && content.type === 'doc';
@@ -214,10 +260,23 @@ export function EmbedViewMode({
       <Box xcss={xcss({ position: 'relative', width: '100%' })}>
         {/* Edit button for Locked Page Model */}
         {onEditClick && (
-          <Box xcss={editButtonContainerStyle}>
-            <Button appearance="subtle" onClick={onEditClick}>
-              Edit ✏️
-            </Button>
+          <Box xcss={xcss({ padding: 'space.050' })}>
+            <Box xcss={editButtonBorderContainerStyle}>
+              <Inline 
+                space="space.100" 
+                alignBlock="center"
+              >
+                <Button 
+                  appearance="default" 
+                  onClick={onEditClick}
+                  shouldFitContainer={true}
+                  iconAfter="chevron-down"
+                  spacing="compact"
+                >
+                  Edit the Chapter below
+                </Button>
+              </Inline>
+            </Box>
           </Box>
         )}
         {/* Only show Review Update button when stale (not when just checking) */}
@@ -269,10 +328,23 @@ export function EmbedViewMode({
     <Box xcss={xcss({ position: 'relative', width: '100%' })}>
       {/* Edit button for Locked Page Model */}
       {onEditClick && (
-        <Box xcss={editButtonContainerStyle}>
-          <Button appearance="subtle" onClick={onEditClick}>
-            Edit ✏️
-          </Button>
+        <Box xcss={xcss({ padding: 'space.050' })}>
+          <Box xcss={editButtonBorderContainerStyle}>
+            <Inline 
+              space="space.100" 
+              alignBlock="center"
+            >
+              <Button 
+                appearance="default" 
+                onClick={onEditClick}
+                shouldFitContainer={true}
+                iconAfter="chevron-down"
+                spacing="compact"
+              >
+                Edit the Chapter below
+              </Button>
+            </Inline>
+          </Box>
         </Box>
       )}
       {/* Only show Review Update button when stale (not when just checking) */}
