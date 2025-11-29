@@ -37,6 +37,7 @@ const StableTextfieldComponent = React.forwardRef(({
   stableKey,
   value,
   onChange,
+  onBlur,
   ...otherProps 
 }, ref) => {
   const textFieldRef = useRef(null);
@@ -104,6 +105,13 @@ const StableTextfieldComponent = React.forwardRef(({
     }
   }, [onChange]);
   
+  // Handle blur events (for draft saving)
+  const handleBlur = useCallback((e) => {
+    if (onBlur) {
+      onBlur(e);
+    }
+  }, [onBlur]);
+  
   return (
     <Textfield
       key={stableKey || `stable-textfield-${otherProps.id || otherProps.name || 'default'}`}
@@ -111,6 +119,7 @@ const StableTextfieldComponent = React.forwardRef(({
       placeholder={otherProps.placeholder}
       defaultValue={value}
       onChange={handleChange}
+      onBlur={handleBlur}
       {...otherProps}
     />
   );
@@ -118,21 +127,36 @@ const StableTextfieldComponent = React.forwardRef(({
 
 StableTextfieldComponent.displayName = 'StableTextfieldComponent';
 
-// Memoize component to prevent re-renders when value changes
-// Only re-render when props that affect the input structure change
+// Memoize component to prevent re-renders when value changes during typing
+// But allow re-renders when value changes significantly (e.g., form reset)
 export const StableTextfield = React.memo(StableTextfieldComponent, (prevProps, nextProps) => {
-  // Don't re-render when value changes - let the ref handle it
-  // Only re-render when structural props change
-  return (
+  // Check structural props first
+  const structuralEqual = (
     prevProps.stableKey === nextProps.stableKey &&
     prevProps.id === nextProps.id &&
     prevProps.name === nextProps.name &&
     prevProps.placeholder === nextProps.placeholder &&
     prevProps.isDisabled === nextProps.isDisabled &&
     prevProps.label === nextProps.label &&
-    prevProps.onChange === nextProps.onChange
-    // Intentionally NOT comparing value - let the ref sync handle it
+    prevProps.onChange === nextProps.onChange &&
+    prevProps.onBlur === nextProps.onBlur
   );
+  
+  if (!structuralEqual) return false;
+  
+  // For value changes: allow re-render if the change is "significant"
+  // (more than 2 characters different - indicates reset, not typing)
+  const prevValue = prevProps.value || '';
+  const nextValue = nextProps.value || '';
+  const lengthDiff = Math.abs(prevValue.length - nextValue.length);
+  
+  // If values differ by more than 2 chars, or are completely different, re-render
+  if (lengthDiff > 2 || (prevValue !== nextValue && !nextValue.startsWith(prevValue) && !prevValue.startsWith(nextValue))) {
+    return false; // Don't skip re-render - values changed significantly
+  }
+  
+  // Small change (typing) - skip re-render, let ref handle it
+  return true;
 });
 
 StableTextfield.displayName = 'StableTextfield';

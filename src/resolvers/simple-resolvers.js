@@ -332,10 +332,14 @@ export async function getVariableValues(req) {
         toggleStates: data.toggleStates || {},
         customInsertions: data.customInsertions || [],
         internalNotes: data.internalNotes || [],
+        customHeading: data.customHeading || '',  // Custom chapter heading override
         lastSynced: data.lastSynced,
         excerptId: data.excerptId,
-        syncedContentHash: data.syncedContentHash,  // Hash for staleness detection
-        syncedContent: data.syncedContent,  // Old Source ADF for diff comparison
+        syncedContentHash: data.syncedContentHash,  // Hash for staleness detection (non-published)
+        syncedContent: data.syncedContent,  // Old Source ADF for diff comparison (non-published)
+        publishedSourceContentHash: data.publishedSourceContentHash,  // Source's contentHash at publish time (for published content staleness detection)
+        publishedSourceContent: data.publishedSourceContent,  // Source's ADF content at publish time (for diff view when published)
+        publishedAt: data.publishedAt,  // When content was published
         redlineStatus: data.redlineStatus || 'reviewable',  // Redline approval status
         approvedBy: data.approvedBy,
         approvedAt: data.approvedAt,

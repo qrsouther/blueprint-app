@@ -40,7 +40,7 @@ const variableBoxStyle = xcss({
  * @param {Object} props.control - React Hook Form control from parent form
  * @returns {JSX.Element}
  */
-export const ToggleConfigPanel = ({ excerpt, control, setValue }) => {
+export const ToggleConfigPanel = ({ excerpt, control, setValue, onBlur }) => {
   // Watch toggle states from parent form
   const toggleStates = useWatch({
     control,
@@ -96,6 +96,8 @@ export const ToggleConfigPanel = ({ excerpt, control, setValue }) => {
                     isChecked={currentValue}
                     onChange={(e) => {
                       setValue(fieldName, e.target.checked, { shouldDirty: true });
+                      // Trigger draft save after toggle change
+                      if (onBlur) onBlur();
                     }}
                   />
                 )

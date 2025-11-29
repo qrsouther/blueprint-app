@@ -101,15 +101,18 @@ export function EmergencyRecoveryModal({ isOpen, onClose, initialTab = 'deleted-
   const [deleteResult, setDeleteResult] = useState(null);
 
   // Tab state (Phase 4 - v7.18.0)
-  const [activeTab, setActiveTab] = useState(initialTab);
+  // DEPRECATED (2025-11-29): Version History tab disabled - Confluence Page History handles versioning
+  // Forced to 'deleted-embeds' since version-history tab is disabled
+  const [activeTab, setActiveTab] = useState('deleted-embeds');
 
-  // Version History state (Phase 4 - v7.18.0)
+  /* DEPRECATED (2025-11-29): Version History state disabled - Confluence Page History handles versioning
   const [versionLocalId, setVersionLocalId] = useState(autoLoadEmbedUuid || '');
   const [versions, setVersions] = useState([]);
   const [loadingVersions, setLoadingVersions] = useState(false);
   const [selectedVersion, setSelectedVersion] = useState(null);
   const [versionError, setVersionError] = useState(null);
   const [restoringVersion, setRestoringVersion] = useState(false);
+  */
 
   // Load deleted items when modal opens
   useEffect(() => {
@@ -118,6 +121,7 @@ export function EmergencyRecoveryModal({ isOpen, onClose, initialTab = 'deleted-
     }
   }, [isOpen]);
 
+  /* DEPRECATED (2025-11-29): Version History effects disabled - Confluence Page History handles versioning
   // Update active tab when modal opens with new initialTab
   useEffect(() => {
     if (isOpen && initialTab) {
@@ -141,6 +145,7 @@ export function EmergencyRecoveryModal({ isOpen, onClose, initialTab = 'deleted-
       }, 100);
     }
   }, [isOpen, autoLoadEmbedUuid, initialTab]);
+  */
 
   /**
    * Load all soft-deleted items from storage
@@ -225,9 +230,8 @@ export function EmergencyRecoveryModal({ isOpen, onClose, initialTab = 'deleted-
     }
   };
 
-  /**
-   * Load version history for a specific Embed localId
-   */
+  /* DEPRECATED (2025-11-29): Version History handlers disabled - Confluence Page History handles versioning
+  
   const handleLoadVersions = async () => {
     if (!versionLocalId.trim()) {
       setVersionError('Please enter a valid Embed UUID (localId)');
@@ -240,7 +244,7 @@ export function EmergencyRecoveryModal({ isOpen, onClose, initialTab = 'deleted-
     setSelectedVersion(null);
 
     try {
-      const entityId = versionLocalId.trim(); // Just the UUID, not the storage key
+      const entityId = versionLocalId.trim();
 
       const response = await invoke('getVersionHistory', { entityId });
 
@@ -261,9 +265,6 @@ export function EmergencyRecoveryModal({ isOpen, onClose, initialTab = 'deleted-
     }
   };
 
-  /**
-   * Load full details for a specific version
-   */
   const handleSelectVersion = async (versionId) => {
     setVersionError(null);
 
@@ -281,9 +282,6 @@ export function EmergencyRecoveryModal({ isOpen, onClose, initialTab = 'deleted-
     }
   };
 
-  /**
-   * Restore an Embed from a version snapshot
-   */
   const handleRestoreVersion = async (versionId) => {
     const confirmed = confirm(
       '⚠️  Restore this version?\n\n' +
@@ -306,7 +304,6 @@ export function EmergencyRecoveryModal({ isOpen, onClose, initialTab = 'deleted-
       if (response.success && response.data) {
         alert(`✅ Successfully restored Embed!\n\nRestored from: ${formatTimestamp(response.data.versionId)}\nBackup created: ${response.data.backupVersionId}\n\nThe Embed is now live with the restored data.`);
         setSelectedVersion(null);
-        // Refresh version list to show new backup
         handleLoadVersions();
       } else {
         setVersionError(`Failed to restore version: ${response.error}`);
@@ -318,6 +315,7 @@ export function EmergencyRecoveryModal({ isOpen, onClose, initialTab = 'deleted-
       setRestoringVersion(false);
     }
   };
+  */
 
   /**
    * Format timestamp for display
@@ -349,10 +347,13 @@ export function EmergencyRecoveryModal({ isOpen, onClose, initialTab = 'deleted-
             <ModalTitle>🚨 Emergency Recovery</ModalTitle>
           </ModalHeader>
           <ModalBody>
-            <Tabs key={`${initialTab}-${autoLoadEmbedUuid || 'none'}`} selected={activeTab} onChange={setActiveTab}>
+            {/* DEPRECATED (2025-11-29): Version History tab removed - using single tab only */}
+            <Tabs key="deleted-embeds-only" selected={activeTab} onChange={setActiveTab}>
               <TabList>
                 <Tab value="deleted-embeds">Deleted Embeds</Tab>
+                {/* DEPRECATED: Version History tab - Confluence Page History handles versioning
                 <Tab value="version-history">Version History</Tab>
+                */}
               </TabList>
 
               <TabPanel value="deleted-embeds">
@@ -534,202 +535,18 @@ export function EmergencyRecoveryModal({ isOpen, onClose, initialTab = 'deleted-
                 </Stack>
               </TabPanel>
 
+              {/* DEPRECATED (2025-11-29): Version History TabPanel disabled - Confluence Page History handles versioning
               <TabPanel value="version-history">
                 <Stack space="space.200">
-                  {/* Info message */}
                   <SectionMessage appearance="information">
                     <Text>
                       <Strong>Version History</Strong> - Look up any Embed by its UUID (localId) to view and restore previous versions.
                     </Text>
                   </SectionMessage>
-
-                  {/* Error message */}
-                  {versionError && (
-                    <SectionMessage appearance="error">
-                      <Text><Strong>Error:</Strong> {versionError}</Text>
-                    </SectionMessage>
-                  )}
-
-                  {/* Lookup input */}
-                  <Stack space="space.100">
-                    <Text><Strong>Embed UUID (localId)</Strong></Text>
-                    <Inline space="space.100" alignBlock="center">
-                      <StableTextfield
-                        stableKey="emergency-recovery-version-uuid"
-                        placeholder="Enter Embed UUID (e.g., 1a2b3c4d-5e6f-7g8h-9i0j-1k2l3m4n5o6p)"
-                        value={versionLocalId}
-                        onChange={(e) => setVersionLocalId(e.target.value)}
-                        width="full"
-                      />
-                      <Button
-                        appearance="primary"
-                        onClick={handleLoadVersions}
-                        isDisabled={loadingVersions || !versionLocalId.trim()}
-                      >
-                        {loadingVersions ? 'Loading...' : 'Load History'}
-                      </Button>
-                    </Inline>
-                    <Text appearance="subtle">
-                      Find the UUID in the Admin page under "All Embeds" or in an Embed's settings.
-                    </Text>
-                  </Stack>
-
-                  {/* Version list */}
-                  {versions.length > 0 && !selectedVersion && (
-                    <Box xcss={scrollableListStyle}>
-                      <Stack space="space.150">
-                        <Text>
-                          <Strong>Found {versions.length} version{versions.length !== 1 ? 's' : ''}</Strong> for Embed: {versionLocalId}
-                        </Text>
-
-                        {versions.map((version) => (
-                          <Box key={version.versionId} xcss={deletedItemStyle}>
-                            <Stack space="space.100">
-                              <Inline space="space.100" alignBlock="center" spread="space-between">
-                                <Stack space="space.050">
-                                  <Text><Strong>{formatTimestamp(version.timestamp)}</Strong></Text>
-                                  <Inline space="space.100" alignBlock="center">
-                                    <Lozenge appearance={
-                                      version.changeType === 'CREATE' ? 'success' :
-                                      version.changeType === 'UPDATE' ? 'default' :
-                                      version.changeType === 'DELETE' ? 'removed' :
-                                      'moved'
-                                    }>
-                                      {version.changeType}
-                                    </Lozenge>
-                                    <Text appearance="subtle">Size: {version.size} bytes</Text>
-                                    {version.changedBy && (
-                                      <Text appearance="subtle">by {version.changedBy}</Text>
-                                    )}
-                                  </Inline>
-                                </Stack>
-
-                                <Button
-                                  appearance="default"
-                                  onClick={() => handleSelectVersion(version.versionId)}
-                                >
-                                  View Details →
-                                </Button>
-                              </Inline>
-                            </Stack>
-                          </Box>
-                        ))}
-                      </Stack>
-                    </Box>
-                  )}
-
-                  {/* Selected version details */}
-                  {selectedVersion && (
-                    <Box xcss={xcss({
-                      padding: 'space.300',
-                      borderColor: 'color.border',
-                      borderStyle: 'solid',
-                      borderWidth: 'border.width',
-                      borderRadius: 'border.radius',
-                      backgroundColor: 'color.background.neutral.subtle'
-                    })}>
-                      <Stack space="space.200">
-                        {/* Header with back button */}
-                        <Inline space="space.100" alignBlock="center" spread="space-between">
-                        <Text><Strong>Timestamp:</Strong> {formatTimestamp(selectedVersion.timestamp)}</Text>
-                        <Inline space="space.100" alignBlock="center">
-                            <Button
-                              appearance="subtle"
-                              onClick={() => setSelectedVersion(null)}
-                            >
-                              ← Back to List
-                            </Button>
-                            <Button
-                              appearance="primary"
-                              onClick={() => handleRestoreVersion(selectedVersion.versionId)}
-                              isDisabled={restoringVersion}
-                            >
-                              {restoringVersion ? 'Restoring...' : '↺ Restore This Version'}
-                            </Button>
-                          </Inline>
-                        </Inline>
-
-                        {/* Version metadata */}
-                        <Stack space="space.050">
-                          <Text><Strong>Changed By:</Strong> {selectedVersion.changedBy}</Text>
-                        </Stack>
-
-                        {/* Stored data */}
-                        {selectedVersion.data && (
-                          <Stack space="space.100">
-                            {/* Key metadata fields */}
-                            <Box xcss={jsonPreviewStyle}>
-                              <Stack space="space.100">
-                                {/* Variable values */}
-                                {selectedVersion.data.variableValues && Object.keys(selectedVersion.data.variableValues).length > 0 && (
-                                  <Box>
-                                    <Text><Strong>Variable Values:</Strong></Text>
-                                    <Box xcss={xcss({ paddingInlineStart: 'space.200' })}>
-                                      {Object.entries(selectedVersion.data.variableValues).map(([key, value]) => (
-                                        <Text key={key}><Strong>{key}</Strong>: {value}</Text>
-                                      ))}
-                                    </Box>
-                                  </Box>
-                                )}
-
-                                {/* Toggle states */}
-                                {selectedVersion.data.toggleStates && Object.keys(selectedVersion.data.toggleStates).length > 0 && (
-                                  <Box>
-                                    <Text><Strong>Toggle States:</Strong></Text>
-                                    <Box xcss={xcss({ paddingInlineStart: 'space.200' })}>
-                                      {Object.entries(selectedVersion.data.toggleStates).map(([key, value]) => (
-                                        <Text key={key}><Strong>{key}</Strong>: {value ? 'TRUE' : 'FALSE'}</Text>
-                                      ))}
-                                    </Box>
-                                  </Box>
-                                )}
-
-                                {/* Custom paragraphs */}
-                                {selectedVersion.data.customParagraphs && Object.keys(selectedVersion.data.customParagraphs).length > 0 && (
-                                  <Box>
-                                    <Text><Strong>Custom Paragraphs:</Strong></Text>
-                                    <Box xcss={xcss({ paddingInlineStart: 'space.200' })}>
-                                      {Object.entries(selectedVersion.data.customParagraphs).map(([key, adfContent]) => (
-                                        <Text key={key}>• {key}: {JSON.stringify(adfContent).substring(0, 100)}...</Text>
-                                      ))}
-                                    </Box>
-                                  </Box>
-                                )}
-
-                                {/* Internal notes */}
-                                {selectedVersion.data.internalNotes && (
-                                  <Box>
-                                    <Text><Strong>Internal Notes:</Strong></Text>
-                                    <Text appearance="subtle">{JSON.stringify(selectedVersion.data.internalNotes).substring(0, 200)}...</Text>
-                                  </Box>
-                                )}
-                              </Stack>
-                            </Box>
-
-                            {/* Full JSON preview (collapsed by default) */}
-                            <Stack space="space.050">
-                              <Button
-                                appearance="subtle"
-                                onClick={() => setExpandedItems(prev => ({
-                                  ...prev,
-                                  [selectedVersion.versionId]: !prev[selectedVersion.versionId]
-                                }))}
-                              >
-                                {expandedItems[selectedVersion.versionId] ? '▼' : '▶'} View full JSON
-                              </Button>
-                              {expandedItems[selectedVersion.versionId] && (
-                                <Box xcss={jsonPreviewStyle}>
-                                  <Text>{JSON.stringify(selectedVersion.data, null, 2)}</Text>
-                                </Box>
-                              )}
-                            </Stack>
-                          </Stack>
-                        )}
-                      </Stack>
-                    </Box>
-                  )}
+                  ... Version History UI code removed for brevity - see git history for full code ...
                 </Stack>
               </TabPanel>
+              */}
             </Tabs>
           </ModalBody>
           <ModalFooter>

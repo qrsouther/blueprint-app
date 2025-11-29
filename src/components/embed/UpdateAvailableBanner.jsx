@@ -59,8 +59,8 @@ export function UpdateAvailableBanner({
           {/* Compact heading section with inline buttons */}
           <Inline spread="space-between" alignBlock="center" xcss={sectionContentStyle}>
             <Stack space="space.050">
-              <Heading size="small">Update Available</Heading>
-              <Text>The Source content has been updated since this Embed was last edited.</Text>
+              <Heading size="medium">Update Available</Heading>
+              <Text>Source content has been updated since this Embed was last published.</Text>
             </Stack>
             <ButtonGroup>
               <Button
@@ -68,7 +68,7 @@ export function UpdateAvailableBanner({
                 onClick={handleUpdateToLatest}
                 isDisabled={isUpdating}
               >
-                {isUpdating ? 'Updating...' : 'Update'}
+                {isUpdating ? 'Updating...' : 'Update and Publish'}
               </Button>
               <Button
                 appearance="default"

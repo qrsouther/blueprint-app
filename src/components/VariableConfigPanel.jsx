@@ -75,7 +75,7 @@ const textfieldWrapperStyle = xcss({
  * @param {Function} props.setValue - React Hook Form setValue function
  * @returns {JSX.Element}
  */
-export const VariableConfigPanel = ({ excerpt, control, setValue }) => {
+export const VariableConfigPanel = ({ excerpt, control, setValue, onBlur, formKey }) => {
   // Watch variable values from parent form for status checkmarks
   const watchedValues = useWatch({
     control,
@@ -161,7 +161,7 @@ export const VariableConfigPanel = ({ excerpt, control, setValue }) => {
                         <StableTextfield
                           appearance="standard"
                           id={`var-value-${variable.name}`}
-                          stableKey={`var-value-${variable.name}`}
+                          stableKey={`var-value-${variable.name}-${formKey || 0}`}
                           placeholder={variable.example ? `e.g., ${variable.example}` : `Enter value for ${variable.name}`}
                           value={currentValue}
                           onChange={(e) => {
@@ -171,6 +171,7 @@ export const VariableConfigPanel = ({ excerpt, control, setValue }) => {
                             // Update form value (triggers watch() update immediately)
                             setValue(fieldName, normalizedValue, { shouldDirty: true });
                           }}
+                          onBlur={onBlur}
                         />
                       </Box>
                     </Box>

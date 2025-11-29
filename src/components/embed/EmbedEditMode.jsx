@@ -7,7 +7,7 @@
  * Features:
  * - Standard selector dropdown at top
  * - Header with standard name and "View Source" link
- * - Save status indicator (Saving/Saved)
+ * - Draft status indicator (Draft Saving/Draft Saved) - shows during blur, exit, reset, source switch
  * - Publish to Page button (injects content to Confluence page storage)
  * - Three tabs: Toggles, Write (variables), Custom (insertions/notes)
  * - Live preview below tabs (updates as configuration changes)
@@ -20,7 +20,7 @@
  * @param {string} props.selectedExcerptId - ID of currently selected Standard
  * @param {Function} props.handleExcerptSelection - Handler for Standard selection change
  * @param {Object} props.context - Forge context object
- * @param {string} props.saveStatus - Current save status ('saving'|'saved'|null)
+ * @param {string} props.saveStatus - Current draft save status ('saving'|'saved'|'error'|null)
  * @param {number} props.selectedTabIndex - Currently selected tab index (0=Toggles, 1=Write, 2=Custom)
  * @param {Function} props.setSelectedTabIndex - Handler to change selected tab
  * @param {Object} props.variableValues - Current variable values
@@ -37,14 +37,15 @@
  * @param {Function} props.setSelectedPosition - Update selected position
  * @param {string} props.customText - Custom text input
  * @param {Function} props.setCustomText - Update custom text
- * @param {Function} props.getPreviewContent - Get rendered preview content
- * @param {Function} props.getRawPreviewContent - Get raw preview with markers
+ * @param {Function} props.getPreviewContent - Get fully rendered preview content (with variable substitutions, toggles, etc.)
  * @param {Object} props.publishStatus - Publish status data from getPublishStatus resolver
  * @param {boolean} props.isPublishing - Whether publish is in progress
+ * @param {number} props.publishProgress - Progress value (0-1) for progress bar
  * @param {string} props.publishError - Error message if publish failed
  * @param {Function} props.onPublish - Handler for publish button click
  * @param {boolean} props.needsRepublish - Whether content changed since last publish
  * @param {string} props.originalExcerptId - Original excerpt ID (for Reset button - either published or initial)
+ * @param {boolean} props.canReset - Whether Reset button should be enabled (source changed OR form dirty)
  * @param {Function} props.onClose - Handler for close button (Locked Page Model - null if in Confluence edit mode)
  * @returns {JSX.Element} - Edit mode JSX
  */
@@ -72,6 +73,7 @@ import {
   ButtonGroup,
   Textfield,
   Tooltip,
+  ProgressBar,
   xcss
 } from '@forge/react';
 import { router, view } from '@forge/bridge';
@@ -79,6 +81,7 @@ import { VariableConfigPanel } from '../VariableConfigPanel';
 import { ToggleConfigPanel } from '../ToggleConfigPanel';
 import { CustomInsertionsPanel } from '../CustomInsertionsPanel';
 import { DocumentationLinksDisplay } from './DocumentationLinksDisplay';
+import { CompositorModal } from '../compositor/CompositorModal';
 import { logger } from '../../utils/logger.js';
 import {
   excerptSelectorStyle,
@@ -98,6 +101,8 @@ export function EmbedEditMode({
   setSelectedTabIndex,
   control,
   setValue,
+  formKey,
+  customHeading, // From form, not local state
   insertionType,
   setInsertionType,
   selectedPosition,
@@ -105,47 +110,65 @@ export function EmbedEditMode({
   customText,
   setCustomText,
   getPreviewContent,
-  getRawPreviewContent,
   // New publish props
   publishStatus,
   isPublishing,
+  publishProgress = 0, // 0-1 for progress bar
   publishError,
   onPublish,
   needsRepublish,
   originalExcerptId,
+  canReset,
   // Locked Page Model props
-  onClose
+  onClose,
+  // New props for simplified architecture
+  onBlur,  // Handler for localStorage draft saves on blur
+  onReset  // Handler for resetting to original state
 }) {
   const [copySuccess, setCopySuccess] = useState(false);
-  const [customHeading, setCustomHeading] = useState(excerpt?.name || 'Untitled Chapter');
+  const [isCompositorModalOpen, setIsCompositorModalOpen] = useState(false);
   const previousExcerptNameRef = useRef(excerpt?.name);
 
-  // Get localId from context
+  // Get localId and pageId from context
   const localId = context?.localId || context?.extension?.localId;
+  const pageId = context?.contentId || context?.extension?.content?.id;
+
+  // Initialize ref on mount
+  useEffect(() => {
+    if (excerpt?.name && !previousExcerptNameRef.current) {
+      previousExcerptNameRef.current = excerpt.name;
+    }
+  }, [excerpt?.name]);
 
   // Sync custom heading with excerpt name when excerpt changes
   // Only update if the heading hasn't been customized (still matches previous excerpt name)
   useEffect(() => {
-    const currentExcerptName = excerpt?.name || 'Untitled Chapter';
-    const previousExcerptName = previousExcerptNameRef.current || 'Untitled Chapter';
+    const currentExcerptName = excerpt?.name;
+    const previousExcerptName = previousExcerptNameRef.current;
     
-    // If excerpt name changed
-    if (currentExcerptName !== previousExcerptName) {
-      // Only update customHeading if it still matches the previous excerpt name
-      // (meaning user hasn't customized it yet)
-      if (customHeading === previousExcerptName || 
-          (previousExcerptName === 'Untitled Chapter' && customHeading === 'Untitled Chapter')) {
-        setCustomHeading(currentExcerptName);
-      }
-      
-      // Update the ref to track the new excerpt name
-      previousExcerptNameRef.current = currentExcerptName;
-    } else if (!previousExcerptNameRef.current && excerpt?.name) {
-      // First time setting excerpt name
-      setCustomHeading(excerpt.name);
-      previousExcerptNameRef.current = excerpt.name;
+    // Only run if excerpt name actually changed (not on initial mount)
+    if (!currentExcerptName || currentExcerptName === previousExcerptName) {
+      return;
     }
-  }, [excerpt?.name]);
+    
+    // Excerpt name changed - only update customHeading if:
+    // 1. It's undefined/null (not set yet), OR
+    // 2. It still matches the previous excerpt name (user hasn't customized it)
+    // Don't overwrite if it's a custom value (doesn't match current or previous excerpt name)
+    // Don't overwrite empty string - that means user cleared it intentionally
+    const isUnset = customHeading === undefined || customHeading === null;
+    const matchesPrevious = customHeading === previousExcerptName;
+    const matchesCurrent = customHeading === currentExcerptName;
+    
+    // Only update if unset or matches previous (meaning it wasn't customized)
+    // Never update if it matches current (already correct) or is empty (user cleared it)
+    if (isUnset || (matchesPrevious && !matchesCurrent)) {
+      setValue('customHeading', currentExcerptName, { shouldDirty: true });
+    }
+    
+    // Update the ref to track the new excerpt name
+    previousExcerptNameRef.current = currentExcerptName;
+  }, [excerpt?.name, setValue]); // Removed customHeading from deps to prevent overwriting on load
 
   // Handler for copying UUID to clipboard using native Clipboard API
   const handleCopyUuid = async () => {
@@ -195,35 +218,42 @@ export function EmbedEditMode({
     }
   };
 
-  // Use different preview based on selected tab
-  // Toggles tab (0): Raw with markers
-  // Write tab (1): Rendered without markers
-  // Custom tab (2): Raw with markers
-  const previewContent = (selectedTabIndex === 0 || selectedTabIndex === 2)
-    ? getRawPreviewContent()
-    : getPreviewContent();
+  // Always show fully substituted content (toggles + variables + custom insertions)
+  // regardless of which tab is selected
+  const previewContent = getPreviewContent();
+  
   const isAdf = previewContent && typeof previewContent === 'object' && previewContent.type === 'doc';
 
   // Check if toggles are defined
   const hasToggles = excerpt?.toggles && excerpt.toggles.length > 0;
 
-  // Wrapper function for publish that includes custom heading
+  // Publish handler - heading comes from form, not parameter
   const handlePublishWithHeading = () => {
     if (onPublish) {
-      onPublish(customHeading);
+      // Pass null - saveAndPublish will get heading from form values
+      onPublish(null);
     }
   };
 
-  // Handler for Reset button - resets to original source
-  const handleReset = () => {
-    if (originalExcerptId && handleExcerptSelection) {
-      // Find the original excerpt to get its name for heading reset
+  // Handler for Reset button - resets to original state
+  const handleReset = async () => {
+    // If onReset is provided (from useEmbedEditSession), use it
+    if (onReset) {
+      await onReset();
+      // Reset heading to match the original source (form will be reset by onReset)
       const originalExcerpt = availableExcerpts.find(ex => ex.id === originalExcerptId);
       if (originalExcerpt) {
-        // Reset heading to original source name
-        setCustomHeading(originalExcerpt.name);
+        previousExcerptNameRef.current = originalExcerpt.name;
       }
-      // Reset source selection
+      return;
+    }
+    
+    // Fallback to old behavior if onReset not provided
+    if (originalExcerptId && handleExcerptSelection) {
+      const originalExcerpt = availableExcerpts.find(ex => ex.id === originalExcerptId);
+      if (originalExcerpt) {
+        setValue('customHeading', originalExcerpt.name, { shouldDirty: true });
+      }
       handleExcerptSelection({ value: originalExcerptId });
     }
   };
@@ -236,11 +266,11 @@ export function EmbedEditMode({
         <Box xcss={[excerptSelectorStyle, xcss({ width: '100%' })]}>
           <Select
             options={isLoadingExcerpts ? [] : availableExcerpts.map(ex => ({
-              label: `${ex.name}${ex.category ? ` (${ex.category})` : ''}`,
+              label: ex.name,
               value: ex.id
             }))}
             value={isLoadingExcerpts ? undefined : availableExcerpts.map(ex => ({
-              label: `${ex.name}${ex.category ? ` (${ex.category})` : ''}`,
+              label: ex.name,
               value: ex.id
             })).find(opt => opt.value === selectedExcerptId)}
             onChange={isLoadingExcerpts ? undefined : handleExcerptSelection}
@@ -258,17 +288,17 @@ export function EmbedEditMode({
             </Text>
           )}
 
-          {/* Saving/Saved indicator */}
-          {saveStatus === 'saving' && (
+          {/* Draft status indicator - shows during blur, exit, reset, source switch (NOT during publish) */}
+          {saveStatus === 'saving' && !isPublishing && (
             <Fragment>
-              <Spinner size="small" label="Saving" />
-              <Text size="small"><Em>Saving...</Em></Text>
+              <Spinner size="small" label="Saving draft" />
+              <Text size="small"><Em>Draft Saving...</Em></Text>
             </Fragment>
           )}
-          {saveStatus === 'saved' && (
+          {saveStatus === 'saved' && !isPublishing && (
             <Fragment>
-              <Icon glyph="check-circle" color="success" size="small" label="Saved" />
-              <Text size="small"><Em>Saved</Em></Text>
+              <Icon glyph="check-circle" color="success" size="small" label="Draft saved" />
+              <Text size="small"><Em>Draft Saved</Em></Text>
             </Fragment>
           )}
 
@@ -282,7 +312,7 @@ export function EmbedEditMode({
                 iconBefore="angle-brackets"
                 alignBlock="center"
               >
-                {copySuccess ? 'Copied!' : ''}
+                {copySuccess ? 'Copied!' : 'CopyGUID'}
               </Button>
             )}
             {/* Exit button (renamed from Done) */}
@@ -291,14 +321,23 @@ export function EmbedEditMode({
                 Exit
               </Button>
             )}
-            {/* Reset button - only show if original excerpt exists and current is different */}
-            {originalExcerptId && originalExcerptId !== selectedExcerptId && (
+            {/* Reset button - show when source changed OR form has unsaved changes */}
+            {canReset && (
               <Button 
                 appearance="default" 
                 onClick={handleReset}
                 isDisabled={isLoadingExcerpts}
               >
                 Reset
+              </Button>
+            )}
+            {/* Blueprint Settings button - opens Compositor Modal */}
+            {pageId && (
+              <Button
+                appearance="subtle"
+                onClick={() => setIsCompositorModalOpen(true)}
+              >
+                Blueprint Settings
               </Button>
             )}
             {/* Publish button */}
@@ -308,18 +347,28 @@ export function EmbedEditMode({
                 onClick={handlePublishWithHeading}
                 isDisabled={isPublishing || !selectedExcerptId}
               >
-                {isPublishing 
-                  ? 'Publishing...' 
-                  : needsRepublish 
-                    ? 'Publish Changes' 
-                    : publishStatus?.isPublished 
-                      ? 'Republish' 
-                      : 'Publish to Page'}
+                {isPublishing ? 'Publishing...' : 'Publish'}
               </Button>
             )}
           </ButtonGroup>
         </Inline>
       </Inline>
+
+      {/* Publish Progress Indicator */}
+      {isPublishing && (
+        <Box xcss={xcss({ marginTop: 'space.200' })}>
+          <ProgressBar
+            ariaLabel="Publishing chapter to page"
+            value={publishProgress}
+            appearance={publishProgress >= 1 ? 'success' : 'default'}
+          />
+          <Text size="small" color="color.text.subtle" xcss={xcss({ marginTop: 'space.100' })}>
+            {publishProgress >= 1 
+              ? 'Publish complete!' 
+              : 'Publishing your changes to the page...'}
+          </Text>
+        </Box>
+      )}
 
       {/* Publish Error Message */}
       {publishError && (
@@ -333,7 +382,7 @@ export function EmbedEditMode({
 
       <Tabs 
         onChange={(index) => setSelectedTabIndex(index)}
-        defaultSelected={hasToggles ? 0 : 1}
+        selected={selectedTabIndex ?? 1}
         id="embed-edit-tabs"
       >
         <TabList>
@@ -363,6 +412,7 @@ export function EmbedEditMode({
             excerpt={excerpt}
             control={control}
             setValue={setValue}
+            onBlur={onBlur}
           />
         </TabPanel>
 
@@ -372,6 +422,8 @@ export function EmbedEditMode({
             excerpt={excerpt}
             control={control}
             setValue={setValue}
+            formKey={formKey}
+            onBlur={onBlur}
           />
         </TabPanel>
 
@@ -386,6 +438,7 @@ export function EmbedEditMode({
             setSelectedPosition={setSelectedPosition}
             customText={customText}
             setCustomText={setCustomText}
+            onBlur={onBlur}
           />
         </TabPanel>
       </Tabs>
@@ -412,16 +465,37 @@ export function EmbedEditMode({
                 <Inline space="space.025" alignBlock="baseline" alignInline="start">
                   <Icon glyph="edit" label="Edit heading" size="medium" />
                   <InlineEdit
-                    defaultValue={customHeading || excerpt?.name || 'Untitled Chapter'}
+                    defaultValue={customHeading || excerpt?.name || ''}
                     editView={({ errorMessage, ...fieldProps }) => (
-                      <Textfield {...fieldProps} autoFocus placeholder="Enter chapter heading..." />
+                      <Textfield 
+                        {...fieldProps} 
+                        autoFocus 
+                        placeholder="Enter chapter heading..."
+                        onBlur={(e) => {
+                          // Call the original onBlur from fieldProps if exists
+                          if (fieldProps.onBlur) fieldProps.onBlur(e);
+                          // Then call our draft save handler
+                          if (onBlur) onBlur();
+                        }}
+                      />
                     )}
                     readView={() => (
                       <Box xcss={xcss({ padding: 'space.0', margin: 'space.0' })}>
-                        <Heading size="large">{customHeading || excerpt?.name || 'Untitled Chapter'}</Heading>
+                        <Heading size="large">{customHeading || excerpt?.name || ''}</Heading>
                       </Box>
                     )}
-                    onConfirm={(value) => setCustomHeading(value || excerpt?.name || 'Untitled Chapter')}
+                    onConfirm={(value) => {
+                      // If user clears the field, use empty string (will fallback to excerpt.name on publish)
+                      const headingValue = value !== null && value !== undefined ? value : '';
+                      setValue('customHeading', headingValue, { shouldDirty: true });
+                      // Trigger blur save after heading change is confirmed
+                      // Use setTimeout to ensure form state has updated
+                      if (onBlur) {
+                        setTimeout(() => {
+                          onBlur();
+                        }, 0);
+                      }
+                    }}
                   />
                 </Inline>
               </Box>
@@ -437,6 +511,15 @@ export function EmbedEditMode({
           </Stack>
         </Box>
       </Stack>
+
+      {/* Compositor Modal */}
+      {pageId && (
+        <CompositorModal
+          isOpen={isCompositorModalOpen}
+          onClose={() => setIsCompositorModalOpen(false)}
+          pageId={pageId}
+        />
+      )}
     </Stack>
   );
 }

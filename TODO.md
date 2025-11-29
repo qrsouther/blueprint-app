@@ -2087,3 +2087,70 @@ See `src/resolvers/migration-resolvers.js:10-16` for complete deletion checklist
 
 **Last Updated:** 2025-11-14
 **Current Version:** v8.21.0 (latest deployed)
+
+---
+
+### Remove Forge Storage Versioning for Embeds
+**Status:** 🔄 TODO - Pending Review
+**Priority:** Medium (code simplification)
+**Created:** 2025-11-29
+**Estimated Effort:** Medium (4-6 hours)
+
+**Context:**
+With the Locked Page Model and native content injection now active:
+1. **Content is versioned by Confluence** - All rendered output (including internal notes and custom insertions) is injected into page storage and tracked via Page History
+2. **Users cannot delete/move Embeds** - Editing happens via View Mode UI, not Confluence Edit Mode. No accidental deletions possible.
+3. **Source reassignment is the only "rollback" scenario** - If a user changes from Source A to Source B, their old inputs are preserved in Page History as rendered output
+
+**What This Means:**
+- Forge-based version snapshots (`version:{entityId}:{timestamp}`, `version-index:{entityId}`) are redundant
+- Users wanting to rollback can use Confluence's native Page History
+- If rendered output doesn't match expected inputs, that's a bug to fix, not a versioning use case
+
+**Files/Systems to Remove:**
+1. **Version Manager** - `src/utils/version-manager.js` (entire file)
+2. **Version Resolvers** - `src/resolvers/version-resolvers.js` (entire file)
+3. **Version Pruning Worker** - `src/workers/pruneVersionsWorker.js` (entire file)
+4. **saveVersion() calls** - Remove from:
+   - `src/resolvers/include-resolvers.js` (saveVariableValues)
+   - `src/workers/helpers/orphan-detector.js` (softDeleteMacroVars)
+   - Any other locations that create version snapshots
+5. **Version History UI** - Remove "Version History" tab from `src/components/admin/EmergencyRecoveryModal.jsx`
+6. **Resolver registrations** - Remove from `src/index.js`:
+   - `getVersionHistory`, `getVersionDetails`, `restoreFromVersion`
+   - `pruneVersionsNow`, `getVersioningStats`
+
+**What to KEEP:**
+- **Soft-delete protection** (`macro-vars-deleted:*`) - Still useful for cleanup/recovery workflows
+- **Backup snapshots** (`backup-{timestamp}:*`) - Created before Check All Embeds, still provides safety net
+- **localStorage draft storage** - Crash recovery (separate system, client-side)
+
+**Edge Case Analysis:**
+If a user reassigns an Embed from Source A → Source B, then wants to revert:
+- Page History shows Source A's rendered output ✓
+- But Embed config in Forge still has Source B
+- User would need to manually reconfigure back to Source A
+- This is acceptable: the critical content (output) is recoverable
+
+**Testing Before Removal:**
+1. Verify Page History correctly captures all injected content
+2. Confirm internal notes and custom insertions appear in page storage
+3. Test Page History rollback restores expected content
+4. Document that Embed config won't auto-restore (expected behavior)
+
+**Success Criteria:**
+- [ ] All version-manager code removed
+- [ ] Version storage keys no longer created
+- [ ] Version History UI removed from Admin page
+- [ ] Soft-delete and backup systems still function
+- [ ] No regressions in content injection or Page History
+
+**Related Documentation:**
+- `docs/architecture/BACKUP_RESTORE_DESIGN.md` - Update to reflect removal
+- `docs/planning/DATA-SAFETY-VERSIONING-PROPOSAL.md` - Archive as completed/superseded
+- This TODO section "Data Safety & Versioning System" - Mark as superseded
+
+**Frontend Components Commented Out (2025-11-29):**
+- `src/admin-page.jsx` - VersionHistoryModal import and usage commented out
+- `src/components/admin/EmergencyRecoveryModal.jsx` - Version History tab commented out
+- `src/components/admin/VersionHistoryModal.jsx` - Entire component marked deprecated

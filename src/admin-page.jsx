@@ -80,12 +80,15 @@ import { CheckAllProgressBar } from './components/admin/CheckAllProgressBar';
 import { AdminToolbar } from './components/admin/AdminToolbar';
 import { OrphanedItemsSection } from './components/admin/OrphanedItemsSection';
 import { EmergencyRecoveryModal } from './components/admin/EmergencyRecoveryModal';
-import { VersionHistoryModal } from './components/admin/VersionHistoryModal';
+// DEPRECATED (2025-11-29): Version History UI disabled - Confluence Page History handles versioning now
+// See TODO.md "Remove Forge Storage Versioning for Embeds" for full removal plan
+// import { VersionHistoryModal } from './components/admin/VersionHistoryModal';
 import { StorageUsageFooter } from './components/admin/StorageUsageFooter';
 import { RedlineQueuePage } from './components/admin/RedlineQueuePage';
 import { StorageBrowser } from './components/admin/StorageBrowser';
 import { StorageExportModal } from './components/admin/StorageExportModal';
 import { StorageImportModal } from './components/admin/StorageImportModal';
+import { ArchetypesPage } from './components/admin/ArchetypesPage';
 
 // Import admin styles
 import {
@@ -275,9 +278,10 @@ const App = () => {
   // Storage Export/Import Modal UI
   const [isStorageExportOpen, setIsStorageExportOpen] = useState(false);
   const [isStorageImportOpen, setIsStorageImportOpen] = useState(false);
-  const [versionHistoryEmbedUuid, setVersionHistoryEmbedUuid] = useState(null);
-  const [isVersionHistoryOpen, setIsVersionHistoryOpen] = useState(false);
-  const [versionHistoryUuid, setVersionHistoryUuid] = useState(null);
+  // DEPRECATED (2025-11-29): Version History state disabled - Confluence Page History handles versioning
+  // const [versionHistoryEmbedUuid, setVersionHistoryEmbedUuid] = useState(null);
+  // const [isVersionHistoryOpen, setIsVersionHistoryOpen] = useState(false);
+  // const [versionHistoryUuid, setVersionHistoryUuid] = useState(null);
 
   // Storage usage state
   const [storageUsage, setStorageUsage] = useState(null);
@@ -1526,6 +1530,12 @@ const App = () => {
                     </Tab>
                     <Tab>
                       <Inline space="space.100" alignBlock="center">
+                        <Icon glyph="teams" label="Archetypes" />
+                        <Heading size='small'>Archetypes</Heading>
+                      </Inline>
+                    </Tab>
+                    <Tab>
+                      <Inline space="space.100" alignBlock="center">
                         <Icon glyph="database" label="Storage" />
                         <Heading size='small'>Storage</Heading>
                       </Inline>
@@ -1595,10 +1605,9 @@ const App = () => {
             overflow: 'hidden', // Prevent sidebar from expanding beyond its container
             paddingInlineEnd: 'space.200',
             padding: 'space.200',
-            borderColor: 'color.border',
-            borderStyle: 'solid',
-            borderWidth: 'border.width',
-            borderRadius: 'border.radius',
+            borderRightWidth: 'border.width',
+            borderRightStyle: 'solid',
+            borderRightColor: 'color.border',
             boxSizing: 'border-box'
           })}
           selectStyles={selectStyles}
@@ -2108,6 +2117,7 @@ const App = () => {
                           content: (
                             <Box xcss={tableCellSeparatorStyle}>
                               <Inline space="space.100" alignBlock="center">
+                              {/* DEPRECATED (2025-11-29): Version History button disabled - Confluence Page History handles versioning
                               <Button
                                 appearance="default"
                                 spacing="compact"
@@ -2118,6 +2128,7 @@ const App = () => {
                               >
                                 Recovery Options
                               </Button>
+                              */}
                               <Button
                                 appearance="primary"
                                 spacing="compact"
@@ -2181,6 +2192,10 @@ const App = () => {
           <Box xcss={tabPanelContentStyles}>
             <RedlineQueuePage />
           </Box>
+        </TabPanel>
+
+        <TabPanel>
+          <ArchetypesPage />
         </TabPanel>
 
         <TabPanel>
@@ -2640,6 +2655,7 @@ const App = () => {
                                       key: 'actions',
                                       content: (
                                         <Inline space="space.100" alignBlock="center">
+                                          {/* DEPRECATED (2025-11-29): Version History button disabled - Confluence Page History handles versioning
                                           <Button
                                             appearance="default"
                                             spacing="compact"
@@ -2650,6 +2666,7 @@ const App = () => {
                                           >
                                             Recovery Options
                                           </Button>
+                                          */}
                                           <Button
                                             appearance="primary"
                                             spacing="compact"
@@ -2760,14 +2777,15 @@ const App = () => {
       />
 
       {/* Emergency Recovery Modal (Phase 1 Safety Patch - v7.16.0) */}
+      {/* Note: Version History tab disabled (2025-11-29) - Confluence Page History handles versioning */}
       <EmergencyRecoveryModal
         isOpen={isEmergencyRecoveryOpen}
         onClose={() => {
           setIsEmergencyRecoveryOpen(false);
-          setVersionHistoryEmbedUuid(null); // Reset UUID when closing
+          // setVersionHistoryEmbedUuid(null); // DEPRECATED: Version History disabled
         }}
-        initialTab={versionHistoryEmbedUuid ? 'version-history' : 'deleted-embeds'}
-        autoLoadEmbedUuid={versionHistoryEmbedUuid}
+        initialTab="deleted-embeds"
+        // autoLoadEmbedUuid={versionHistoryEmbedUuid} // DEPRECATED: Version History disabled
       />
 
       {/* Storage Export/Import Modals */}
@@ -2781,7 +2799,7 @@ const App = () => {
         onClose={() => setIsStorageImportOpen(false)}
       />
 
-      {/* Version History Modal (Phase 4 - v7.18.8) */}
+      {/* DEPRECATED (2025-11-29): Version History Modal disabled - Confluence Page History handles versioning
       <VersionHistoryModal
         isOpen={isVersionHistoryOpen}
         onClose={() => {
@@ -2790,6 +2808,7 @@ const App = () => {
         }}
         embedUuid={versionHistoryUuid}
       />
+      */}
 
       {/* Storage Usage Footer */}
       <StorageUsageFooter

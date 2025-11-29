@@ -475,6 +475,16 @@ export async function publishChapter(req) {
     const updatedPage = await updateResponse.json();
 
     // 9. Update Embed config with published state
+    // Store the Source's contentHash and ADF content at publish time for staleness detection
+    // This allows us to detect when the Source changes after publishing and show a diff
+    const publishedSourceContentHash = excerpt.contentHash || null;
+    // Deep clone the Source ADF content to prevent reference issues
+    // If we store by reference, updates to the Source will mutate our stored copy
+    const publishedSourceContent = excerpt.content 
+      ? JSON.parse(JSON.stringify(excerpt.content))
+      : null;
+    
+    // Also store a hash of the rendered content for reference
     const publishedContentHash = calculateContentHash({
       content: storageContent,
       variableValues,
@@ -498,6 +508,8 @@ export async function publishChapter(req) {
       excerptId,
       publishedAt: new Date().toISOString(),
       publishedContentHash,
+      publishedSourceContentHash, // Source's contentHash at publish time (for staleness detection)
+      publishedSourceContent, // Source's ADF content at publish time (for diff view)
       publishedVersion: updatedPage.version.number,
       // Update sync timestamp
       lastSynced: new Date().toISOString()

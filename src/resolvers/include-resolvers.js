@@ -36,7 +36,7 @@ import { createErrorResponse, ERROR_CODES } from '../utils/error-codes.js';
 export async function saveVariableValues(req) {
   const functionStartTime = Date.now();
   try {
-    const { localId, excerptId, variableValues, toggleStates, customInsertions, internalNotes, pageId: explicitPageId } = req.payload;
+    const { localId, excerptId, variableValues, toggleStates, customInsertions, internalNotes, customHeading, pageId: explicitPageId } = req.payload;
     
     // Input validation
     if (!localId || typeof localId !== 'string' || localId.trim() === '') {
@@ -158,6 +158,7 @@ export async function saveVariableValues(req) {
       toggleStates: toggleStates || {},
       customInsertions: customInsertions || [],
       internalNotes: internalNotes || [],
+      customHeading: customHeading || '',  // Custom chapter heading override
       updatedAt: now,
       lastSynced: now,  // Track when this Include instance last synced with Source
       syncedContentHash,  // Store hash of the content at sync time for staleness detection

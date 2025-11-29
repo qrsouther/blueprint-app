@@ -85,11 +85,10 @@ export const previewBoxStyle = xcss({
 
 /**
  * Select dropdown sizing
- * Compact width to fit within sidebar
+ * Matches the width of the search input field
  */
 export const selectStyles = xcss({
-  width: '100%',
-  maxWidth: '180px'
+  width: '100%'
 });
 
 /**
@@ -132,7 +131,8 @@ export const scrollableListStyle = xcss({
   flex: 1,         // Fill vertical available space in LeftSidebar
   minHeight: 0,    // Allow shrinking to fit container if content is small
   overflowY: 'auto',
-  padding: 'space.200'
+  padding: 'space.0',
+  paddingTop: 'space.200'
 });
 
 /**
@@ -151,11 +151,7 @@ export const middleSectionStyles = xcss({
   boxSizing: 'border-box', // Include padding in width calculation
   paddingInlineEnd: 'space.200',
   paddingInlineStart: 'space.200',
-  padding: 'space.200',
-  borderColor: 'color.border',
-  borderStyle: 'solid',
-  borderWidth: 'border.width',
-  borderRadius: 'border.radius'
+  padding: 'space.200'
 });
 
 /**

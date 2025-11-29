@@ -70,7 +70,8 @@ export const CustomInsertionsPanel = ({
   selectedPosition,
   setSelectedPosition,
   customText,
-  setCustomText
+  setCustomText,
+  onBlur
 }) => {
   // Watch form values from parent form
   const variableValues = useWatch({ control, name: 'variableValues' }) || {};
@@ -183,6 +184,7 @@ export const CustomInsertionsPanel = ({
               value={customText}
               onChange={(e) => setCustomText(e.target.value)}
               isDisabled={selectedPosition === null}
+              onBlur={onBlur}
             />
           )
         },
@@ -211,6 +213,9 @@ export const CustomInsertionsPanel = ({
 
                 setSelectedPosition(null);
                 setCustomText('');
+                
+                // Trigger draft save after adding content
+                if (onBlur) onBlur();
               }}
             >
               Add
@@ -260,6 +265,8 @@ export const CustomInsertionsPanel = ({
                   } else {
                     removeInternalNote(item.originalIndex);
                   }
+                  // Trigger draft save after deleting content
+                  if (onBlur) onBlur();
                 }}
               >
                 <Icon glyph="trash" size="small" label="Delete" />

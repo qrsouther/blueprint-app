@@ -1,6 +1,14 @@
 /**
  * Version History Modal Component
  *
+ * ⚠️ DEPRECATED (2025-11-29): This component is no longer used.
+ * 
+ * With native content injection activated, Confluence's Page History now handles
+ * all versioning. Forge-based version snapshots are redundant.
+ * 
+ * See TODO.md "Remove Forge Storage Versioning for Embeds" for the full removal plan.
+ * This file will be deleted as part of that cleanup.
+ *
  * Part of Phase 4 (v7.18.8) - Embed Version Management UI
  *
  * Displays version history for a specific Embed, allowing users to:
@@ -16,6 +24,7 @@
  * @param {Function} props.onClose - Handler to close modal
  * @param {string} props.embedUuid - Embed UUID (localId) to load version history for
  * @returns {JSX.Element}
+ * @deprecated Use Confluence Page History instead
  */
 
 import React, { useState, useEffect } from 'react';

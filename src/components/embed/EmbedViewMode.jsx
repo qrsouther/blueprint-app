@@ -127,38 +127,43 @@ export function EmbedViewMode({
   // When content has been published to the page (isPublished=true), we don't need
   // to render the preview content - it's already on the page natively.
   // We only show:
-  // 1. Edit button (always, for Locked Page Model)
-  // 2. Update Available banner (only when stale, with Review button)
+  // 1. Edit button (when NOT stale, for Locked Page Model)
+  // 2. Update Available button (when stale, replaces Edit button)
+  // 3. Update Available banner with diff view (after clicking Update Available)
   if (isPublished) {
     return (
       <Box xcss={xcss({ padding: 'space.050' })}>
-        {/* Edit button - always visible in Locked Page Model */}
-        {onEditClick && (
+        {/* Show Edit button when NOT stale (keep visible while checking staleness) */}
+        {onEditClick && !isStale && (
           <Box xcss={editButtonBorderContainerStyle}>
-            <Inline 
-              space="space.100" 
-              alignBlock="center"
-            >
             <Button 
               appearance="default" 
               onClick={onEditClick}
               shouldFitContainer={true}
               iconAfter="chevron-down"
               spacing="compact"
+              isDisabled={isCheckingStaleness}
             >
-              Edit the Chapter below
+              Edit the chapter below
             </Button>
-            {/* Show subtle "Update Available" indicator when stale */}
-            {isStale && !isCheckingStaleness && !showUpdateBanner && (
-              <Button appearance="warning" onClick={handleReviewClick}>
-                Update Available
-              </Button>
-            )}
-          </Inline>
           </Box>
         )}
         
-        {/* Full Update banner - only shown after clicking "Update Available" */}
+        {/* Show Update Available button when stale (replaces Edit button) */}
+        {isStale && !isCheckingStaleness && !showUpdateBanner && (
+          <Box xcss={editButtonBorderContainerStyle}>
+            <Button 
+              appearance="warning" 
+              onClick={handleReviewClick}
+              shouldFitContainer={true}
+              spacing="compact"
+            >
+              Update Available for chapter below
+            </Button>
+          </Box>
+        )}
+        
+        {/* Full Update banner with diff view - shown after clicking "Update Available" */}
         {showUpdateBanner && isStale && (
           <Box xcss={xcss({ marginTop: 'space.100' })}>
             <UpdateAvailableBanner

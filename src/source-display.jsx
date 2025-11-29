@@ -83,11 +83,11 @@ const App = () => {
 
       const result = await invoke('getExcerpt', { excerptId: config.excerptId });
 
-      if (!result.success || !result.excerpt) {
-        throw new Error('Failed to load excerpt');
+      if (!result.success || !result.data?.excerpt) {
+        throw new Error(result.error || 'Failed to load excerpt');
       }
 
-      return result.excerpt;
+      return result.data.excerpt;
     },
     enabled: !!config?.excerptId,
     staleTime: 1000 * 60 * 60, // 1 hour - aggressive caching

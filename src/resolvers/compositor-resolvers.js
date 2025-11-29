@@ -119,7 +119,8 @@ export async function saveCompositorConfig(req) {
 /**
  * Get available archetypes
  *
- * Returns the list of all defined archetypes.
+ * Returns the list of all defined archetypes from storage.
+ * Falls back to hardcoded ARCHETYPES if storage is empty (for migration).
  *
  * @returns {Promise<Object>} List of archetypes
  */
@@ -127,12 +128,245 @@ export async function getArchetypes(req) {
   logFunction('getArchetypes', 'START', {});
 
   try {
+    // Try to get archetypes from storage
+    const storedArchetypes = await storage.get('archetypes-index');
+    
+    if (storedArchetypes && storedArchetypes.archetypes && storedArchetypes.archetypes.length > 0) {
+      // Load full details for each archetype
+      const archetypePromises = storedArchetypes.archetypes.map(async (archetypeId) => {
+        const fullArchetype = await storage.get(`archetype:${archetypeId}`);
+        return fullArchetype;
+      });
+
+      const archetypes = await Promise.all(archetypePromises);
+      
+      return {
+        success: true,
+        data: archetypes.filter(a => a !== null)
+      };
+    }
+
+    // Fallback to hardcoded archetypes (for migration/initial setup)
     return {
       success: true,
       data: ARCHETYPES
     };
   } catch (error) {
     logFailure('getArchetypes', 'Error', error);
+    return { success: false, error: error.message };
+  }
+}
+
+/**
+ * Get a single archetype by ID
+ *
+ * @param {Object} req - Request object
+ * @param {string} req.payload.archetypeId - Archetype ID
+ * @returns {Promise<Object>} Archetype data
+ */
+export async function getArchetype(req) {
+  const { archetypeId } = req.payload || {};
+
+  logFunction('getArchetype', 'START', { archetypeId });
+
+  try {
+    if (!archetypeId) {
+      return { success: false, error: 'Missing required parameter: archetypeId' };
+    }
+
+    // Try to get from storage first
+    const archetype = await storage.get(`archetype:${archetypeId}`);
+    
+    if (archetype) {
+      return {
+        success: true,
+        data: archetype
+      };
+    }
+
+    // Fallback to hardcoded archetypes
+    const hardcodedArchetype = getArchetypeById(archetypeId);
+    if (hardcodedArchetype) {
+      return {
+        success: true,
+        data: hardcodedArchetype
+      };
+    }
+
+    return { success: false, error: `Archetype not found: ${archetypeId}` };
+  } catch (error) {
+    logFailure('getArchetype', 'Error', error, { archetypeId });
+    return { success: false, error: error.message };
+  }
+}
+
+/**
+ * Create a new archetype
+ *
+ * Creates a new archetype with the given name and saves it to storage.
+ *
+ * @param {Object} req - Request object
+ * @param {string} req.payload.name - Archetype name
+ * @param {string} req.payload.description - Optional description
+ * @param {string} req.payload.category - Optional category
+ * @returns {Promise<Object>} Created archetype
+ */
+export async function createArchetype(req) {
+  const { name, description = '', category = 'Uncategorized' } = req.payload || {};
+
+  logFunction('createArchetype', 'START', { name });
+
+  try {
+    if (!name || !name.trim()) {
+      return { success: false, error: 'Archetype name is required' };
+    }
+
+    // Generate unique ID
+    const id = `archetype-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+
+    // Create archetype object
+    const archetype = {
+      id,
+      name: name.trim(),
+      description: description.trim() || '',
+      category: category.trim() || 'Uncategorized',
+      chapters: [],
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    };
+
+    // Save archetype to storage
+    await storage.set(`archetype:${id}`, archetype);
+
+    // Update archetypes index
+    const index = await storage.get('archetypes-index') || { archetypes: [] };
+    if (!index.archetypes.includes(id)) {
+      index.archetypes.push(id);
+      await storage.set('archetypes-index', index);
+    }
+
+    logSuccess('createArchetype', 'Archetype created', { id, name });
+
+    return {
+      success: true,
+      data: archetype
+    };
+  } catch (error) {
+    logFailure('createArchetype', 'Error', error, { name });
+    return { success: false, error: error.message };
+  }
+}
+
+/**
+ * Update an archetype
+ *
+ * Updates an existing archetype's properties.
+ *
+ * @param {Object} req - Request object
+ * @param {string} req.payload.archetypeId - Archetype ID
+ * @param {string} req.payload.name - Optional new name
+ * @param {string} req.payload.description - Optional new description
+ * @param {string} req.payload.category - Optional new category
+ * @returns {Promise<Object>} Updated archetype
+ */
+export async function updateArchetype(req) {
+  const { archetypeId, name, description, category } = req.payload || {};
+
+  logFunction('updateArchetype', 'START', { archetypeId, name });
+
+  try {
+    if (!archetypeId) {
+      return { success: false, error: 'Missing required parameter: archetypeId' };
+    }
+
+    // Get existing archetype
+    let archetype = await storage.get(`archetype:${archetypeId}`);
+    
+    // If not in storage, try hardcoded
+    if (!archetype) {
+      archetype = getArchetypeById(archetypeId);
+      if (!archetype) {
+        return { success: false, error: `Archetype not found: ${archetypeId}` };
+      }
+      // Create a copy to avoid mutating hardcoded data
+      archetype = JSON.parse(JSON.stringify(archetype));
+    }
+
+    // Update fields if provided
+    if (name !== undefined) {
+      archetype.name = name.trim();
+    }
+    if (description !== undefined) {
+      archetype.description = description.trim();
+    }
+    if (category !== undefined) {
+      archetype.category = category.trim();
+    }
+
+    archetype.updatedAt = new Date().toISOString();
+
+    // Save updated archetype
+    await storage.set(`archetype:${archetypeId}`, archetype);
+
+    logSuccess('updateArchetype', 'Archetype updated', { archetypeId, name });
+
+    return {
+      success: true,
+      data: archetype
+    };
+  } catch (error) {
+    logFailure('updateArchetype', 'Error', error, { archetypeId });
+    return { success: false, error: error.message };
+  }
+}
+
+/**
+ * Delete an archetype
+ *
+ * Removes an archetype from storage.
+ *
+ * @param {Object} req - Request object
+ * @param {string} req.payload.archetypeId - Archetype ID to delete
+ * @returns {Promise<Object>} Result
+ */
+export async function deleteArchetype(req) {
+  const { archetypeId } = req.payload || {};
+
+  logFunction('deleteArchetype', 'START', { archetypeId });
+
+  try {
+    if (!archetypeId) {
+      return { success: false, error: 'Missing required parameter: archetypeId' };
+    }
+
+    // Check if archetype exists in storage
+    const archetype = await storage.get(`archetype:${archetypeId}`);
+    
+    if (!archetype) {
+      // Check if it's a hardcoded archetype (cannot delete)
+      const hardcodedArchetype = getArchetypeById(archetypeId);
+      if (hardcodedArchetype) {
+        return { success: false, error: 'Cannot delete hardcoded archetype. Only user-created archetypes can be deleted.' };
+      }
+      return { success: false, error: `Archetype not found: ${archetypeId}` };
+    }
+
+    // Remove from storage
+    await storage.delete(`archetype:${archetypeId}`);
+
+    // Remove from index
+    const index = await storage.get('archetypes-index') || { archetypes: [] };
+    index.archetypes = index.archetypes.filter(id => id !== archetypeId);
+    await storage.set('archetypes-index', index);
+
+    logSuccess('deleteArchetype', 'Archetype deleted', { archetypeId });
+
+    return {
+      success: true,
+      message: 'Archetype deleted successfully'
+    };
+  } catch (error) {
+    logFailure('deleteArchetype', 'Error', error, { archetypeId });
     return { success: false, error: error.message };
   }
 }

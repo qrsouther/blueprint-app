@@ -151,6 +151,10 @@ import {
   getCompositorConfig as getCompositorConfigResolver,
   saveCompositorConfig as saveCompositorConfigResolver,
   getArchetypes as getArchetypesResolver,
+  getArchetype as getArchetypeResolver,
+  createArchetype as createArchetypeResolver,
+  updateArchetype as updateArchetypeResolver,
+  deleteArchetype as deleteArchetypeResolver,
   getArchetypeChapters as getArchetypeChaptersResolver,
   toggleChapter as toggleChapterResolver,
   bulkPublishChapters as bulkPublishChaptersResolver,
@@ -1049,6 +1053,18 @@ resolver.define('saveCompositorConfig', saveCompositorConfigResolver);
 
 // Get available archetypes
 resolver.define('getArchetypes', getArchetypesResolver);
+
+// Get a single archetype
+resolver.define('getArchetype', getArchetypeResolver);
+
+// Create a new archetype
+resolver.define('createArchetype', createArchetypeResolver);
+
+// Update an archetype
+resolver.define('updateArchetype', updateArchetypeResolver);
+
+// Delete an archetype
+resolver.define('deleteArchetype', deleteArchetypeResolver);
 
 // Get chapters for an archetype
 resolver.define('getArchetypeChapters', getArchetypeChaptersResolver);
