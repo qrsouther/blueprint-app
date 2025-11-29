@@ -321,6 +321,146 @@ export async function updateArchetype(req) {
 }
 
 /**
+ * Copy an archetype
+ *
+ * Creates a duplicate of an existing archetype with a new ID and name.
+ *
+ * @param {Object} req - Request object
+ * @param {string} req.payload.archetypeId - Archetype ID to copy
+ * @returns {Promise<Object>} Copied archetype
+ */
+export async function copyArchetype(req) {
+  const { archetypeId } = req.payload || {};
+
+  logFunction('copyArchetype', 'START', { archetypeId });
+
+  try {
+    if (!archetypeId) {
+      return { success: false, error: 'Missing required parameter: archetypeId' };
+    }
+
+    // Get existing archetype
+    let archetype = await storage.get(`archetype:${archetypeId}`);
+    
+    // If not in storage, try hardcoded
+    if (!archetype) {
+      archetype = getArchetypeById(archetypeId);
+      if (!archetype) {
+        return { success: false, error: `Archetype not found: ${archetypeId}` };
+      }
+      // Create a copy to avoid mutating hardcoded data
+      archetype = JSON.parse(JSON.stringify(archetype));
+    } else {
+      // Deep clone to avoid reference issues
+      archetype = JSON.parse(JSON.stringify(archetype));
+    }
+
+    // Generate new ID
+    const newId = `archetype-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+
+    // Update archetype with new ID and name
+    archetype.id = newId;
+    archetype.name = `${archetype.name} (Copy)`;
+    archetype.createdAt = new Date().toISOString();
+    archetype.updatedAt = new Date().toISOString();
+
+    // Deep clone chapters if they exist
+    if (archetype.chapters && Array.isArray(archetype.chapters)) {
+      archetype.chapters = archetype.chapters.map(chapter => ({
+        ...chapter,
+        // Generate new chapter IDs to avoid conflicts
+        id: `chapter-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`
+      }));
+    }
+
+    // Save new archetype to storage
+    await storage.set(`archetype:${newId}`, archetype);
+
+    // Update archetypes index
+    const index = await storage.get('archetypes-index') || { archetypes: [] };
+    if (!index.archetypes.includes(newId)) {
+      index.archetypes.push(newId);
+      await storage.set('archetypes-index', index);
+    }
+
+    logSuccess('copyArchetype', 'Archetype copied', { originalId: archetypeId, newId });
+
+    return {
+      success: true,
+      data: archetype
+    };
+  } catch (error) {
+    logFailure('copyArchetype', 'Error', error, { archetypeId });
+    return { success: false, error: error.message };
+  }
+}
+
+/**
+ * Update source defaults for an archetype
+ *
+ * Updates toggle states and other defaults for a specific source within an archetype.
+ *
+ * @param {Object} req - Request object
+ * @param {string} req.payload.archetypeId - Archetype ID
+ * @param {string} req.payload.sourceId - Source ID
+ * @param {Object} req.payload.toggleStates - Toggle states object (e.g., { "toggleName": true })
+ * @returns {Promise<Object>} Updated archetype
+ */
+export async function updateArchetypeSourceDefaults(req) {
+  const { archetypeId, sourceId, toggleStates } = req.payload || {};
+
+  logFunction('updateArchetypeSourceDefaults', 'START', { archetypeId, sourceId });
+
+  try {
+    if (!archetypeId || !sourceId) {
+      return { success: false, error: 'Missing required parameters: archetypeId and sourceId' };
+    }
+
+    // Get existing archetype
+    let archetype = await storage.get(`archetype:${archetypeId}`);
+    
+    // If not in storage, try hardcoded
+    if (!archetype) {
+      archetype = getArchetypeById(archetypeId);
+      if (!archetype) {
+        return { success: false, error: `Archetype not found: ${archetypeId}` };
+      }
+      // Create a copy to avoid mutating hardcoded data
+      archetype = JSON.parse(JSON.stringify(archetype));
+    } else {
+      // Deep clone to avoid reference issues
+      archetype = JSON.parse(JSON.stringify(archetype));
+    }
+
+    // Initialize sourceDefaults if it doesn't exist
+    if (!archetype.sourceDefaults) {
+      archetype.sourceDefaults = {};
+    }
+
+    // Update or create source defaults
+    archetype.sourceDefaults[sourceId] = {
+      ...archetype.sourceDefaults[sourceId],
+      toggleStates: toggleStates || {}
+    };
+
+    archetype.updatedAt = new Date().toISOString();
+
+    // Save updated archetype
+    await storage.set(`archetype:${archetypeId}`, archetype);
+
+    logSuccess('updateArchetypeSourceDefaults', 'Source defaults updated', { archetypeId, sourceId });
+
+    return {
+      success: true,
+      data: archetype
+    };
+  } catch (error) {
+    logFailure('updateArchetypeSourceDefaults', 'Error', error, { archetypeId, sourceId });
+    return { success: false, error: error.message };
+  }
+}
+
+/**
  * Delete an archetype
  *
  * Removes an archetype from storage.

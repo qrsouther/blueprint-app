@@ -6,7 +6,6 @@
  * - Manage Categories button
  * - Check All Sources button
  * - Check All Embeds button
- * - Emergency Recovery button (Phase 1 safety feature)
  *
  * Shows last verification timestamp as tooltip on button hover.
  *
@@ -18,7 +17,6 @@
  * @param {boolean} props.isCheckingAllSources - Whether Check All Sources is running
  * @param {Function} props.onCheckAllIncludes - Handler for Check All Embeds button
  * @param {boolean} props.isCheckingIncludes - Whether Check All Embeds is running
- * @param {Function} props.onOpenEmergencyRecovery - Handler for Emergency Recovery button
  * @param {string|null} props.lastVerificationTime - ISO timestamp of last verification
  * @param {Function} props.formatTimestamp - Function to format timestamp for display
  * @param {Function} props.onOpenStorageExport - Handler for Export Production Data button
@@ -50,7 +48,6 @@ export function AdminToolbar({
   isCheckingAllSources,
   onCheckAllIncludes,
   isCheckingIncludes,
-  onOpenEmergencyRecovery,
   lastVerificationTime,
   formatTimestamp,
   onCreateTestPage,
@@ -91,7 +88,7 @@ export function AdminToolbar({
         onClick={onOpenCategoryModal}
         xcss={buttonStyles}
       >
-        Manage Categories
+        Categories
       </Button>
 
       <Tooltip content={verificationTooltip}>
@@ -102,7 +99,7 @@ export function AdminToolbar({
           isDisabled={isCheckingAllSources}
           xcss={buttonStyles}
         >
-          {isCheckingAllSources ? 'Checking...' : 'Check All Sources'}
+          {isCheckingAllSources ? 'Checking...' : 'Check Sources'}
         </Button>
       </Tooltip>
 
@@ -114,17 +111,7 @@ export function AdminToolbar({
           isDisabled={isCheckingIncludes}
           xcss={buttonStyles}
         >
-          {isCheckingIncludes ? 'Checking...' : 'Check All Embeds'}
-        </Button>
-      </Tooltip>
-
-      <Tooltip content="View and restore soft-deleted Embeds from the recovery namespace. Use this if data was accidentally removed by Check All Embeds or other operations.">
-        <Button
-          iconBefore='pulse'
-          onClick={onOpenEmergencyRecovery}
-          xcss={buttonStyles}
-        >
-          Restore Version
+          {isCheckingIncludes ? 'Checking...' : 'Check Embeds'}
         </Button>
       </Tooltip>
 
@@ -135,7 +122,7 @@ export function AdminToolbar({
           onClick={onOpenStorageExport}
           xcss={buttonStyles}
         >
-          Export Data
+          Export
         </Button>
       </Tooltip>
 
@@ -146,7 +133,7 @@ export function AdminToolbar({
           onClick={onOpenStorageImport}
           xcss={buttonStyles}
         >
-          Import Data
+          Import
         </Button>
       </Tooltip>
 

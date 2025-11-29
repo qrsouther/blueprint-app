@@ -7,7 +7,7 @@
  * @module ArchetypesPage
  */
 
-import React, { useState } from 'react';
+import React, { useState, useCallback, memo } from 'react';
 import {
   Box,
   Inline,
@@ -15,33 +15,35 @@ import {
 } from '@forge/react';
 import { ArchetypeListSidebar } from './ArchetypeListSidebar';
 import { ArchetypeConfig } from './ArchetypeConfig';
+import { tabPanelContentStyles } from '../../styles/admin-styles.js';
 
-const tabPanelContentStyles = xcss({
-  padding: 'space.300',
-  width: '100%',
-  maxWidth: '100%',
-  overflow: 'hidden'
-});
-
-export function ArchetypesPage() {
+export const ArchetypesPage = memo(function ArchetypesPage() {
   const [selectedArchetypeId, setSelectedArchetypeId] = useState(null);
   const [refreshKey, setRefreshKey] = useState(0);
 
-  const handleArchetypeUpdated = (updatedArchetype) => {
+  // Stable callback references to prevent child re-renders
+  const handleArchetypeUpdated = useCallback((updatedArchetype) => {
     // Trigger sidebar refresh
     setRefreshKey(prev => prev + 1);
-  };
+  }, []);
 
-  const handleArchetypeDeleted = (deletedArchetypeId) => {
+  const handleArchetypeDeleted = useCallback((deletedArchetypeId) => {
     // Clear selection
     setSelectedArchetypeId(null);
     // Trigger sidebar refresh
     setRefreshKey(prev => prev + 1);
-  };
+  }, []);
+
+  const handleArchetypeCopied = useCallback((copiedArchetype) => {
+    // Select the newly copied archetype
+    setSelectedArchetypeId(copiedArchetype.id);
+    // Trigger sidebar refresh
+    setRefreshKey(prev => prev + 1);
+  }, []);
 
   return (
-    <Box xcss={tabPanelContentStyles}>
-      <Box xcss={xcss({ width: '100%', maxWidth: '100%', overflow: 'hidden' })}>
+    <Box xcss={xcss({ width: '100%', maxWidth: '100%', overflow: 'hidden' })}>
+      <Box xcss={tabPanelContentStyles}>
         <Inline
           space="space.200"
           alignBlock="stretch"
@@ -66,10 +68,10 @@ export function ArchetypesPage() {
             selectedArchetypeId={selectedArchetypeId}
             onArchetypeUpdated={handleArchetypeUpdated}
             onArchetypeDeleted={handleArchetypeDeleted}
+            onArchetypeCopied={handleArchetypeCopied}
           />
         </Inline>
       </Box>
     </Box>
   );
-}
-
+});

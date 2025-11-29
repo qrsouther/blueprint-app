@@ -9,6 +9,7 @@
  * @param {Object|null} props.includesProgress - Progress state object with phase, percent, processed, total, results, etc.
  * @param {Function} props.onCleanUpNow - Handler for "Clean Up Now" button (switches from dry-run to live mode)
  * @param {Function} props.calculateETA - Function to calculate estimated time remaining
+ * @param {Function} props.onOpenEmergencyRecovery - Handler for Emergency Recovery button
  * @returns {JSX.Element|null}
  */
 
@@ -25,7 +26,8 @@ import {
   ProgressBar,
   xcss,
   Heading,
-  Lozenge
+  Lozenge,
+  Tooltip
 } from '@forge/react';
 
 export function CheckAllProgressBar({
@@ -33,7 +35,8 @@ export function CheckAllProgressBar({
   onCleanUpNow,
   calculateETA,
   onSelectOrphanedItem,
-  cardStyles
+  cardStyles,
+  onOpenEmergencyRecovery
 }) {
   if (!includesProgress) return null;
 
@@ -145,6 +148,20 @@ export function CheckAllProgressBar({
                   {includesProgress.results.summary.orphanedCount === 0 && (
                     <Box xcss={xcss({ marginBlockStart: 'space.200' })}>
                       <Text><Strong>✨ All Clear:</Strong> No orphaned Embeds found.</Text>
+                    </Box>
+                  )}
+
+                  {/* Restore Version button - appears after check completes */}
+                  {onOpenEmergencyRecovery && (
+                    <Box xcss={xcss({ marginBlockStart: 'space.200' })}>
+                      <Tooltip content="View and restore soft-deleted Embeds from the recovery namespace. Use this if data was accidentally removed by Check All Embeds or other operations.">
+                        <Button
+                          iconBefore='pulse'
+                          onClick={onOpenEmergencyRecovery}
+                        >
+                          Restore Version
+                        </Button>
+                      </Tooltip>
                     </Box>
                   )}
                 </Fragment>

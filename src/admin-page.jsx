@@ -1444,6 +1444,7 @@ const App = () => {
           setIsModalOpen(true);
         }}
         cardStyles={cardStyles}
+        onOpenEmergencyRecovery={() => setIsEmergencyRecoveryOpen(true)}
       />
 
       {/* Progress Bar for MultiExcerpt Scan (hidden via feature flag) */}
@@ -1517,25 +1518,25 @@ const App = () => {
               <Inline alignInline="space-between" alignBlock="center">
                   <TabList>
                     <Tab>
-                      <Inline space="space.100" alignBlock="center">
+                      <Inline space="space.025" alignBlock="center">
                         <Icon glyph="library" label="Sources" />
                         <Heading size='small'>Sources</Heading>
                       </Inline>
                     </Tab>
                     <Tab>
-                      <Inline space="space.100" alignBlock="center">
+                      <Inline space="space.025" alignBlock="center">
                         <Icon glyph="list-checklist" label="Redlines" />
                         <Heading size='small'>Redlines</Heading>
                       </Inline>
                     </Tab>
                     <Tab>
-                      <Inline space="space.100" alignBlock="center">
+                      <Inline space="space.025" alignBlock="center">
                         <Icon glyph="teams" label="Archetypes" />
                         <Heading size='small'>Archetypes</Heading>
                       </Inline>
                     </Tab>
                     <Tab>
-                      <Inline space="space.100" alignBlock="center">
+                      <Inline space="space.025" alignBlock="center">
                         <Icon glyph="database" label="Storage" />
                         <Heading size='small'>Storage</Heading>
                       </Inline>
@@ -1549,7 +1550,6 @@ const App = () => {
                     isCheckingAllSources={sourcesProgress !== null && sourcesProgress.phase !== 'complete'}
                     onCheckAllIncludes={handleCheckAllIncludes}
                     isCheckingIncludes={includesProgress !== null}
-                    onOpenEmergencyRecovery={() => setIsEmergencyRecoveryOpen(true)}
                     lastVerificationTime={lastVerificationTime}
                     formatTimestamp={formatTimestamp}
                     onOpenStorageExport={() => setIsStorageExportOpen(true)}

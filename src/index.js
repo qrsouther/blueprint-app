@@ -154,6 +154,8 @@ import {
   getArchetype as getArchetypeResolver,
   createArchetype as createArchetypeResolver,
   updateArchetype as updateArchetypeResolver,
+  updateArchetypeSourceDefaults as updateArchetypeSourceDefaultsResolver,
+  copyArchetype as copyArchetypeResolver,
   deleteArchetype as deleteArchetypeResolver,
   getArchetypeChapters as getArchetypeChaptersResolver,
   toggleChapter as toggleChapterResolver,
@@ -1062,6 +1064,12 @@ resolver.define('createArchetype', createArchetypeResolver);
 
 // Update an archetype
 resolver.define('updateArchetype', updateArchetypeResolver);
+
+// Update source defaults for an archetype
+resolver.define('updateArchetypeSourceDefaults', updateArchetypeSourceDefaultsResolver);
+
+// Copy an archetype
+resolver.define('copyArchetype', copyArchetypeResolver);
 
 // Delete an archetype
 resolver.define('deleteArchetype', deleteArchetypeResolver);

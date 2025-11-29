@@ -106,25 +106,25 @@ export function ArchetypeListSidebar({
     <Box xcss={xcss({
       width: '20%',
       maxWidth: '20%',
+      minWidth: '20%',
       flexShrink: 0,
       display: 'flex',
       flexDirection: 'column',
       height: '50em',
-      minHeight: '50em',
-      maxHeight: '50em',
-      overflow: 'hidden',
+      overflow: 'scroll',
       paddingInlineEnd: 'space.200',
       padding: 'space.200',
       borderRightWidth: 'border.width',
       borderRightStyle: 'solid',
-      borderRightColor: 'color.border'
+      borderRightColor: 'color.border',
+      boxSizing: 'border-box'
     })}>
       <Box xcss={xcss({ flexShrink: 0 })}>
         <Stack space="space.200">
           {/* Create New Archetype */}
           <Stack space="space.100">
-            <Inline space="space.100" alignBlock="center" shouldWrap={false}>
-              <Box xcss={xcss({ flex: 1, minWidth: 0 })}>
+            <Inline space="space.100" alignBlock="center" shouldWrap={false} xcss={xcss({ width: '100%', minWidth: 0 })}>
+              <Box xcss={xcss({ flex: 1, minWidth: 0, maxWidth: '100%' })}>
                 <StableTextfield
                   placeholder="New archetype"
                   value={newArchetypeName}
@@ -141,6 +141,7 @@ export function ArchetypeListSidebar({
                 appearance="primary"
                 onClick={handleCreateArchetype}
                 isDisabled={!newArchetypeName.trim() || isCreating}
+                xcss={xcss({ flexShrink: 0 })}
               >
                 Add
               </Button>
