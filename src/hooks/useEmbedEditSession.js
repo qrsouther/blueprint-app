@@ -63,6 +63,26 @@ function normalizeFormData(data) {
 }
 
 /**
+ * Extract client name from page title if it matches "Blueprint: Client Name" pattern
+ * @param {string} pageTitle - The page title
+ * @returns {string|null} The extracted client name or null if pattern doesn't match
+ */
+function inferClientFromPageTitle(pageTitle) {
+  if (!pageTitle || typeof pageTitle !== 'string') {
+    return null;
+  }
+  
+  // Match "Blueprint: Client Name" pattern (case-insensitive)
+  // Handles variations like "Blueprint: Portland Pickles" or "blueprint: Client Name"
+  const match = pageTitle.match(/^Blueprint:\s*(.+)$/i);
+  if (match && match[1]) {
+    return match[1].trim();
+  }
+  
+  return null;
+}
+
+/**
  * Custom hook for managing Embed edit sessions
  * 
  * @param {string} localId - The Embed's local ID
@@ -106,6 +126,9 @@ export const useEmbedEditSession = (localId, options = {}) => {
   
   // Prevent double-initialization
   const initRef = useRef(false);
+  
+  // Track if we've attempted Client variable inference (to avoid doing it multiple times)
+  const clientInferenceAttemptedRef = useRef(false);
   
   // ============================================================================
   // REACT HOOK FORM
@@ -204,8 +227,28 @@ export const useEmbedEditSession = (localId, options = {}) => {
       logger.saves('[useEmbedEditSession] Initialized from stored data', {
         localId,
         excerptId: storedData.excerptId,
-        hasVariables: Object.keys(storedData.variableValues || {}).length > 0
+        hasVariables: Object.keys(storedData.variableValues || {}).length > 0,
+        variableValues: storedData.variableValues
       });
+      
+      // If we have an excerptId but empty Client variable, prepare for inference
+      // The inference effect will handle it once the excerpt loads
+      if (storedData.excerptId && storedData.variableValues) {
+        const clientVarName = Object.keys(storedData.variableValues).find(
+          key => key.toLowerCase() === 'client'
+        );
+        if (clientVarName) {
+          const clientValue = storedData.variableValues[clientVarName] || '';
+          if (!clientValue || clientValue.trim() === '') {
+            // Client variable is empty, inference effect will handle it
+            console.log('[useEmbedEditSession] Detected empty Client variable, inference will run when excerpt loads', {
+              localId,
+              excerptId: storedData.excerptId,
+              clientVarName
+            });
+          }
+        }
+      }
     }
     
     setIsInitialized(true);
@@ -215,6 +258,241 @@ export const useEmbedEditSession = (localId, options = {}) => {
   useEffect(() => {
     draftStorage.clearStale();
   }, []);
+  
+  // ============================================================================
+  // CLIENT VARIABLE INFERENCE FROM PAGE TITLE
+  // ============================================================================
+  
+  /**
+   * Infer Client variable value from page title when:
+   * - Hook is initialized
+   * - Excerpt is loaded
+   * - Excerpt has a "Client" variable (case-insensitive)
+   * - Client variable is empty
+   * - Page title matches "Blueprint: Client Name" pattern
+   */
+  useEffect(() => {
+    // Debug logging
+    console.log('[useEmbedEditSession] Inference effect triggered', {
+      isInitialized,
+      hasExcerpt: !!excerpt,
+      excerptId,
+      hasVariables: excerpt?.variables?.length > 0,
+      attempted: clientInferenceAttemptedRef.current,
+      localId,
+      isEditing: context?.extension?.isEditing
+    });
+    
+    // Only run if:
+    // 1. We're initialized
+    // 2. We have an excerpt loaded
+    // 3. We're in edit mode (inference should only happen when actively editing)
+    //    - Check both context.isEditing (Confluence edit mode) and if excerptId is set (user has selected a source)
+    // 4. We haven't already attempted inference for this session
+    const isEditing = context?.extension?.isEditing;
+    const hasSelectedSource = !!excerptId; // Only run if user has selected a source (indicates active editing)
+    
+    if (!isInitialized || !excerpt || !excerpt.variables || excerpt.variables.length === 0 || !isEditing || !hasSelectedSource) {
+      console.log('[useEmbedEditSession] Inference effect early return', {
+        isInitialized,
+        hasExcerpt: !!excerpt,
+        hasVariables: excerpt?.variables?.length > 0,
+        isEditing,
+        hasSelectedSource,
+        excerptId
+      });
+      return;
+    }
+    
+    // Only attempt inference once per session
+    if (clientInferenceAttemptedRef.current) {
+      console.log('[useEmbedEditSession] Inference already attempted, skipping');
+      return;
+    }
+    
+    // Check if there's a "Client" variable (case-insensitive)
+    const clientVariable = excerpt.variables.find(v => 
+      v.name.toLowerCase() === 'client'
+    );
+    
+    if (!clientVariable) {
+      // No Client variable, mark as attempted so we don't check again
+      logger.saves('[useEmbedEditSession] No Client variable found, skipping inference', {
+        localId,
+        variables: excerpt.variables.map(v => v.name)
+      });
+      clientInferenceAttemptedRef.current = true;
+      return;
+    }
+    
+    // Get current Client variable value
+    const currentClientValue = variableValues[clientVariable.name] || '';
+    const isClientEmpty = !currentClientValue || currentClientValue.trim() === '';
+    
+    // Only infer if Client variable is empty
+    if (!isClientEmpty) {
+      // Client already has a value, mark as attempted
+      logger.saves('[useEmbedEditSession] Client variable already has value, skipping inference', {
+        localId,
+        variableName: clientVariable.name,
+        currentValue: currentClientValue
+      });
+      clientInferenceAttemptedRef.current = true;
+      return;
+    }
+    
+    // Async function to fetch page title and perform inference
+    const performInference = async () => {
+      console.log('[useEmbedEditSession] Starting inference', {
+        localId,
+        variableName: clientVariable.name,
+        currentValue: variableValues[clientVariable.name]
+      });
+      
+      // First try to get page title from context
+      let pageTitle = context?.extension?.content?.title || context?.contentTitle || null;
+      
+      console.log('[useEmbedEditSession] Page title from context', {
+        localId,
+        pageTitle,
+        hasContext: !!context,
+        contextKeys: context ? Object.keys(context) : null,
+        extensionContentTitle: context?.extension?.content?.title,
+        contentTitle: context?.contentTitle
+      });
+      
+      // If not in context, try to fetch via API
+      if (!pageTitle) {
+        const pageId = context?.contentId || context?.extension?.content?.id;
+        console.log('[useEmbedEditSession] Attempting to fetch page title via API', {
+          localId,
+          pageId
+        });
+        
+        if (pageId) {
+          try {
+            logger.saves('[useEmbedEditSession] Page title not in context, fetching via API', {
+              localId,
+              pageId
+            });
+            const result = await invoke('getPageTitle', { contentId: pageId });
+            console.log('[useEmbedEditSession] getPageTitle API result', {
+              localId,
+              success: result.success,
+              title: result.data?.title,
+              error: result.error
+            });
+            
+            if (result.success && result.data?.title) {
+              pageTitle = result.data.title;
+              logger.saves('[useEmbedEditSession] Fetched page title via API', {
+                localId,
+                pageTitle
+              });
+            }
+          } catch (error) {
+            console.error('[useEmbedEditSession] Failed to fetch page title', error);
+            logger.errors('[useEmbedEditSession] Failed to fetch page title', error, { localId, pageId });
+          }
+        } else {
+          console.log('[useEmbedEditSession] No pageId available', {
+            localId,
+            contentId: context?.contentId,
+            extensionContentId: context?.extension?.content?.id
+          });
+        }
+      }
+      
+      if (!pageTitle) {
+        // No page title available, mark as attempted
+        console.log('[useEmbedEditSession] No page title available, skipping inference', {
+          localId,
+          contextKeys: context ? Object.keys(context) : null,
+          hasExtension: !!context?.extension,
+          hasContent: !!context?.extension?.content,
+          contentId: context?.contentId || context?.extension?.content?.id
+        });
+        logger.saves('[useEmbedEditSession] No page title available, skipping inference', {
+          localId,
+          contextKeys: context ? Object.keys(context) : null,
+          hasExtension: !!context?.extension,
+          hasContent: !!context?.extension?.content,
+          contentId: context?.contentId || context?.extension?.content?.id
+        });
+        clientInferenceAttemptedRef.current = true;
+        return;
+      }
+      
+      console.log('[useEmbedEditSession] Page title found, attempting inference', {
+        localId,
+        pageTitle
+      });
+      
+      // Extract client name from page title
+      const inferredClient = inferClientFromPageTitle(pageTitle);
+      
+      console.log('[useEmbedEditSession] Inference result', {
+        localId,
+        pageTitle,
+        inferredClient,
+        variableName: clientVariable.name
+      });
+      
+      if (inferredClient) {
+        // Set the Client variable value
+        console.log('[useEmbedEditSession] Setting Client variable value', {
+          localId,
+          fieldName: `variableValues.${clientVariable.name}`,
+          value: inferredClient
+        });
+        
+        setValue(`variableValues.${clientVariable.name}`, inferredClient, { shouldDirty: true });
+        
+        // Increment formKey to force StableTextfield components to remount with new value
+        // This ensures the TextField displays the inferred value immediately
+        // Use setTimeout to ensure setValue completes first
+        setTimeout(() => {
+          setFormKey(prev => prev + 1);
+        }, 50);
+        
+        // Verify it was set
+        setTimeout(() => {
+          const currentValue = getValues(`variableValues.${clientVariable.name}`);
+          console.log('[useEmbedEditSession] Verified Client variable value after set', {
+            localId,
+            setValue: inferredClient,
+            actualValue: currentValue
+          });
+        }, 100);
+        
+        logger.saves('[useEmbedEditSession] Inferred Client variable from page title', {
+          localId,
+          pageTitle,
+          inferredClient,
+          variableName: clientVariable.name
+        });
+      } else {
+        console.log('[useEmbedEditSession] Page title does not match Blueprint pattern', {
+          localId,
+          pageTitle,
+          variableName: clientVariable.name
+        });
+        logger.saves('[useEmbedEditSession] Page title does not match Blueprint pattern', {
+          localId,
+          pageTitle,
+          variableName: clientVariable.name
+        });
+      }
+      
+      // Mark as attempted regardless of whether inference succeeded
+      clientInferenceAttemptedRef.current = true;
+    };
+    
+    // Run async inference with a small delay to ensure form is fully initialized
+    setTimeout(() => {
+      performInference();
+    }, 100);
+  }, [isInitialized, excerpt, variableValues, context, setValue, getValues, localId]);
   
   // ============================================================================
   // BLUR HANDLER - Save to localStorage
@@ -329,6 +607,82 @@ export const useEmbedEditSession = (localId, options = {}) => {
       
       // Update excerpt ID
       setExcerptId(newExcerptId);
+      
+      // Reset Client inference attempt ref so it can try again with new source
+      clientInferenceAttemptedRef.current = false;
+      
+      // Perform Client inference immediately after source selection
+      // This ensures inference happens even if the excerpt wasn't loaded before
+      const performClientInference = async () => {
+        // Check if there's a "Client" variable (case-insensitive)
+        const clientVar = newExcerpt.variables?.find(v => 
+          v.name.toLowerCase() === 'client'
+        );
+        
+        if (!clientVar) {
+          return; // No Client variable
+        }
+        
+        // Check if Client variable is empty in preserved values
+        const preservedClientValue = preservedVariableValues[clientVar.name] || '';
+        const isClientEmpty = !preservedClientValue || preservedClientValue.trim() === '';
+        
+        if (!isClientEmpty) {
+          return; // Client already has a value
+        }
+        
+        // Get page title from context or API
+        let pageTitle = context?.extension?.content?.title || context?.contentTitle || null;
+        
+        if (!pageTitle) {
+          const pageId = context?.contentId || context?.extension?.content?.id;
+          if (pageId) {
+            try {
+              const result = await invoke('getPageTitle', { contentId: pageId });
+              if (result.success && result.data?.title) {
+                pageTitle = result.data.title;
+              }
+            } catch (error) {
+              logger.errors('[useEmbedEditSession] Failed to fetch page title during source switch', error, { localId, pageId });
+            }
+          }
+        }
+        
+        if (!pageTitle) {
+          return; // No page title available
+        }
+        
+        // Extract client name from page title
+        const inferredClient = inferClientFromPageTitle(pageTitle);
+        
+        if (inferredClient) {
+          // Set the Client variable value
+          setValue(`variableValues.${clientVar.name}`, inferredClient, { shouldDirty: true });
+          
+          // Increment formKey to force StableTextfield components to remount with new value
+          // This ensures the TextField displays the inferred value immediately
+          // Use setTimeout to ensure setValue completes first
+          setTimeout(() => {
+            setFormKey(prev => prev + 1);
+          }, 50);
+          
+          logger.saves('[useEmbedEditSession] Inferred Client variable from page title (during source switch)', {
+            localId,
+            pageTitle,
+            inferredClient,
+            variableName: clientVar.name,
+            newExcerptId
+          });
+          
+          // Update preserved values for saving
+          preservedVariableValues[clientVar.name] = inferredClient;
+        }
+      };
+      
+      // Run inference after a brief delay to ensure form is reset
+      setTimeout(() => {
+        performClientInference();
+      }, 150);
       
       // If this is the first source selection (no original yet), set it as the original
       // This allows Reset to work even before the first publish

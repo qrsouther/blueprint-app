@@ -103,14 +103,19 @@ export function ExcerptListSidebar({
                   { label: 'Sort: Name (Z-A)', value: 'name-desc' },
                   { label: 'Sort: Most Used', value: 'usage-high' },
                   { label: 'Sort: Least Used', value: 'usage-low' },
-                  { label: 'Sort: Category', value: 'category' }
+                  { label: 'Sort: Category', value: 'category' },
+                  { label: 'Sort: Last Updated (Oldest)', value: 'updated-oldest' },
+                  { label: 'Sort: Last Updated (Newest)', value: 'updated-newest' }
                 ]}
                 value={{
                   label: sortBy === 'name-asc' ? 'Sort: Name (A-Z)' :
                          sortBy === 'name-desc' ? 'Sort: Name (Z-A)' :
                          sortBy === 'usage-high' ? 'Sort: Most Used' :
                          sortBy === 'usage-low' ? 'Sort: Least Used' :
-                         'Sort: Category',
+                         sortBy === 'category' ? 'Sort: Category' :
+                         sortBy === 'updated-oldest' ? 'Sort: Last Updated (Oldest)' :
+                         sortBy === 'updated-newest' ? 'Sort: Last Updated (Newest)' :
+                         'Sort: Name (A-Z)',
                   value: sortBy
                 }}
                 onChange={(e) => setSortBy(e.value)}

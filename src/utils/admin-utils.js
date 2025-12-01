@@ -312,7 +312,7 @@ export const filterExcerpts = (excerpts, searchTerm, categoryFilter) => {
  * Sort excerpts by specified criteria
  *
  * @param {Array} excerpts - Array of excerpt objects to sort
- * @param {string} sortBy - Sort criteria: 'name-asc', 'name-desc', 'usage-high', 'usage-low', 'category'
+ * @param {string} sortBy - Sort criteria: 'name-asc', 'name-desc', 'usage-high', 'usage-low', 'category', 'updated-oldest', 'updated-newest'
  * @param {Object} usageCounts - Map of excerpt IDs to usage counts (for usage sorting)
  * @returns {Array} Sorted array of excerpts (creates new array, doesn't mutate original)
  */
@@ -337,6 +337,20 @@ export const sortExcerpts = (excerpts, sortBy, usageCounts = {}) => {
       }
       case 'category':
         return (a.category || 'General').localeCompare(b.category || 'General');
+      case 'updated-oldest': {
+        // Sort by updatedAt ascending (oldest first)
+        // Treat missing updatedAt as very old (sort to beginning)
+        const timeA = a.updatedAt ? new Date(a.updatedAt).getTime() : 0;
+        const timeB = b.updatedAt ? new Date(b.updatedAt).getTime() : 0;
+        return timeA - timeB;
+      }
+      case 'updated-newest': {
+        // Sort by updatedAt descending (newest first)
+        // Treat missing updatedAt as very old (sort to end)
+        const timeA = a.updatedAt ? new Date(a.updatedAt).getTime() : 0;
+        const timeB = b.updatedAt ? new Date(b.updatedAt).getTime() : 0;
+        return timeB - timeA;
+      }
       default:
         return 0;
     }

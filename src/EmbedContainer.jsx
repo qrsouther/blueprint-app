@@ -338,11 +338,19 @@ const App = () => {
   // ============================================================================
   // VIEW MODE: Set content from cached data
   // ============================================================================
+  // IMPORTANT: Only set content in view mode if content is NOT published
+  // Published content is already on the page natively, so we shouldn't render it again
   useEffect(() => {
     if (!isEditing && !isEditingEmbed && cachedContentData) {
-      setContent(cachedContentData.content);
+      // Only set content if it's not published (published content is already on the page)
+      if (!publishStatus?.isPublished) {
+        setContent(cachedContentData.content);
+      } else {
+        // Content is published, don't set it (it's already on the page natively)
+        setContent(null);
+      }
     }
-  }, [isEditing, isEditingEmbed, cachedContentData]);
+  }, [isEditing, isEditingEmbed, cachedContentData, publishStatus?.isPublished]);
 
   // ============================================================================
   // VIEW MODE: Staleness detection
