@@ -67,6 +67,34 @@ export const ArchetypeConfig = memo(function ArchetypeConfig({ selectedArchetype
     }
   }, [selectedArchetypeId]);
 
+  // Re-apply source order when archetype loads (handles race condition with loadSources)
+  useEffect(() => {
+    if (archetype?.sourceOrder && Array.isArray(archetype.sourceOrder) && archetype.sourceOrder.length > 0 && sources.length > 0) {
+      const sourceMap = new Map(sources.map(s => [s.id, s]));
+      const orderedSources = [];
+      
+      // Add sources in saved order
+      for (const id of archetype.sourceOrder) {
+        if (sourceMap.has(id)) {
+          orderedSources.push(sourceMap.get(id));
+          sourceMap.delete(id);
+        }
+      }
+      
+      // Add any remaining sources (new ones not in saved order) at the end
+      for (const source of sourceMap.values()) {
+        orderedSources.push(source);
+      }
+      
+      // Only update if order actually changed
+      const currentOrder = sources.map(s => s.id).join(',');
+      const newOrder = orderedSources.map(s => s.id).join(',');
+      if (currentOrder !== newOrder) {
+        setSources(orderedSources);
+      }
+    }
+  }, [archetype?.sourceOrder, sources.length]);
+
   const loadArchetype = async () => {
     setIsLoadingArchetype(true);
     setError(null);
@@ -95,7 +123,30 @@ export const ArchetypeConfig = memo(function ArchetypeConfig({ selectedArchetype
     try {
       const result = await invoke('getAllExcerpts', {});
       if (result.success && result.data) {
-        setSources(result.data.excerpts || []);
+        let loadedSources = result.data.excerpts || [];
+        
+        // Apply saved source order if archetype has one
+        if (archetype?.sourceOrder && Array.isArray(archetype.sourceOrder) && archetype.sourceOrder.length > 0) {
+          const sourceMap = new Map(loadedSources.map(s => [s.id, s]));
+          const orderedSources = [];
+          
+          // Add sources in saved order
+          for (const id of archetype.sourceOrder) {
+            if (sourceMap.has(id)) {
+              orderedSources.push(sourceMap.get(id));
+              sourceMap.delete(id);
+            }
+          }
+          
+          // Add any remaining sources (new ones not in saved order) at the end
+          for (const source of sourceMap.values()) {
+            orderedSources.push(source);
+          }
+          
+          loadedSources = orderedSources;
+        }
+        
+        setSources(loadedSources);
       } else {
         setError(result.error || 'Failed to load sources');
       }
@@ -201,9 +252,40 @@ export const ArchetypeConfig = memo(function ArchetypeConfig({ selectedArchetype
     }));
   };
 
-  const handleRemoveFromArchetype = (sourceId) => {
-    // TODO: Implement in next instructions
-    logger.saves('Remove from archetype for source:', sourceId);
+  const handleRemoveFromArchetype = async (sourceId) => {
+    if (!selectedArchetypeId || !sourceId) return;
+
+    // Remove from local state immediately for instant UI feedback
+    setSources(prev => prev.filter(s => s.id !== sourceId));
+
+    // Fire and forget: save to backend asynchronously
+    invoke('removeArchetypeSource', {
+      archetypeId: selectedArchetypeId,
+      sourceId
+    })
+      .then((result) => {
+        if (result.success) {
+          setArchetype(result.data);
+          // Update toggle defaults to remove this source's defaults
+          setToggleDefaults(prev => {
+            const newDefaults = { ...prev };
+            delete newDefaults[sourceId];
+            return newDefaults;
+          });
+          if (onArchetypeUpdated) {
+            onArchetypeUpdated(result.data);
+          }
+          logger.saves('Source removed from archetype:', { archetypeId: selectedArchetypeId, sourceId });
+        } else {
+          // Revert on failure - reload sources
+          logger.errors('Failed to remove source from archetype:', result.error);
+          loadSources();
+        }
+      })
+      .catch((err) => {
+        logger.errors('Error removing source from archetype:', err);
+        loadSources();
+      });
   };
 
   // Handle drag-and-drop reordering from DynamicTable
@@ -227,15 +309,35 @@ export const ArchetypeConfig = memo(function ArchetypeConfig({ selectedArchetype
     const [removed] = newSources.splice(sourceIndex, 1);
     newSources.splice(destinationIndex, 0, removed);
 
-    // Update local state
+    // Update local state immediately for instant UI feedback
     setSources(newSources);
 
-    // TODO: Save the new order to the archetype (store sourceOrder array)
-    logger.saves('Reordered sources:', {
-      sourceId: sourceKey,
-      fromIndex: sourceIndex,
-      toIndex: destinationIndex
-    });
+    // Extract source IDs in new order
+    const newSourceOrder = newSources.map(s => s.id);
+
+    // Fire and forget: save to backend asynchronously
+    invoke('updateArchetypeSourceOrder', {
+      archetypeId: selectedArchetypeId,
+      sourceOrder: newSourceOrder
+    })
+      .then((result) => {
+        if (result.success) {
+          setArchetype(result.data);
+          if (onArchetypeUpdated) {
+            onArchetypeUpdated(result.data);
+          }
+          logger.saves('Source order saved:', {
+            archetypeId: selectedArchetypeId,
+            fromIndex: sourceIndex,
+            toIndex: destinationIndex
+          });
+        } else {
+          logger.errors('Failed to save source order:', result.error);
+        }
+      })
+      .catch((err) => {
+        logger.errors('Error saving source order:', err);
+      });
   };
 
   // Local state for name editing - using onChange to track value

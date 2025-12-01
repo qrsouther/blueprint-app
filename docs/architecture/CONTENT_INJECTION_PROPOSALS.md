@@ -95,7 +95,7 @@ Maintain the current iframe-based Edit Mode for configuration, but add a "Publis
 │                                                                 │
 │  <!-- BLUEPRINT-CONTENT-START-{localId} -->                    │
 │  <h2>Weekly Status Report</h2>                                 │
-│  <p>Client: <strong>Acme Corp</strong></p>                    │
+│  <p>Client: <Strong>Acme Corp</Strong></p>                    │
 │  <p>This is the indexed, searchable content...</p>            │
 │  <table>...</table>                                            │
 │  <!-- BLUEPRINT-CONTENT-END-{localId} -->                      │
@@ -462,7 +462,7 @@ The most radical approach from the original architecture document: View Mode has
 │  VIEW MODE: Pure Confluence Page (NO FORGE RUNTIME)          │
 │                                                                │
 │  <h2>Weekly Status Report</h2>                                │
-│  <p>Client: <strong>Acme Corp</strong></p>                   │
+│  <p>Client: <Strong>Acme Corp</Strong></p>                   │
 │  <table>...</table>                                           │
 │                                                                │
 │  [Edit Blueprint ✏️]  ← Small button to reopen compositor     │
@@ -1680,7 +1680,7 @@ Each chapter injected into the page follows this structure:
 <h2>Ticketing Configuration</h2>
 
 <!-- BLUEPRINT-MANAGED-START: embed-abc123 -->
-<p>This section covers ticketing setup for <strong>{{client}}</strong>...</p>
+<p>This section covers ticketing setup for <Strong>{{client}}</Strong>...</p>
 <table>...</table>
 <!-- BLUEPRINT-MANAGED-END: embed-abc123 -->
 

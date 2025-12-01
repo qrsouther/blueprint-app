@@ -2066,7 +2066,7 @@ export async function importFromParsedJson(req) {
       console.log(`Creating page in space: ${spaceKey}`);
 
       // Build page content with all Source macros
-      let pageContent = `<p><strong>Blueprint Standards - Migrated from MultiExcerpt</strong></p>`;
+      let pageContent = `<p><Strong>Blueprint Standards - Migrated from MultiExcerpt</Strong></p>`;
       pageContent += `<p>This page contains ${imported.length} Blueprint Standard Source macros imported from MultiExcerpt.</p>`;
       pageContent += `<p><em>Created: ${new Date().toISOString()}</em></p><hr />`;
 
@@ -2719,7 +2719,7 @@ export async function createTestEmbedsPage(req) {
     // Step 4: Create page content
     console.log('📝 Assembling page content...');
     const pageContent = `<h1>🧪 Performance Test: ${embedMacros.length} Blueprint Standard Embeds</h1>
-<p>This page contains <strong>${embedMacros.length} Embed macros</strong> for performance testing.</p>
+<p>This page contains <Strong>${embedMacros.length} Embed macros</Strong> for performance testing.</p>
 <p><em>Created: ${new Date().toISOString()}</em></p>
 <p>This is 3x the realistic maximum to test caching and rendering performance.</p>
 <hr/>

@@ -28,6 +28,7 @@ import { invoke, view, router } from '@forge/bridge';
 import { QueryClient, QueryClientProvider, useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useCategoriesQuery } from './hooks/admin-hooks';
 import { StableTextfield } from './components/common/StableTextfield';
+import { SourceMetadataTabs } from './components/common/SourceMetadataTabs';
 import { logger } from './utils/logger.js';
 
 // Create a client
@@ -83,11 +84,12 @@ const useSaveExcerptMutation = () => {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: async ({ excerptName, category, content, excerptId, variableMetadata, toggleMetadata, documentationLinks, sourcePageId, sourcePageTitle, sourceSpaceKey, sourceLocalId }) => {
+    mutationFn: async ({ excerptName, category, bespoke, content, excerptId, variableMetadata, toggleMetadata, documentationLinks, sourcePageId, sourcePageTitle, sourceSpaceKey, sourceLocalId }) => {
       try {
         const result = await invoke('saveExcerpt', {
           excerptName,
           category,
+          bespoke,
           content,
           excerptId,
           variableMetadata,
@@ -139,6 +141,7 @@ const App = () => {
   // Use state for controlled components
   const [excerptName, setExcerptName] = useState('');
   const [category, setCategory] = useState('General');
+  const [bespoke, setBespoke] = useState(false); // Track whether Source is bespoke (custom) vs standard
   const [dataLoaded, setDataLoaded] = useState(false); // Track when data has been loaded for key generation
   const [detectedVariables, setDetectedVariables] = useState([]);
   const [variableMetadata, setVariableMetadata] = useState({});
@@ -248,8 +251,11 @@ const App = () => {
         // Always update state
         setCategory(categoryToSet);
 
-        // Load variable metadata, toggle metadata, and documentation links only once per excerptId
+        // Load variable metadata, toggle metadata, documentation links, and bespoke only once per excerptId
         if (!hasLoadedDataRef.current) {
+          // Load bespoke flag
+          setBespoke(excerptData.bespoke || false);
+
           // Load variable metadata
           if (excerptData.variables && Array.isArray(excerptData.variables)) {
             const metadata = {};
@@ -366,6 +372,7 @@ const App = () => {
       saveExcerptMutation({
         excerptName,
         category,
+        bespoke,
         content: macroBody,
         excerptId,
         variableMetadata: variablesWithMetadata,
@@ -438,281 +445,38 @@ const App = () => {
 
   return (
     <Form onSubmit={handleSubmit(onSubmit)}>
-      <Tabs>
-        <TabList>
-          <Tab>Name/Category</Tab>
-          <Tab>Variables</Tab>
-          <Tab>Toggles</Tab>
-          <Tab>Documentation</Tab>
-        </TabList>
-
-        <TabPanel>
-          <FormSection>
-            <Label labelFor={getFieldId('excerptName')}>
-              Blueprint Standard Source Name
-            </Label>
-            <StableTextfield
-              id={getFieldId('excerptName')}
-              stableKey={`source-excerpt-name-${excerptId || 'new'}-${dataLoaded ? 'loaded' : 'empty'}`}
-              value={excerptName || ''}
-              placeholder=""
-              isDisabled={false}
-              onChange={(e) => setExcerptName(e.target.value)}
-            />
-
-            <Label labelFor={getFieldId('category')}>
-              Blueprint Standard Category
-            </Label>
-            <Select
-              id={getFieldId('category')}
-              options={categoryOptions}
-              value={isLoadingCategories ? undefined : categoryOptions.find(opt => opt.value === category)}
-              placeholder={isLoadingCategories ? 'Loading...' : undefined}
-              onChange={(e) => setCategory(e.value)}
-            />
-
-            <Text>{' '}</Text>
-            <SectionMessage appearance="discovery">
-              <Text>Edit macro body in the page editor. Use {'{{variable}}'} syntax for variables. IMPORTANT: After clicking "Save", you MUST publish the page to persist changes!</Text>
-            </SectionMessage>
-          </FormSection>
-        </TabPanel>
-
-        <TabPanel>
-          <FormSection>
-            {macroBody && detectedVariables.length === 0 && (
-              <Text><Em>Checking for variables...</Em></Text>
-            )}
-
-            {detectedVariables.length === 0 && !macroBody && (
-              <Text>No variables detected. Add {'{{variable}}'} syntax to your macro body to create variables.</Text>
-            )}
-
-            {detectedVariables.length > 0 && (
-              <Fragment>
-                {detectedVariables.map((variable) => (
-                  <Fragment key={variable.name}>
-                    <Text>{' '}</Text>
-                    <Inline space="space.300" alignBlock="center" spread="space-between">
-                      <Text><Strong><Code>{`{{${variable.name}}}`}</Code></Strong></Text>
-                      <Inline space="space.100" alignBlock="center">
-                        <Text>Required</Text>
-                        <Toggle
-                          id={`required-${variable.name}`}
-                          isChecked={variableMetadata[variable.name]?.required || false}
-                          isDisabled={isLoadingExcerpt}
-                          onChange={(e) => {
-                            setVariableMetadata({
-                              ...variableMetadata,
-                              [variable.name]: {
-                                ...variableMetadata[variable.name],
-                                required: e.target.checked
-                              }
-                            });
-                          }}
-                        />
-                      </Inline>
-                    </Inline>
-                    <StableTextfield
-                      id={`var-desc-${variable.name}`}
-                      stableKey={`source-var-desc-${variable.name}`}
-                      label="Description"
-                      placeholder={isLoadingExcerpt ? 'Loading...' : 'Description'}
-                      value={variableMetadata[variable.name]?.description || ''}
-                      isDisabled={isLoadingExcerpt}
-                      onChange={(e) => {
-                        setVariableMetadata({
-                          ...variableMetadata,
-                          [variable.name]: {
-                            ...variableMetadata[variable.name],
-                            description: e.target.value
-                          }
-                        });
-                      }}
-                    />
-                    <StableTextfield
-                      id={`var-example-${variable.name}`}
-                      stableKey={`source-var-example-${variable.name}`}
-                      label="Example"
-                      placeholder={isLoadingExcerpt ? 'Loading...' : 'Example'}
-                      value={variableMetadata[variable.name]?.example || ''}
-                      isDisabled={isLoadingExcerpt}
-                      onChange={(e) => {
-                        setVariableMetadata({
-                          ...variableMetadata,
-                          [variable.name]: {
-                            ...variableMetadata[variable.name],
-                            example: e.target.value
-                          }
-                        });
-                      }}
-                    />
-                  </Fragment>
-                ))}
-              </Fragment>
-            )}
-
-            <Text>{' '}</Text>
-            <SectionMessage appearance="discovery">
-              <Text>Edit macro body in the page editor. Use {'{{variable}}'} syntax for variables. IMPORTANT: After clicking "Save", you MUST publish the page to persist changes!</Text>
-            </SectionMessage>
-          </FormSection>
-        </TabPanel>
-
-        <TabPanel>
-          <FormSection>
-            {macroBody && detectedToggles.length === 0 && (
-              <Text><Em>Checking for toggles...</Em></Text>
-            )}
-
-            {detectedToggles.length === 0 && !macroBody && (
-              <Text>No toggles detected. Add {'{{toggle:name}}'} ... {'{{/toggle:name}}'} syntax to your macro body to create toggles.</Text>
-            )}
-
-            {detectedToggles.length > 0 && (
-              <Fragment>
-                {detectedToggles.map((toggle) => (
-                  <Fragment key={toggle.name}>
-                    <Text>{' '}</Text>
-                    <Text><Strong><Code>{`{{toggle:${toggle.name}}}`}</Code></Strong></Text>
-                    <StableTextfield
-                      id={`toggle-desc-${toggle.name}`}
-                      stableKey={`source-toggle-desc-${toggle.name}`}
-                      label="Description"
-                      placeholder={isLoadingExcerpt ? 'Loading...' : 'Description'}
-                      value={toggleMetadata[toggle.name]?.description || ''}
-                      isDisabled={isLoadingExcerpt}
-                      onChange={(e) => {
-                        setToggleMetadata({
-                          ...toggleMetadata,
-                          [toggle.name]: {
-                            description: e.target.value
-                          }
-                        });
-                      }}
-                    />
-                  </Fragment>
-                ))}
-              </Fragment>
-            )}
-
-            <Text>{' '}</Text>
-            <SectionMessage appearance="discovery">
-              <Text>Edit macro body in the page editor. Use {'{{toggle:name}}'} and {'{{/toggle:name}}'} to wrap content that can be toggled on/off. IMPORTANT: After clicking "Save", you MUST publish the page to persist changes!</Text>
-            </SectionMessage>
-          </FormSection>
-        </TabPanel>
-
-        {/* Documentation Tab - Links */}
-        <TabPanel>
-          <FormSection>
-            {/* Existing documentation links */}
-            {documentationLinks.length > 0 && (
-              <Fragment>
-                <Text><Strong>Documentation Links</Strong></Text>
-                <Text>{' '}</Text>
-                {documentationLinks.map((link, index) => (
-                  <Box key={index} padding="space.100" backgroundColor="color.background.neutral.subtle" style={{ marginBottom: '8px', borderRadius: '3px' }}>
-                    <Inline space="space.200" alignBlock="center" spread="space-between">
-                      <Stack space="space.050">
-                        <Text><Strong>{link.anchor}</Strong></Text>
-                        <Text size="small"><Em>{link.url}</Em></Text>
-                      </Stack>
-                      <Inline space="space.100">
-                        <Button
-                          appearance="subtle"
-                          iconBefore={<Icon glyph="arrow-up" label="Move up" />}
-                          isDisabled={index === 0 || isLoadingExcerpt}
-                          onClick={() => {
-                            const newLinks = [...documentationLinks];
-                            [newLinks[index - 1], newLinks[index]] = [newLinks[index], newLinks[index - 1]];
-                            setDocumentationLinks(newLinks);
-                          }}
-                        />
-                        <Button
-                          appearance="subtle"
-                          iconBefore={<Icon glyph="arrow-down" label="Move down" />}
-                          isDisabled={index === documentationLinks.length - 1 || isLoadingExcerpt}
-                          onClick={() => {
-                            const newLinks = [...documentationLinks];
-                            [newLinks[index], newLinks[index + 1]] = [newLinks[index + 1], newLinks[index]];
-                            setDocumentationLinks(newLinks);
-                          }}
-                        />
-                        <Button
-                          appearance="danger"
-                          iconBefore={<Icon glyph="trash" label="Delete" />}
-                          isDisabled={isLoadingExcerpt}
-                          onClick={() => {
-                            setDocumentationLinks(documentationLinks.filter((_, i) => i !== index));
-                          }}
-                        />
-                      </Inline>
-                    </Inline>
-                  </Box>
-                ))}
-                <Text>{' '}</Text>
-              </Fragment>
-            )}
-
-            {/* Add new documentation link form */}
-            <Text><Strong>Add New Documentation Link</Strong></Text>
-            <Text>{' '}</Text>
-            <StableTextfield
-              stableKey="source-doc-link-anchor"
-              label="Anchor Text"
-              placeholder={isLoadingExcerpt ? 'Loading...' : 'e.g., API Reference'}
-              value={newLinkAnchor}
-              isDisabled={isLoadingExcerpt}
-              onChange={(e) => setNewLinkAnchor(e.target.value)}
-            />
-            <StableTextfield
-              stableKey="source-doc-link-url"
-              label="URL"
-              placeholder={isLoadingExcerpt ? 'Loading...' : 'https://example.com/docs'}
-              value={newLinkUrl}
-              isDisabled={isLoadingExcerpt}
-              onChange={(e) => {
-                setNewLinkUrl(e.target.value);
-                // Basic URL validation
-                const url = e.target.value.trim();
-                if (url && !url.match(/^https?:\/\/.+/i)) {
-                  setUrlError('URL must start with http:// or https://');
-                } else {
-                  setUrlError('');
-                }
-              }}
-            />
-            {urlError && (
-              <SectionMessage appearance="error">
-                <Text>{urlError}</Text>
-              </SectionMessage>
-            )}
-            <Text>{' '}</Text>
-            <Button
-              appearance="primary"
-              isDisabled={!newLinkAnchor.trim() || !newLinkUrl.trim() || !!urlError || isLoadingExcerpt}
-              onClick={() => {
-                if (newLinkAnchor.trim() && newLinkUrl.trim() && !urlError) {
-                  setDocumentationLinks([
-                    ...documentationLinks,
-                    { anchor: newLinkAnchor.trim(), url: newLinkUrl.trim() }
-                  ]);
-                  setNewLinkAnchor('');
-                  setNewLinkUrl('');
-                }
-              }}
-            >
-              Add Link
-            </Button>
-
-            <Text>{' '}</Text>
-            <SectionMessage appearance="discovery">
-              <Text>Add documentation links that will appear in all Embed instances using this Source. Links open in a new tab.</Text>
-            </SectionMessage>
-          </FormSection>
-        </TabPanel>
-      </Tabs>
+      <SourceMetadataTabs
+        excerptName={excerptName}
+        setExcerptName={setExcerptName}
+        category={category}
+        setCategory={setCategory}
+        bespoke={bespoke}
+        setBespoke={setBespoke}
+        categoryOptions={categoryOptions}
+        isLoading={isLoadingExcerpt}
+        isLoadingCategories={isLoadingCategories}
+        detectedVariables={detectedVariables}
+        variableMetadata={variableMetadata}
+        setVariableMetadata={setVariableMetadata}
+        detectedToggles={detectedToggles}
+        toggleMetadata={toggleMetadata}
+        setToggleMetadata={setToggleMetadata}
+        documentationLinks={documentationLinks}
+        setDocumentationLinks={setDocumentationLinks}
+        newLinkAnchor={newLinkAnchor}
+        setNewLinkAnchor={setNewLinkAnchor}
+        newLinkUrl={newLinkUrl}
+        setNewLinkUrl={setNewLinkUrl}
+        urlError={urlError}
+        setUrlError={setUrlError}
+        hasContent={!!macroBody}
+        hasDetectedVariables={detectedVariables.length > 0 || !macroBody}
+        hasDetectedToggles={detectedToggles.length > 0 || !macroBody}
+        getFieldId={getFieldId}
+        excerptId={excerptId}
+        dataLoaded={dataLoaded}
+        variant="config"
+      />
 
       <FormFooter>
         <Inline space="space.200" alignBlock="center" spread="space-between">

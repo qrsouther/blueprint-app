@@ -18,6 +18,7 @@ import {
   convertAdfToStorage,
   buildChapterStructure,
   buildChapterPlaceholder,
+  buildFreeformChapter,
   findChapter
 } from '../utils/storage-format-utils.js';
 import {
@@ -302,7 +303,11 @@ export async function publishChapter(req) {
     variableValues: passedVariableValues,
     toggleStates: passedToggleStates,
     customInsertions: passedCustomInsertions,
-    internalNotes: passedInternalNotes
+    internalNotes: passedInternalNotes,
+    complianceLevel: passedComplianceLevel,
+    // Freeform mode values
+    isFreeformMode: passedIsFreeformMode,
+    freeformContent: passedFreeformContent
   } = req.payload || {};
 
   logFunction('publishChapter', 'START', { pageId, localId, excerptId });
@@ -331,6 +336,9 @@ export async function publishChapter(req) {
     const toggleStates = passedToggleStates || embedConfig.toggleStates || {};
     const customInsertions = passedCustomInsertions || embedConfig.customInsertions || [];
     const internalNotes = passedInternalNotes || embedConfig.internalNotes || [];
+    const complianceLevel = passedComplianceLevel !== undefined ? passedComplianceLevel : embedConfig.complianceLevel || null;
+    const isFreeformMode = passedIsFreeformMode !== undefined ? passedIsFreeformMode : embedConfig.isFreeformMode || false;
+    const freeformContent = passedFreeformContent !== undefined ? passedFreeformContent : embedConfig.freeformContent || '';
     
     logPhase('publishChapter', 'Using form values', {
       toggleStateKeys: Object.keys(toggleStates),
@@ -339,45 +347,58 @@ export async function publishChapter(req) {
       customInsertionsCount: customInsertions.length,
       internalNotesCount: Array.isArray(internalNotes) ? internalNotes.length : 0,
       chapterId: embedConfig.chapterId,
-      usedPassedValues: !!passedToggleStates
+      usedPassedValues: !!passedToggleStates,
+      isFreeformMode: isFreeformMode
     });
 
-    // 3. Render content with all settings applied
-    let renderedAdf = excerpt.content;
-
-    if (renderedAdf && typeof renderedAdf === 'object' && renderedAdf.type === 'doc') {
-      // Log content stats before filtering
-      const beforeContentLength = JSON.stringify(renderedAdf).length;
-      logPhase('publishChapter', 'Before toggle filtering', { 
-        contentLength: beforeContentLength,
-        toggleStates: toggleStates,
-        hasToggles: JSON.stringify(renderedAdf).includes('{{toggle:')
+    // 3. Handle content based on mode (freeform vs standard)
+    let storageContent;
+    
+    if (isFreeformMode) {
+      // Freeform mode - use raw text content (no Source rendering needed)
+      logPhase('publishChapter', 'Using freeform content mode', { 
+        freeformContentLength: freeformContent?.length || 0 
       });
-      
-      // Apply transformations in correct order
-      renderedAdf = substituteVariablesInAdf(renderedAdf, variableValues);
-      renderedAdf = insertCustomParagraphsInAdf(renderedAdf, customInsertions);
-      // Pass customInsertions to insertInternalNotesInAdf so it can adjust positions
-      // (internal note positions are based on original content, but custom paragraphs are already inserted)
-      renderedAdf = insertInternalNotesInAdf(renderedAdf, internalNotes, customInsertions);
-      renderedAdf = filterContentByToggles(renderedAdf, toggleStates);
-      
-      // Log content stats after filtering
-      const afterContentLength = JSON.stringify(renderedAdf).length;
-      logPhase('publishChapter', 'After toggle filtering', { 
-        contentLength: afterContentLength,
-        contentReduction: beforeContentLength - afterContentLength
-      });
+      // storageContent will be built by buildFreeformChapter, so we don't need conversion here
+      storageContent = null; // Signal to use freeform chapter builder
     } else {
-      logWarning('publishChapter', 'Content is not ADF format', { excerptId });
-    }
+      // Standard mode - render Source content with all settings applied
+      let renderedAdf = excerpt.content;
 
-    // 4. Convert ADF to storage format
-    logPhase('publishChapter', 'Converting ADF to storage format', { excerptId });
-    const storageContent = await convertAdfToStorage(renderedAdf);
-    if (!storageContent) {
-      logFailure('publishChapter', 'ADF conversion failed', new Error('Conversion returned null'));
-      return { success: false, error: 'Failed to convert content to storage format' };
+      if (renderedAdf && typeof renderedAdf === 'object' && renderedAdf.type === 'doc') {
+        // Log content stats before filtering
+        const beforeContentLength = JSON.stringify(renderedAdf).length;
+        logPhase('publishChapter', 'Before toggle filtering', { 
+          contentLength: beforeContentLength,
+          toggleStates: toggleStates,
+          hasToggles: JSON.stringify(renderedAdf).includes('{{toggle:')
+        });
+        
+        // Apply transformations in correct order
+        renderedAdf = substituteVariablesInAdf(renderedAdf, variableValues);
+        renderedAdf = insertCustomParagraphsInAdf(renderedAdf, customInsertions);
+        // Pass customInsertions to insertInternalNotesInAdf so it can adjust positions
+        // (internal note positions are based on original content, but custom paragraphs are already inserted)
+        renderedAdf = insertInternalNotesInAdf(renderedAdf, internalNotes, customInsertions);
+        renderedAdf = filterContentByToggles(renderedAdf, toggleStates);
+        
+        // Log content stats after filtering
+        const afterContentLength = JSON.stringify(renderedAdf).length;
+        logPhase('publishChapter', 'After toggle filtering', { 
+          contentLength: afterContentLength,
+          contentReduction: beforeContentLength - afterContentLength
+        });
+      } else {
+        logWarning('publishChapter', 'Content is not ADF format', { excerptId });
+      }
+
+      // 4. Convert ADF to storage format
+      logPhase('publishChapter', 'Converting ADF to storage format', { excerptId });
+      storageContent = await convertAdfToStorage(renderedAdf);
+      if (!storageContent) {
+        logFailure('publishChapter', 'ADF conversion failed', new Error('Conversion returned null'));
+        return { success: false, error: 'Failed to convert content to storage format' };
+      }
     }
 
     // 5. Get current page content
@@ -419,12 +440,28 @@ export async function publishChapter(req) {
     // Build the chapter HTML (same structure for new or update)
     // Use passed heading or fall back to excerpt name
     const heading = passedHeading || excerpt.name || 'Untitled Chapter';
-    const chapterHtml = buildChapterStructure({
-      chapterId,
-      localId,
-      heading: heading,
-      bodyContent: storageContent
-    });
+    
+    let chapterHtml;
+    if (isFreeformMode) {
+      // Use freeform chapter builder for fully custom content
+      chapterHtml = buildFreeformChapter({
+        chapterId,
+        localId,
+        heading: heading,
+        freeformContent: freeformContent || '',
+        complianceLevel
+      });
+    } else {
+      // Use standard chapter builder with rendered Source content
+      chapterHtml = buildChapterStructure({
+        chapterId,
+        localId,
+        heading: heading,
+        bodyContent: storageContent,
+        complianceLevel,
+        isBespoke: excerpt.bespoke || false
+      });
+    }
 
     if (existingChapter) {
       // Update existing chapter - replace entire layout block
@@ -503,6 +540,9 @@ export async function publishChapter(req) {
       toggleStates,
       customInsertions,
       internalNotes,
+      // Freeform mode values
+      isFreeformMode,
+      freeformContent,
       // Publish metadata
       chapterId,
       excerptId,
@@ -511,6 +551,8 @@ export async function publishChapter(req) {
       publishedSourceContentHash, // Source's contentHash at publish time (for staleness detection)
       publishedSourceContent, // Source's ADF content at publish time (for diff view)
       publishedVersion: updatedPage.version.number,
+      // Clear cached incomplete status (no longer incomplete once published)
+      cachedIncomplete: false,
       // Update sync timestamp
       lastSynced: new Date().toISOString()
     });
@@ -636,10 +678,13 @@ export async function injectPlaceholder(req) {
     }
 
     // Build placeholder
+    // Placeholder uses 'tbd' compliance level by default since no Source is selected yet
     const placeholderHtml = buildChapterPlaceholder({
       chapterId,
       localId,
-      heading: heading || 'New Chapter'
+      heading: heading || 'New Chapter',
+      complianceLevel: 'tbd',
+      isBespoke: false
     });
 
     const newPageBody = pageBody.trim() + '\n\n' + placeholderHtml;

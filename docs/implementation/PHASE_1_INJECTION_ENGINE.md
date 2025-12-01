@@ -140,7 +140,7 @@ export function buildChapterPlaceholder({ chapterId, localId, heading }) {
 <!-- BLUEPRINT-MANAGED-START: ${localId} -->
 <ac:structured-macro ac:name="info" ac:schema-version="1">
   <ac:rich-text-body>
-    <p><strong>📝 Chapter Under Construction</strong></p>
+    <p><Strong>📝 Chapter Under Construction</Strong></p>
     <p>This chapter has not been configured yet. Click the Edit button above to set up variables and publish content.</p>
   </ac:rich-text-body>
 </ac:structured-macro>

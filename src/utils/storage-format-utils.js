@@ -89,11 +89,39 @@ export function escapeHtml(text) {
 }
 
 /**
+ * Compliance level configuration mapping
+ * Maps compliance level values to emoji and label for injected content
+ */
+const COMPLIANCE_LEVEL_CONFIG = {
+  'standard': { emoji: '🟢', label: 'STANDARD' },
+  'bespoke': { emoji: '🟣', label: 'BESPOKE' },
+  'semi-standard': { emoji: '🟡', label: 'SEMI-STANDARD' },
+  'non-standard': { emoji: '🔴', label: 'NON-STANDARD' },
+  'tbd': { emoji: '⚪', label: 'TBD' },
+  'na': { emoji: '⚪', label: 'N/A' }
+};
+
+/**
+ * Build compliance indicator (emoji + label) for injected content
+ *
+ * @param {string} complianceLevel - The compliance level (standard, bespoke, semi-standard, non-standard, tbd, na)
+ * @param {boolean} isBespoke - Fallback: Whether the Source is bespoke (used when complianceLevel is null)
+ * @returns {string} Emoji and label text for the heading
+ */
+function buildStatusMacro(complianceLevel, isBespoke = false) {
+  // Determine effective compliance level
+  const effectiveLevel = complianceLevel || (isBespoke ? 'bespoke' : 'standard');
+  const config = COMPLIANCE_LEVEL_CONFIG[effectiveLevel] || COMPLIANCE_LEVEL_CONFIG['standard'];
+  
+  return `${config.emoji}`;
+}
+
+/**
  * Build complete chapter HTML structure using Confluence Section macro
  *
  * Creates the full chapter structure wrapped in a Section macro:
  * - Section macro as container with blueprint parameters (these are preserved!)
- * - H2 heading (native, TOC-readable)
+ * - Status lozenge based on compliance level, followed by H2 heading (native, TOC-readable)
  * - Body content
  * - Simple <hr> divider at end for visual separation
  *
@@ -108,14 +136,17 @@ export function escapeHtml(text) {
  * @param {string} options.localId - Embed macro localId
  * @param {string} options.heading - Chapter heading text
  * @param {string} options.bodyContent - Rendered body content (storage format)
+ * @param {string} options.complianceLevel - Compliance level (standard, bespoke, semi-standard, non-standard, tbd, na)
+ * @param {boolean} options.isBespoke - Fallback for when complianceLevel is null
  * @returns {string} Complete chapter HTML wrapped in section macro
  */
-export function buildChapterStructure({ chapterId, localId, heading, bodyContent }) {
+export function buildChapterStructure({ chapterId, localId, heading, bodyContent, complianceLevel = null, isBespoke = false }) {
   if (!chapterId || !localId) {
     throw new Error('buildChapterStructure requires chapterId and localId');
   }
 
   const escapedHeading = escapeHtml(heading || 'Untitled Chapter');
+  const statusMacro = buildStatusMacro(complianceLevel, isBespoke);
 
   // Use Section macro as container - parameters are preserved!
   // Section macro itself forms the boundary, no need for <hr />
@@ -123,7 +154,7 @@ export function buildChapterStructure({ chapterId, localId, heading, bodyContent
 <ac:parameter ac:name="blueprint-chapter">${chapterId}</ac:parameter>
 <ac:parameter ac:name="blueprint-local">${localId}</ac:parameter>
 <ac:rich-text-body>
-<h2>${escapedHeading}</h2>
+<h2>${statusMacro} ${escapedHeading}</h2>
 ${bodyContent || ''}
 </ac:rich-text-body>
 </ac:structured-macro>`;
@@ -141,14 +172,17 @@ ${bodyContent || ''}
  * @param {string} options.chapterId - Unique chapter identifier
  * @param {string} options.localId - Embed macro localId
  * @param {string} options.heading - Chapter heading text
+ * @param {string} options.complianceLevel - Compliance level (standard, bespoke, semi-standard, non-standard, tbd, na)
+ * @param {boolean} options.isBespoke - Fallback for when complianceLevel is null
  * @returns {string} Placeholder HTML wrapped in section macro
  */
-export function buildChapterPlaceholder({ chapterId, localId, heading }) {
+export function buildChapterPlaceholder({ chapterId, localId, heading, complianceLevel = null, isBespoke = false }) {
   if (!chapterId || !localId) {
     throw new Error('buildChapterPlaceholder requires chapterId and localId');
   }
 
   const escapedHeading = escapeHtml(heading || 'New Chapter');
+  const statusMacro = buildStatusMacro(complianceLevel, isBespoke);
 
   const placeholderContent = `<ac:structured-macro ac:name="info" ac:schema-version="1">
 <ac:rich-text-body>
@@ -162,9 +196,60 @@ export function buildChapterPlaceholder({ chapterId, localId, heading }) {
 <ac:parameter ac:name="blueprint-chapter">${chapterId}</ac:parameter>
 <ac:parameter ac:name="blueprint-local">${localId}</ac:parameter>
 <ac:rich-text-body>
-<h2>${escapedHeading}</h2>
+<h2>${statusMacro} ${escapedHeading}</h2>
 ${placeholderContent}
 <hr />
+</ac:rich-text-body>
+</ac:structured-macro>`;
+}
+
+/**
+ * Build chapter HTML for freeform content mode
+ *
+ * Creates a chapter structure with user-written freeform content (plain text)
+ * instead of Source-based content. Used when user selects non-standard, tbd, or na
+ * compliance levels and chooses to write their own content.
+ *
+ * Converts plain text into <p> tags, handling newlines as paragraph breaks.
+ * Uses Section macro as container to maintain redlining capability.
+ *
+ * @param {Object} options
+ * @param {string} options.chapterId - Unique chapter identifier
+ * @param {string} options.localId - Embed macro localId
+ * @param {string} options.heading - Chapter heading text
+ * @param {string} options.freeformContent - Raw text content (newlines create paragraph breaks)
+ * @param {string} options.complianceLevel - Compliance level (non-standard, tbd, na)
+ * @returns {string} Complete chapter HTML wrapped in section macro
+ */
+export function buildFreeformChapter({ chapterId, localId, heading, freeformContent = '', complianceLevel }) {
+  if (!chapterId || !localId) {
+    throw new Error('buildFreeformChapter requires chapterId and localId');
+  }
+
+  const escapedHeading = escapeHtml(heading || 'Untitled Chapter');
+  // For freeform mode, always use the compliance level (no bespoke fallback)
+  const statusMacro = buildStatusMacro(complianceLevel, false);
+
+  // Convert freeform text to paragraphs
+  // Split by newlines and wrap each non-empty line in <p> tags
+  const lines = freeformContent.split('\n');
+  const paragraphs = lines
+    .map(line => line.trim())
+    .filter(line => line !== '')
+    .map(line => `<p>${escapeHtml(line)}</p>`)
+    .join('\n');
+
+  // If no content, show a placeholder message
+  const bodyContent = paragraphs || '<p><em>No content provided.</em></p>';
+
+  // Use Section macro as container - same structure as standard chapters
+  return `<ac:structured-macro ac:name="section" ac:schema-version="1">
+<ac:parameter ac:name="blueprint-chapter">${chapterId}</ac:parameter>
+<ac:parameter ac:name="blueprint-local">${localId}</ac:parameter>
+<ac:parameter ac:name="blueprint-freeform">true</ac:parameter>
+<ac:rich-text-body>
+<h2>${statusMacro} ${escapedHeading}</h2>
+${bodyContent}
 </ac:rich-text-body>
 </ac:structured-macro>`;
 }

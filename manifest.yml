@@ -33,11 +33,10 @@ modules:
       resolver:
         function: resolver
 
-  confluence:contentBylineItem:
-    - key: blueprint-compositor
-      title: Blueprint Compositor
-      tooltip: Configure Blueprint page archetype and chapters
-      resource: compositor-byline
+  confluence:contentAction:
+    - key: blueprint-deploy-archetype
+      title: Deploy Blueprint
+      resource: deploy-archetype-action
       render: native
       resolver:
         function: resolver
@@ -92,8 +91,8 @@ resources:
   - key: admin-page
     path: src/admin-page.jsx
 
-  - key: compositor-byline
-    path: src/compositor-byline.jsx
+  - key: deploy-archetype-action
+    path: src/deploy-archetype-action.jsx
 
   - key: icon-assets
     path: static/icons

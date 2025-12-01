@@ -47,6 +47,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useCategoriesQuery } from '../../hooks/admin-hooks';
 import { extractTextFromAdf } from '../../utils/adf-utils';
 import { StableTextfield } from '../common/StableTextfield';
+import { SourceMetadataTabs } from '../common/SourceMetadataTabs';
 import { logger } from '../../utils/logger.js';
 
 // Custom hook for fetching excerpt data with React Query
@@ -73,11 +74,12 @@ const useSaveExcerptMutation = () => {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: async ({ excerptName, category, content, excerptId, variableMetadata, toggleMetadata, documentationLinks, sourcePageId, sourcePageTitle, sourceSpaceKey, sourceLocalId }) => {
+    mutationFn: async ({ excerptName, category, bespoke, content, excerptId, variableMetadata, toggleMetadata, documentationLinks, sourcePageId, sourcePageTitle, sourceSpaceKey, sourceLocalId }) => {
       try {
         const result = await invoke('saveExcerpt', {
           excerptName,
           category,
+          bespoke,
           content,
           excerptId,
           variableMetadata,
@@ -156,6 +158,7 @@ export function ExcerptPreviewModal({
   const [detectedToggles, setDetectedToggles] = useState([]);
   const [toggleMetadata, setToggleMetadata] = useState({});
   const [documentationLinks, setDocumentationLinks] = useState([]);
+  const [bespoke, setBespoke] = useState(false);
 
   // Form state for adding new documentation links
   const [newLinkAnchor, setNewLinkAnchor] = useState('');
@@ -177,6 +180,7 @@ export function ExcerptPreviewModal({
       setVariableMetadata({});
       setToggleMetadata({});
       setDocumentationLinks([]);
+      setBespoke(false);
       setNewLinkAnchor('');
       setNewLinkUrl('');
       setUrlError('');
@@ -188,12 +192,21 @@ export function ExcerptPreviewModal({
   const contentForDetection = editorContent || excerptData?.content;
   const contentText = contentForDetection ? extractTextFromAdf(contentForDetection) : '';
 
+  // Get initial data from excerpts list for immediate display
+  const initialExcerpt = excerpts?.find(e => e.id === excerptId);
+
   // Load excerpt data from React Query (only once per excerptId)
   useEffect(() => {
     // Reset flag if excerptId changed
     if (lastExcerptIdRef.current !== excerptId) {
       hasLoadedDataRef.current = false;
       lastExcerptIdRef.current = excerptId;
+      
+      // Immediately set initial data from excerpts list while waiting for React Query
+      if (initialExcerpt) {
+        setExcerptName(initialExcerpt.name || '');
+        setCategory(initialExcerpt.category || 'General');
+      }
     }
 
     if (!excerptId || !excerptData) {
@@ -201,8 +214,11 @@ export function ExcerptPreviewModal({
     }
 
     if (!hasLoadedDataRef.current) {
-      // Load name and category from React Query data
-      setExcerptName(excerptData.name || '');
+      // Load name and category from React Query data (authoritative source)
+      const nameToSet = excerptData.name !== undefined && excerptData.name !== null 
+        ? String(excerptData.name).trim() 
+        : (initialExcerpt?.name || '');
+      setExcerptName(nameToSet);
       setCategory(excerptData.category || 'General');
       
       // Load editor content (ADF format)
@@ -239,9 +255,12 @@ export function ExcerptPreviewModal({
         setDocumentationLinks(excerptData.documentationLinks);
       }
 
+      // Load bespoke flag
+      setBespoke(excerptData.bespoke || false);
+
       hasLoadedDataRef.current = true;
     }
-  }, [excerptId, excerptData]);
+  }, [excerptId, excerptData, initialExcerpt]);
 
   // Detect variables whenever content text changes
   useEffect(() => {
@@ -318,6 +337,7 @@ export function ExcerptPreviewModal({
     saveExcerptMutation({
       excerptName,
       category,
+      bespoke,
       content: contentToSave,
       excerptId,
       variableMetadata: variablesWithMetadata,
@@ -452,6 +472,18 @@ export function ExcerptPreviewModal({
                         placeholder={(isLoadingExcerpt || isLoadingCategories) ? 'Loading...' : undefined}
                         onChange={(e) => setCategory(e.value)}
                       />
+                    </Box>
+
+                    <Box paddingTop="space.200">
+                      <Inline space="space.200" alignBlock="center">
+                        <Text>Bespoke Source</Text>
+                        <Toggle
+                          id="bespoke-toggle"
+                          isChecked={bespoke}
+                          isDisabled={isLoadingExcerpt}
+                          onChange={(e) => setBespoke(e.target.checked)}
+                        />
+                      </Inline>
                     </Box>
 
                     <Box paddingTop="space.200">

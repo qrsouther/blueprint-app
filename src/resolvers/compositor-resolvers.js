@@ -461,6 +461,129 @@ export async function updateArchetypeSourceDefaults(req) {
 }
 
 /**
+ * Update archetype source order
+ *
+ * Saves the ordered list of source IDs for an archetype.
+ * This determines the display order in the Archetype configuration.
+ *
+ * @param {Object} req - Request object
+ * @param {string} req.payload.archetypeId - Archetype ID
+ * @param {string[]} req.payload.sourceOrder - Ordered array of source IDs
+ * @returns {Promise<Object>} Updated archetype
+ */
+export async function updateArchetypeSourceOrder(req) {
+  const { archetypeId, sourceOrder } = req.payload || {};
+
+  logFunction('updateArchetypeSourceOrder', 'START', { archetypeId, sourceCount: sourceOrder?.length });
+
+  try {
+    if (!archetypeId) {
+      return { success: false, error: 'Missing required parameter: archetypeId' };
+    }
+
+    if (!Array.isArray(sourceOrder)) {
+      return { success: false, error: 'sourceOrder must be an array' };
+    }
+
+    // Get existing archetype
+    let archetype = await storage.get(`archetype:${archetypeId}`);
+    
+    // If not in storage, try hardcoded
+    if (!archetype) {
+      archetype = getArchetypeById(archetypeId);
+      if (!archetype) {
+        return { success: false, error: `Archetype not found: ${archetypeId}` };
+      }
+      // Create a copy to avoid mutating hardcoded data
+      archetype = JSON.parse(JSON.stringify(archetype));
+    } else {
+      // Deep clone to avoid reference issues
+      archetype = JSON.parse(JSON.stringify(archetype));
+    }
+
+    // Update source order
+    archetype.sourceOrder = sourceOrder;
+    archetype.updatedAt = new Date().toISOString();
+
+    // Save updated archetype
+    await storage.set(`archetype:${archetypeId}`, archetype);
+
+    logSuccess('updateArchetypeSourceOrder', 'Source order updated', { archetypeId, sourceCount: sourceOrder.length });
+
+    return {
+      success: true,
+      data: archetype
+    };
+  } catch (error) {
+    logFailure('updateArchetypeSourceOrder', 'Error', error, { archetypeId });
+    return { success: false, error: error.message };
+  }
+}
+
+/**
+ * Remove a source from an archetype
+ *
+ * Removes a source from the archetype's sourceOrder and clears its sourceDefaults.
+ *
+ * @param {Object} req - Request object
+ * @param {string} req.payload.archetypeId - Archetype ID
+ * @param {string} req.payload.sourceId - Source ID to remove
+ * @returns {Promise<Object>} Updated archetype
+ */
+export async function removeArchetypeSource(req) {
+  const { archetypeId, sourceId } = req.payload || {};
+
+  logFunction('removeArchetypeSource', 'START', { archetypeId, sourceId });
+
+  try {
+    if (!archetypeId || !sourceId) {
+      return { success: false, error: 'Missing required parameters: archetypeId and sourceId' };
+    }
+
+    // Get existing archetype
+    let archetype = await storage.get(`archetype:${archetypeId}`);
+    
+    // If not in storage, try hardcoded
+    if (!archetype) {
+      archetype = getArchetypeById(archetypeId);
+      if (!archetype) {
+        return { success: false, error: `Archetype not found: ${archetypeId}` };
+      }
+      // Create a copy to avoid mutating hardcoded data
+      archetype = JSON.parse(JSON.stringify(archetype));
+    } else {
+      // Deep clone to avoid reference issues
+      archetype = JSON.parse(JSON.stringify(archetype));
+    }
+
+    // Remove from sourceOrder if it exists
+    if (archetype.sourceOrder && Array.isArray(archetype.sourceOrder)) {
+      archetype.sourceOrder = archetype.sourceOrder.filter(id => id !== sourceId);
+    }
+
+    // Remove sourceDefaults for this source if they exist
+    if (archetype.sourceDefaults && archetype.sourceDefaults[sourceId]) {
+      delete archetype.sourceDefaults[sourceId];
+    }
+
+    archetype.updatedAt = new Date().toISOString();
+
+    // Save updated archetype
+    await storage.set(`archetype:${archetypeId}`, archetype);
+
+    logSuccess('removeArchetypeSource', 'Source removed from archetype', { archetypeId, sourceId });
+
+    return {
+      success: true,
+      data: archetype
+    };
+  } catch (error) {
+    logFailure('removeArchetypeSource', 'Error', error, { archetypeId, sourceId });
+    return { success: false, error: error.message };
+  }
+}
+
+/**
  * Delete an archetype
  *
  * Removes an archetype from storage.
@@ -684,6 +807,7 @@ export async function bulkPublishChapters(req) {
         const toggleStates = embedConfig.toggleStates || {};
         const customInsertions = embedConfig.customInsertions || [];
         const internalNotes = embedConfig.internalNotes || [];
+        const complianceLevel = embedConfig.complianceLevel || null;
 
         // Render content with settings
         let renderedAdf = excerpt.content;
@@ -709,7 +833,9 @@ export async function bulkPublishChapters(req) {
           chapterId,
           localId,
           heading: chapter.name || excerpt.name,
-          bodyContent: storageContent
+          bodyContent: storageContent,
+          complianceLevel,
+          isBespoke: excerpt.bespoke || false
         });
 
         // Check if chapter already exists in page
@@ -885,6 +1011,285 @@ export async function initializePageWithArchetype(req) {
 
   } catch (error) {
     logFailure('initializePageWithArchetype', 'Error', error, { pageId, archetypeId });
+    return { success: false, error: error.message };
+  }
+}
+
+/**
+ * Scan page for existing Blueprint macros
+ *
+ * Scans the page content for existing Blueprint Embed macros.
+ *
+ * @param {Object} req - Request object
+ * @param {string} req.payload.pageId - Confluence page ID
+ * @returns {Promise<Object>} List of existing macros
+ */
+export async function scanPageForMacros(req) {
+  const { pageId } = req.payload || {};
+
+  logFunction('scanPageForMacros', 'START', { pageId });
+
+  try {
+    if (!pageId) {
+      return { success: false, error: 'Missing required parameter: pageId' };
+    }
+
+    // Fetch page content
+    const response = await api.asApp().requestConfluence(
+      route`/wiki/api/v2/pages/${pageId}?body-format=storage`,
+      { method: 'GET' }
+    );
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      logFailure('scanPageForMacros', 'Failed to fetch page', { status: response.status, error: errorText });
+      return { success: false, error: `Failed to fetch page: ${response.status}` };
+    }
+
+    const pageData = await response.json();
+    const content = pageData?.body?.storage?.value || '';
+
+    // Find all Blueprint Embed macros
+    const macroRegex = /<ac:structured-macro[^>]*ac:name="blueprint-standard-embed"[^>]*>[\s\S]*?<ac:parameter[^>]*ac:name="localId"[^>]*>([^<]+)<\/ac:parameter>[\s\S]*?<\/ac:structured-macro>/g;
+    
+    const macros = [];
+    let match;
+    while ((match = macroRegex.exec(content)) !== null) {
+      macros.push({
+        localId: match[1],
+        fullMatch: match[0]
+      });
+    }
+
+    logSuccess('scanPageForMacros', 'Scan complete', { pageId, macroCount: macros.length });
+
+    return {
+      success: true,
+      data: {
+        macros,
+        hasContent: content.trim().length > 0
+      }
+    };
+  } catch (error) {
+    logFailure('scanPageForMacros', 'Error', error, { pageId });
+    return { success: false, error: error.message };
+  }
+}
+
+/**
+ * Deploy an archetype to a page
+ *
+ * Inserts Blueprint Embed macros for each Source in the archetype's sourceOrder,
+ * with toggle defaults from sourceDefaults. Uses batched parallel storage writes
+ * for performance.
+ *
+ * @param {Object} req - Request object
+ * @param {string} req.payload.pageId - Confluence page ID
+ * @param {string} req.payload.archetypeId - Archetype ID to deploy
+ * @param {string} req.payload.mode - 'full' (replace all) or 'toggles_only' (keep existing)
+ * @returns {Promise<Object>} Deployment result
+ */
+export async function deployArchetype(req) {
+  const { pageId, archetypeId, mode = 'full' } = req.payload || {};
+
+  logFunction('deployArchetype', 'START', { pageId, archetypeId, mode });
+
+  try {
+    if (!pageId || !archetypeId) {
+      return { success: false, error: 'Missing required parameters: pageId and archetypeId' };
+    }
+
+    // Get archetype from storage
+    let archetype = await storage.get(`archetype:${archetypeId}`);
+    if (!archetype) {
+      // Try hardcoded fallback
+      archetype = getArchetypeById(archetypeId);
+      if (!archetype) {
+        return { success: false, error: `Archetype not found: ${archetypeId}` };
+      }
+    }
+
+    // Validate sourceOrder exists
+    if (!archetype.sourceOrder || archetype.sourceOrder.length === 0) {
+      return { success: false, error: 'Archetype has no sources configured' };
+    }
+
+    const sourceOrder = archetype.sourceOrder;
+    const sourceDefaults = archetype.sourceDefaults || {};
+
+    logPhase('deployArchetype', 'SOURCES', { sourceCount: sourceOrder.length });
+
+    // Mode: toggles_only - just update toggle states on existing Embeds
+    if (mode === 'toggles_only') {
+      const scanResult = await scanPageForMacros({ payload: { pageId } });
+      if (!scanResult.success) {
+        return { success: false, error: 'Failed to scan page for existing macros' };
+      }
+
+      const existingMacros = scanResult.data?.macros || [];
+      let updatedCount = 0;
+
+      for (const macro of existingMacros) {
+        const localId = macro.localId;
+        const existingConfig = await storage.get(`macro-vars:${localId}`);
+        
+        if (existingConfig && existingConfig.excerptId) {
+          const defaults = sourceDefaults[existingConfig.excerptId]?.toggleStates || {};
+          
+          // Merge defaults with existing toggle states (defaults take precedence)
+          const newConfig = {
+            ...existingConfig,
+            toggleStates: {
+              ...existingConfig.toggleStates,
+              ...defaults
+            }
+          };
+          
+          await storage.set(`macro-vars:${localId}`, newConfig);
+          updatedCount++;
+        }
+      }
+
+      logSuccess('deployArchetype', 'Toggle defaults applied', { pageId, updatedCount });
+
+      return {
+        success: true,
+        data: {
+          mode: 'toggles_only',
+          deployedCount: updatedCount
+        }
+      };
+    }
+
+    // Mode: full - replace page content with new Embeds
+    logPhase('deployArchetype', 'FULL_DEPLOY', { sourceCount: sourceOrder.length });
+
+    // Helper to chunk array
+    const chunk = (arr, size) => {
+      const chunks = [];
+      for (let i = 0; i < arr.length; i += size) {
+        chunks.push(arr.slice(i, i + size));
+      }
+      return chunks;
+    };
+
+    // Generate localIds and prepare storage entries
+    const embedConfigs = sourceOrder.map(sourceId => ({
+      localId: crypto.randomUUID(),
+      sourceId,
+      toggleStates: sourceDefaults[sourceId]?.toggleStates || {}
+    }));
+
+    // Batch storage writes in groups of 10 to avoid rate limits
+    const batches = chunk(embedConfigs, 10);
+    
+    for (let i = 0; i < batches.length; i++) {
+      const batch = batches[i];
+      logPhase('deployArchetype', `BATCH_${i + 1}`, { batchSize: batch.length });
+      
+      await Promise.all(batch.map(config => 
+        storage.set(`macro-vars:${config.localId}`, {
+          excerptId: config.sourceId,
+          toggleStates: config.toggleStates,
+          variableValues: {},
+          customInsertions: {},
+          internalNotes: [],
+          customHeading: null,
+          complianceLevel: null,  // Auto-select based on Source's bespoke property
+          cachedIncomplete: true,  // Freshly deployed = incomplete until published
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString()
+        })
+      ));
+    }
+
+    logPhase('deployArchetype', 'STORAGE_COMPLETE', { configCount: embedConfigs.length });
+
+    // Build macro XHTML using ADF extension format (required for Forge native render macros)
+    // App ID is constant from manifest, Environment ID is extracted from install context
+    const APP_ID = 'be1ff96b-d44d-4975-98d3-25b80a813bdd';
+    const ENV_ID = req.context?.installContext?.split('/')[1] || 'ae38f536-b4c8-4dfa-a1c9-62026d61b4f9';
+    const MACRO_KEY = 'blueprint-standard-embed';
+    
+    logPhase('deployArchetype', 'EXTENSION_IDS', { appId: APP_ID, envId: ENV_ID });
+    
+    const extensionKey = `${APP_ID}/${ENV_ID}/static/${MACRO_KEY}`;
+    const extensionId = `ari:cloud:ecosystem::extension/${extensionKey}`;
+    
+    // Determine environment label based on whether we're using the development env ID
+    const isDevelopment = ENV_ID === 'ae38f536-b4c8-4dfa-a1c9-62026d61b4f9';
+    const envLabel = isDevelopment ? ' (Development)' : '';
+    const forgeEnv = isDevelopment ? 'DEVELOPMENT' : 'PRODUCTION';
+    
+    const macrosXhtml = embedConfigs.map(config => {
+      return `<ac:adf-extension><ac:adf-node type="extension"><ac:adf-attribute key="extension-key">${extensionKey}</ac:adf-attribute><ac:adf-attribute key="extension-type">com.atlassian.ecosystem</ac:adf-attribute><ac:adf-attribute key="parameters"><ac:adf-parameter key="local-id">${config.localId}</ac:adf-parameter><ac:adf-parameter key="extension-id">${extensionId}</ac:adf-parameter><ac:adf-parameter key="extension-title">🎯 Blueprint App - Embed${envLabel}</ac:adf-parameter><ac:adf-parameter key="layout">default</ac:adf-parameter><ac:adf-parameter key="forge-environment">${forgeEnv}</ac:adf-parameter><ac:adf-parameter key="render">native</ac:adf-parameter></ac:adf-attribute><ac:adf-attribute key="text">🎯 Blueprint App - Embed${envLabel}</ac:adf-attribute><ac:adf-attribute key="layout">default</ac:adf-attribute><ac:adf-attribute key="local-id">${config.localId}</ac:adf-attribute></ac:adf-node></ac:adf-extension>`;
+    }).join('\n\n');
+
+    // Wrap in a simple structure
+    const pageContent = `<p></p>\n${macrosXhtml}\n<p></p>`;
+
+    // Update page content
+    logPhase('deployArchetype', 'UPDATING_PAGE', { pageId });
+
+    // First get the current page to get version number
+    const getResponse = await api.asApp().requestConfluence(
+      route`/wiki/api/v2/pages/${pageId}`,
+      { method: 'GET' }
+    );
+
+    if (!getResponse.ok) {
+      const errorText = await getResponse.text();
+      logFailure('deployArchetype', 'Failed to get page', { status: getResponse.status, error: errorText });
+      return { success: false, error: `Failed to get page: ${getResponse.status}` };
+    }
+
+    const pageData = await getResponse.json();
+    const currentVersion = pageData.version?.number || 1;
+
+    // Update page with new content
+    const updateResponse = await api.asApp().requestConfluence(
+      route`/wiki/api/v2/pages/${pageId}`,
+      {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          id: pageId,
+          status: 'current',
+          title: pageData.title,
+          body: {
+            representation: 'storage',
+            value: pageContent
+          },
+          version: {
+            number: currentVersion + 1,
+            message: `Blueprint: Deployed archetype "${archetype.name}"`
+          }
+        })
+      }
+    );
+
+    if (!updateResponse.ok) {
+      const errorText = await updateResponse.text();
+      logFailure('deployArchetype', 'Failed to update page', { status: updateResponse.status, error: errorText });
+      return { success: false, error: `Failed to update page: ${updateResponse.status}` };
+    }
+
+    logSuccess('deployArchetype', 'Deployment complete', { 
+      pageId, 
+      archetypeId, 
+      deployedCount: embedConfigs.length 
+    });
+
+    return {
+      success: true,
+      data: {
+        mode: 'full',
+        deployedCount: embedConfigs.length,
+        localIds: embedConfigs.map(c => c.localId)
+      }
+    };
+  } catch (error) {
+    logFailure('deployArchetype', 'Error', error, { pageId, archetypeId, mode });
     return { success: false, error: error.message };
   }
 }

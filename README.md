@@ -71,21 +71,21 @@ This is the editing for the Embed macro.
 
 <table>
   <tr>
-    <td><strong>Source selection</strong></td>
+    <td><Strong>Source selection</Strong></td>
     <td>Dropdown menu to choose from all available Sources, or search by name. After selecting a Source, use the View Source button to go to the page where the Source macro is configured.</td>
   </tr>
   <tr>
-    <td><strong>Toggles tab</strong></td>
+    <td><Strong>Toggles tab</Strong></td>
     <td>Enable/disable toggles to display or hide content blocks. Descriptions will often accompany each toggle. Preview panel will live-update when toggles are switched. Toggle positions are auto-saved near-instantly.</td>
   </tr>
   <tr>
-    <td><strong>Write tab (Variables)</strong></td>
+    <td><Strong>Write tab (Variables)</Strong></td>
     <td>Text fields are available to input a value into each variable defined at the Source. Variable substitutions will update the preview panel beneath in real-time as you type. <br><br> *️⃣ Asterisks denote required variables (should not be left null). Variables without asterisks can be considered optional, and often are those that exist only within toggle blocks.<br><br>Variables, like Toggles, can have accompanying descriptions -- particularly in cases where the variable's meaning is not-obvious based on its name. Variables can and usually will have generic example text which is displayed as a placeholder, to help users see what the variable input expects (i.e., a single word, versus a standalone sentence, versus a full paragraph).
-    <br><br>Variable inputs, like toggle settings, are auto-saved near-instantly.<br><br><strong>Tip:</strong> ✅ will appear to the right of variables' input fields as you fill them in. Turn all your variable lines green!</td>
+    <br><br>Variable inputs, like toggle settings, are auto-saved near-instantly.<br><br><Strong>Tip:</Strong> ✅ will appear to the right of variables' input fields as you fill them in. Turn all your variable lines green!</td>
   </tr>
   <tr>
-    <td><strong>Custom tab<br></strong></td>
-    <td>Insert custom, free-written paragraphs of your own content at any position (Placement) within the Embed's content field. You can insert multiple external or internal custom paragraphs, but use discretion -- the more custom content you write, the less standard your client's approach may be.<br><br>Users no longer need to write freeform content outside of/beneath the excerpted content macro, as was the case with MultiExcerpts. Custom insertions are integrated directly into the Embed's content structure at specified positions.<br><br>The preview panel below will show complete rendered content, including custom insertions and internal notes.<br><br>📝 External content paragraphs will appear within the Blueprint document supplied to the client. SeatGeek employees and the client alike can read these custom insertions. <br><br>🔒 Internal Notes will <strong>not</strong> be visible to clients at all; they will only be visible within the Confluence page of the Blueprint, and only to other SeatGeek employees. Internal Notes act as inline footnotes, and will be marked with a superscript number in the Embed's rendered view (again, only visible internally); those numbers match to the notes which are saved and shown within the <em>🔒 Internal Notes</em> panel displayed at the bottom of the Embed.<br><br><strong>Tip:</strong> Use Internal Notes to stash links to Jira tickets, Slack conversations, or background information that only your SeatGeek teammates need to know about. The reasoning and context behind the ways a SeatGeek client does things is the most valuable part of every Blueprint!</td>
+    <td><Strong>Custom tab<br></Strong></td>
+    <td>Insert custom, free-written paragraphs of your own content at any position (Placement) within the Embed's content field. You can insert multiple external or internal custom paragraphs, but use discretion -- the more custom content you write, the less standard your client's approach may be.<br><br>Users no longer need to write freeform content outside of/beneath the excerpted content macro, as was the case with MultiExcerpts. Custom insertions are integrated directly into the Embed's content structure at specified positions.<br><br>The preview panel below will show complete rendered content, including custom insertions and internal notes.<br><br>📝 External content paragraphs will appear within the Blueprint document supplied to the client. SeatGeek employees and the client alike can read these custom insertions. <br><br>🔒 Internal Notes will <Strong>not</Strong> be visible to clients at all; they will only be visible within the Confluence page of the Blueprint, and only to other SeatGeek employees. Internal Notes act as inline footnotes, and will be marked with a superscript number in the Embed's rendered view (again, only visible internally); those numbers match to the notes which are saved and shown within the <em>🔒 Internal Notes</em> panel displayed at the bottom of the Embed.<br><br><Strong>Tip:</Strong> Use Internal Notes to stash links to Jira tickets, Slack conversations, or background information that only your SeatGeek teammates need to know about. The reasoning and context behind the ways a SeatGeek client does things is the most valuable part of every Blueprint!</td>
   </tr>
 </table>
 
@@ -97,19 +97,19 @@ This is the view that is displayed on the Blueprint page when _reading_ it, rath
 
 <table>
   <tr>
-    <td><strong>Optimistic Rendering</strong></td>
+    <td><Strong>Optimistic Rendering</Strong></td>
     <td>Cached content appears immediately (no "Loading..." messages). Fresh content fetched and compared in background. Display updates automatically if Source has changed. Users see content instantly, then freshest content appears within seconds — seamless experience.</td>
   </tr>
   <tr>
-    <td><strong>Staleness Detection</strong></td>
-    <td> Subtle <em>Checking for Source updates...</em> indicator appears during staleness check upon page load. When Source has changed, a prominent green <strong>Review Update</strong> button appears.<br><br>Staleness check happens 2-3 seconds after page loads. Prior to and during the check, cached content displays while the check runs in background.</td>
+    <td><Strong>Staleness Detection</Strong></td>
+    <td> Subtle <em>Checking for Source updates...</em> indicator appears during staleness check upon page load. When Source has changed, a prominent green <Strong>Review Update</Strong> button appears.<br><br>Staleness check happens 2-3 seconds after page loads. Prior to and during the check, cached content displays while the check runs in background.</td>
   </tr>
   <tr>
-    <td><strong>Update Available banner</strong></td>
+    <td><Strong>Update Available banner</Strong></td>
     <td>This banner appears only when user clicks the Review Update button — if the user doesn't have time to check the available update, they can get to it later or work on other Embeds if they like, until they're ready to review and accept the update.<br><br>A side-by-side diff view compares current (cached) Embed content with updated content from the Source level. All toggle tags -- even those that the writer hasn't enabled in the Embed -- are visible in the diff view, so that the writer can be aware of newly-added or changed toggle content and decide whether they wish to enable it now.<br><br>Users can click the Update button to get their Embed onto the new version immediately after reviewing how it will change their Embed's rendered output.</td>
   </tr>
   <tr>
-    <td><strong>Documentation Links Display</strong></td>
+    <td><Strong>Documentation Links Display</Strong></td>
     <td>Links that are configured at the Source level are displayed at the top of rendered Embed content, similar to the gray boxes traditionally used in MultiExcerpts.</td>
   </tr>
 </table>
@@ -126,15 +126,15 @@ The text content of a Source excerpt is added within what Atlassian calls a 'bod
 
 <table>
   <tr>
-    <td><strong>WYSIWYG Editor</strong></td>
+    <td><Strong>WYSIWYG Editor</Strong></td>
     <td>Edit Source content directly in the Confluence page editor using the macro body. Full formatting support includes bold, italic, links, tables, headings, and all standard Confluence formatting. Identical to configuring a MultiExcerpt macro.</td>
   </tr>
   <tr>
-    <td><strong>Variable Syntax</strong></td>
-    <td>Use <code>{{Variable Name}}</code> syntax to define variables that can be filled in by Embeds.<br><br>Variables are automatically detected from the bodied macro text content when you open the Source macro's config (edit) modal via the Edit pencil at the bottom of the macro's area.<br><br>Variable substitution is functionally very similar to what was supported in the MultiExcerpt app; however, the Blueprint App performs variable substitution via structured tree traversal of the ADF document, preserving formatting and document structure (not simple string replacement).<br><br><strong>Tip:</strong> While variable names can contain hyphens (e.g., <code>{{stack-model}}</code>, <code>{{primary-venue}}</code>), we will generally use Title Case, with spaces separating words, to name our variables in a pretty and more readable way; there is no character limit for our variable names now!</td>
+    <td><Strong>Variable Syntax</Strong></td>
+    <td>Use <code>{{Variable Name}}</code> syntax to define variables that can be filled in by Embeds.<br><br>Variables are automatically detected from the bodied macro text content when you open the Source macro's config (edit) modal via the Edit pencil at the bottom of the macro's area.<br><br>Variable substitution is functionally very similar to what was supported in the MultiExcerpt app; however, the Blueprint App performs variable substitution via structured tree traversal of the ADF document, preserving formatting and document structure (not simple string replacement).<br><br><Strong>Tip:</Strong> While variable names can contain hyphens (e.g., <code>{{stack-model}}</code>, <code>{{primary-venue}}</code>), we will generally use Title Case, with spaces separating words, to name our variables in a pretty and more readable way; there is no character limit for our variable names now!</td>
   </tr>
   <tr>
-    <td><strong>Toggle Syntax</strong></td>
+    <td><Strong>Toggle Syntax</Strong></td>
     <td>Use <code>{{toggle:name}}content{{/toggle:name}}</code> to create conditional content blocks. Toggles, like variables, are automatically detected from content when you open the Source macro's config/edit modal.<br><br>Toggle-controlled conditional content was not a system that MultiExcerpts supported, which forced the Architecture team into creating distinct, slightly tweaked MultiExcerpts for every basic variation or permutation of a given standard solution. With the Blueprint App, a single Source can contain multiple toggleable content blocks, allowing Embeds to enable or disable specific sections as needed.</td>
   </tr>
 </table>
@@ -143,24 +143,24 @@ The text content of a Source excerpt is added within what Atlassian calls a 'bod
 
 <table>
   <tr>
-    <td><strong>Name/Category tab</strong></td>
+    <td><Strong>Name/Category tab</Strong></td>
     <td>Set a descriptive name for the Source (i.e., <i>Client Profile</i>, <i>Relocations</i>), and assign a Category. The name will generally match the chapter title that will ultimately go into the Client blueprints, but it does not have to match.</td>
   </tr>
   <tr>
-    <td><strong>Variables tab</strong></td>
-    <td>All <code>{{Variables}}</code> detected in the Source body content are listed automatically in his tab. For each variable, assign an optional helpful description, and/or an optional example value. Both of these metadata fields exist as guides for Blueprint writers filling in Embed content.<br><br> The <strong>Required</strong> flag marks the variable with an *️⃣ asterisk when editing the Embed.</td>
+    <td><Strong>Variables tab</Strong></td>
+    <td>All <code>{{Variables}}</code> detected in the Source body content are listed automatically in his tab. For each variable, assign an optional helpful description, and/or an optional example value. Both of these metadata fields exist as guides for Blueprint writers filling in Embed content.<br><br> The <Strong>Required</Strong> flag marks the variable with an *️⃣ asterisk when editing the Embed.</td>
   </tr>
   <tr>
-    <td><strong>Toggles tab</strong></td>
+    <td><Strong>Toggles tab</Strong></td>
     <td>Like Variables, all <code>{{/Toggle}}</code> tags in the Source body content are detected automatically. Add descriptive text explaining what each toggle means and when a user might want to enable it. If two toggles are mutually exclusive by convention, be sure to note that in the Toggle's description.</td>
   </tr>
   <tr>
-    <td><strong>Documentation tab</strong></td>
+    <td><Strong>Documentation tab</Strong></td>
     <td>Add links to relevant documentation that will appear at the top of Embeds. Each link includes a URL and anchor text. Links appear at the top of the rendered Embed content in Blueprint pages, similar to the gray links panel that we've historically applied at the top of our MultiExcerpts.<br><br>The main difference is that with MultiExcerpts, these gray panels would be written into the body content text area using the Confluence <a href="https://atlassian.design/components/section-message/examples">SectionMessage component</a>, while the Blueprint App defines these documentation links using a <a href="https://atlassian.design/components/primitives/box/examples">custom Box component</a>.</td>
   </tr>
 </table>
 
-❗<strong>Important:</strong> After saving and closing the Source config modal, you <u>must</u> publish/update the Confluence page itself to actually save changes to the Source excerpt. The Source macro does not auto-save as you write the way that editing an Embed does!
+❗<Strong>Important:</Strong> After saving and closing the Source config modal, you <u>must</u> publish/update the Confluence page itself to actually save changes to the Source excerpt. The Source macro does not auto-save as you write the way that editing an Embed does!
 
 ### Source Management Technical Details
 
@@ -168,19 +168,19 @@ The following details are for nerds but may be interesting to someone wondering 
 
 <table>
   <tr>
-    <td><strong>UUID-Based Identification</strong></td>
+    <td><Strong>UUID-Based Identification</Strong></td>
     <td>Each Source has a unique UUID that persists across renames, ensuring stable references even when Sources are renamed. <br><br>MultiExcerpt macros were dangerous to rename because their name was effectively their ID, and renaming a MultiExcerpt macro would in turn break all references to it at the <i>MultiExcerpt Include</i> level.</td>
   </tr>
   <tr>
-    <td><strong>Version Tracking</strong></td>
+    <td><Strong>Version Tracking</Strong></td>
     <td>Content changes to Sources are tracked with semantic hashing for staleness detection. This allows Embeds to know when their Source has been updated.</td>
   </tr>
   <tr>
-    <td><strong>Source Page Tracking</strong></td>
+    <td><Strong>Source Page Tracking</Strong></td>
     <td>System tracks which page and space contains each Source, enabling direct navigation and source page management.</td>
   </tr>
   <tr>
-    <td><strong>Automatic Indexing</strong></td>
+    <td><Strong>Automatic Indexing</Strong></td>
     <td>Sources are automatically added to the master index for Admin page visibility, making them searchable and manageable from the Admin page.</td>
   </tr>
 </table>
@@ -240,23 +240,23 @@ The **Query Results** display shows whether the record was found, its data type,
 
 <table>
   <tr>
-    <td><strong>Create Source</strong><br><br><i>Coming soon</i></td>
+    <td><Strong>Create Source</Strong><br><br><i>Coming soon</i></td>
     <td>Source creation and editing must be done via the Blueprint Standard - Source macro on Confluence pages. The Admin page is for viewing usage details and managing metadata only.</td>
   </tr>
   <tr>
-    <td><strong>Manage Categories</strong></td>
+    <td><Strong>Manage Categories</Strong></td>
     <td>Add, edit, reorder, or delete categories for Sources. Deletion of a category is blocked if any Sources are assigned to it.</td>
   </tr>
   <tr>
-    <td><strong>Check All Sources</strong></td>
+    <td><Strong>Check All Sources</Strong></td>
     <td>Actively verifies each Source still exists on its source page. Identifies Sources deleted from pages but still in storage, reports orphaned reasons (page deleted, macro removed, etc.), and provides remediation options: view page history to restore deleted Source, navigate to source page, or permanently delete orphaned Source from storage.</td>
   </tr>
     <tr>
-    <td><strong>Check All Embeds</strong></td>
+    <td><Strong>Check All Embeds</Strong></td>
     <td>A full-database validator for all Embeds. Refer to the detailed <a href="#check-all-embeds">Check All Embeds</a> section below for a full description.</td>
   </tr>
   <tr>
-    <td><strong>Migration Tools</strong></td>
+    <td><Strong>Migration Tools</Strong></td>
     <td>
       Opens a modal for migrating excerpt (Source) content from the MultiExcerpt app to the Blueprint app as Source macros. Provides a 4-step migration process:
       <ol>
@@ -269,12 +269,12 @@ The **Query Results** display shows whether the record was found, its data type,
     </td>
   </tr>
   <tr>
-    <td><strong>Restore Version</strong></td>
+    <td><Strong>Restore Version</Strong></td>
     <td>
       Opens the Emergency Recovery modal which contains two tabs:
       <ul>
-        <li><strong>Deleted Embeds</strong>: View and restore soft-deleted Embeds. An Embed becomes soft-deleted when its macro is removed from a Confluence page (either accidentally or intentionally) and then detected as orphaned by an admin cleanup operation. Instead of permanently deleting the configuration, the system moves it to a recovery namespace, preserving all variable values, toggle states, custom insertions, and internal notes. Soft-deleted Embeds are recoverable for 90 days.</li>
-        <li><strong>Version History</strong>: View and restore previous versions of active Embeds (Embeds that still exist on their pages). Every time an Embed's configuration is modified (variable values, toggle states, custom insertions, etc.), a version snapshot is automatically created. These version snapshots are retained for 14 days, allowing you to restore an active Embed to any previous state within that window.</li>
+        <li><Strong>Deleted Embeds</Strong>: View and restore soft-deleted Embeds. An Embed becomes soft-deleted when its macro is removed from a Confluence page (either accidentally or intentionally) and then detected as orphaned by an admin cleanup operation. Instead of permanently deleting the configuration, the system moves it to a recovery namespace, preserving all variable values, toggle states, custom insertions, and internal notes. Soft-deleted Embeds are recoverable for 90 days.</li>
+        <li><Strong>Version History</Strong>: View and restore previous versions of active Embeds (Embeds that still exist on their pages). Every time an Embed's configuration is modified (variable values, toggle states, custom insertions, etc.), a version snapshot is automatically created. These version snapshots are retained for 14 days, allowing you to restore an active Embed to any previous state within that window.</li>
       </ul>
       Use this to recover Embeds that were accidentally deleted or restore an Embed to a previous version. Creates a backup snapshot before restoring to ensure the current version is preserved.
     </td>
@@ -287,11 +287,11 @@ You’ll see the Orphaned Item card and its available remediation steps automati
 
 <table>
   <tr>
-    <td><strong>Orphaned Embeds</strong></td>
+    <td><Strong>Orphaned Embeds</Strong></td>
     <td>Automatically detects Embeds referencing deleted Sources. Shows affected pages and reference counts, and suggests remediation: recreate the Source with same name, update Embeds to reference different Source, or remove Embeds from affected pages.</td>
   </tr>
   <tr>
-    <td><strong>Automatic Cleanup</strong></td>
+    <td><Strong>Automatic Cleanup</Strong></td>
     <td>Removes stale Embed usage entries during Source checking. Verifies Embed instances still exist on their pages. Maintains data integrity across the system.</td>
   </tr>
 </table>
@@ -318,23 +318,23 @@ After selecting a Source from the left-side nav, the following toolbar buttons a
 
 <table>
   <tr>
-    <td><strong>Preview Content</strong></td>
+    <td><Strong>Preview Content</Strong></td>
     <td>Opens a modal displaying the raw Source content with all variables and toggle tags visible. This allows you to review the exact content structure, variable syntax, and toggle blocks without navigating to the source page. Useful for quickly verifying Source content or checking variable/toggle syntax.</td>
   </tr>
   <tr>
-    <td><strong>View Source</strong></td>
+    <td><Strong>View Source</Strong></td>
     <td>Navigates directly to the Confluence page containing the Source macro, opening it in a new tab. If the Source macro has a localId, the page will automatically scroll to the macro's location using an anchor link on the page for quick access.</td>
   </tr>
   <tr>
-    <td><strong>Export to CSV</strong></td>
+    <td><Strong>Export to CSV</Strong></td>
     <td>Exports all usage data for the selected Source to a CSV file using the same export function as <b>Check All Embeds</b>. The export includes all pages using this Source, along with variable values, toggle states, status information, timestamps, custom insertions content, and rendered content (plain text) for each Embed instance. The CSV file is automatically downloaded with a filename that includes the Source name and current date.</td>
   </tr>
   <tr>
-    <td><strong>Permadelete</strong></td>
-    <td>Permanently removes the Source from the library and all storage indexes. This action cannot be undone. <br><br><strong>Important:</strong> This only deletes the Source from the Blueprint App library—the actual content remains stored in the Source macro on its Confluence source page. After deletion, you'll be prompted to view the source page if you want to access the content to delete it from the relevant page.</td>
+    <td><Strong>Permadelete</Strong></td>
+    <td>Permanently removes the Source from the library and all storage indexes. This action cannot be undone. <br><br><Strong>Important:</Strong> This only deletes the Source from the Blueprint App library—the actual content remains stored in the Source macro on its Confluence source page. After deletion, you'll be prompted to view the source page if you want to access the content to delete it from the relevant page.</td>
   </tr>
   <tr>
-    <td><strong>Force Update to All Pages</strong></td>
+    <td><Strong>Force Update to All Pages</Strong></td>
     <td>Pushes the latest Source content to all Embed instances across all pages that use this Source. This button is only enabled when there are stale Embed instances (Source has been modified since Embeds last synced).<br><br>This is generally only going to be used when a Source has been changed and the change was either trivial and completely non-destructive (i.e., fixing a typo), or the change was absolutely necessary and urgently needs to be propagated to all Blueprints.<br><br>This function updates all cached Embed configurations with the current Source content, variable definitions, toggle definitions, and documentation links. Requires confirmation before executing.</td>
   </tr>
 </table>

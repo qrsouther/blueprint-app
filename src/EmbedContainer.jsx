@@ -69,6 +69,54 @@ import { editButtonBorderContainerStyle } from './styles/embed-styles';
 import { logger } from './utils/logger';
 import ErrorBoundary from './components/common/ErrorBoundary.jsx';
 
+/**
+ * Check if an Embed is incomplete (missing required variable values)
+ * 
+ * An Embed is considered incomplete if:
+ * - ALL variable values are null/empty, OR
+ * - ANY variable marked required: true has null/empty value
+ * 
+ * Exception: If in freeform mode with content, the Embed is NOT incomplete
+ * (freeform mode bypasses the Source structure entirely)
+ * 
+ * @param {Object} excerpt - The Source excerpt with variables array
+ * @param {Object} variableValues - Object of variable name -> value
+ * @param {Object} embedConfig - Optional config with isFreeformMode and freeformContent
+ * @returns {boolean} True if Embed is incomplete
+ */
+const isEmbedIncomplete = (excerpt, variableValues, embedConfig = {}) => {
+  // If in freeform mode with content, it's NOT incomplete
+  // Freeform mode bypasses Source structure, so empty variables are expected
+  if (embedConfig.isFreeformMode && embedConfig.freeformContent?.trim()) {
+    return false;
+  }
+
+  if (!excerpt?.variables || excerpt.variables.length === 0) {
+    return false; // No variables = not incomplete
+  }
+
+  const values = variableValues || {};
+  
+  // Check if ALL values are empty
+  const allEmpty = excerpt.variables.every(v => {
+    const value = values[v.name];
+    return !value || value.trim() === '';
+  });
+  
+  if (allEmpty) {
+    return true;
+  }
+  
+  // Check if any REQUIRED variable is empty
+  const hasEmptyRequired = excerpt.variables.some(v => {
+    if (!v.required) return false;
+    const value = values[v.name];
+    return !value || value.trim() === '';
+  });
+  
+  return hasEmptyRequired;
+};
+
 // Create a client for React Query
 const styles3 = xcss({ padding: 'space.200', marginBottom: 'space.200' });
 const styles2 = xcss({ padding: 'space.050' });
@@ -162,7 +210,10 @@ const App = () => {
           variableValues: values.variableValues || {},
           toggleStates: values.toggleStates || {},
           customInsertions: values.customInsertions || [],
-          internalNotes: values.internalNotes || []
+          internalNotes: values.internalNotes || [],
+          complianceLevel: values.complianceLevel || null,
+          isFreeformMode: values.isFreeformMode || false,
+          freeformContent: values.freeformContent || ''
         });
 
         if (result.success) {
@@ -212,6 +263,14 @@ const App = () => {
     control: editSession.control, 
     name: 'internalNotes'
   }) || [];
+  const watchedIsFreeformMode = useWatch({ 
+    control: editSession.control, 
+    name: 'isFreeformMode'
+  }) || false;
+  const watchedFreeformContent = useWatch({ 
+    control: editSession.control, 
+    name: 'freeformContent'
+  }) || '';
   
   // Set initial tab index based on whether excerpt has toggles
   // Only set once when excerpt first loads
@@ -525,6 +584,43 @@ const App = () => {
   // ============================================================================
   // Uses watched values directly for live preview updates
   const getPreviewContent = () => {
+    // Handle freeform mode - return simple ADF with the freeform content as paragraphs
+    if (watchedIsFreeformMode) {
+      const freeformText = watchedFreeformContent || '';
+      
+      // Split by newlines and create paragraph nodes
+      const paragraphs = freeformText.split('\n').filter(line => line.trim() !== '');
+      
+      if (paragraphs.length === 0) {
+        // Return placeholder when empty
+        return {
+          type: 'doc',
+          version: 1,
+          content: [{
+            type: 'paragraph',
+            content: [{
+              type: 'text',
+              text: 'Your freeform content will appear here...',
+              marks: [{ type: 'em' }]
+            }]
+          }]
+        };
+      }
+      
+      return {
+        type: 'doc',
+        version: 1,
+        content: paragraphs.map(text => ({
+          type: 'paragraph',
+          content: [{
+            type: 'text',
+            text: text
+          }]
+        }))
+      };
+    }
+    
+    // Standard mode - use Source content with transformations
     if (!editSession.excerpt?.content) return null;
 
     try {
@@ -590,6 +686,28 @@ const App = () => {
   };
 
   // ============================================================================
+  // INCOMPLETE STATUS CACHING (must be before conditional returns for hooks rules)
+  // ============================================================================
+  const cachedIncomplete = variableValuesData?.cachedIncomplete;
+  const isUnpublished = !variableValuesData?.publishedAt;
+  const step1Loaded = !isLoadingVariableValues && variableValuesData;
+  const isEssentialDataLoaded = !isLoadingExcerpt && !isLoadingVariableValues && excerpt;
+  
+  // Cache the incomplete status for faster subsequent loads (only for unpublished Embeds)
+  useEffect(() => {
+    if (isEssentialDataLoaded && isUnpublished && effectiveLocalId && cachedIncomplete === undefined) {
+      // Only cache if we haven't cached yet (cachedIncomplete is undefined)
+      const shouldCache = isEmbedIncomplete(excerpt, variableValuesData?.variableValues, {
+        isFreeformMode: variableValuesData?.isFreeformMode,
+        freeformContent: variableValuesData?.freeformContent
+      });
+      if (shouldCache) {
+        invoke('cacheIncompleteStatus', { localId: effectiveLocalId, isIncomplete: true });
+      }
+    }
+  }, [isEssentialDataLoaded, isUnpublished, effectiveLocalId, cachedIncomplete, excerpt, variableValuesData?.variableValues]);
+
+  // ============================================================================
   // CONDITIONAL RENDERS
   // ============================================================================
 
@@ -627,26 +745,130 @@ const App = () => {
     );
   }
 
-  // View mode loading state
-  if (!content && !isEditing && !isEditingEmbed) {
-    const isLoading = isLoadingCachedContent || isLoadingExcerpt;
+  // ============================================================================
+  // INCOMPLETE STATUS DETECTION
+  // ============================================================================
+  const earlyIncomplete = isEssentialDataLoaded && !inEditMode && isEmbedIncomplete(excerpt, variableValuesData?.variableValues, {
+    isFreeformMode: variableValuesData?.isFreeformMode,
+    freeformContent: variableValuesData?.freeformContent
+  });
+  
+  // Check if freeform mode with content (overrides incomplete status)
+  const hasFreeformContent = variableValuesData?.isFreeformMode && variableValuesData?.freeformContent?.trim();
+  
+  // CACHED INCOMPLETE CHECK: Use cached status for unpublished Embeds
+  // If we have cached incomplete status AND the Embed hasn't been published yet,
+  // AND we have the excerpt loaded (for the source name), show warning immediately.
+  // This skips step 3 (cachedContent) but still needs step 2 (excerpt) for the name.
+  // EXCEPTION: Skip if in freeform mode with content (freeform bypasses variables)
+  if (step1Loaded && cachedIncomplete === true && isUnpublished && !inEditMode && excerpt && !hasFreeformContent) {
     return (
-      <Box xcss={styles2}>
-        <Box xcss={editButtonBorderContainerStyle}>
-          <Inline space="space.100" alignBlock="center">
-            <Button
-              appearance="default"
-              onClick={isLoading ? undefined : () => setIsEditingEmbed(true)}
-              shouldFitContainer={true}
-              iconAfter="chevron-down"
-              isDisabled={isLoading}
-              spacing="compact"
-            >
-              Loading Editor...
-            </Button>
-          </Inline>
+      <EmbedViewMode
+        content={null}
+        isStale={false}
+        isCheckingStaleness={false}
+        showDiffView={false}
+        setShowDiffView={() => {}}
+        handleUpdateToLatest={() => {}}
+        isUpdating={false}
+        syncedContent={null}
+        latestRenderedContent={null}
+        variableValues={variableValuesData?.variableValues || {}}
+        toggleStates={variableValuesData?.toggleStates || {}}
+        excerpt={excerpt}
+        internalNotes={variableValuesData?.internalNotes || []}
+        redlineStatus={variableValuesData?.redlineStatus}
+        approvedBy={variableValuesData?.approvedBy}
+        approvedAt={variableValuesData?.approvedAt}
+        lastChangedBy={variableValuesData?.lastChangedBy}
+        isPublished={false}
+        isIncomplete={true}
+        onEditClick={() => setIsEditingEmbed(true)}
+      />
+    );
+  }
+
+  // EARLY INCOMPLETE CHECK: Detect missing required variables after steps 1+2
+  // Once we have excerpt (step 2) and variableValuesData (step 1) loaded,
+  // immediately check if Embed is incomplete - skips waiting for cachedContent (step 3)
+  if (earlyIncomplete) {
+    return (
+      <EmbedViewMode
+        content={content}
+        isStale={isStale}
+        isCheckingStaleness={isCheckingStaleness}
+        showDiffView={showDiffView}
+        setShowDiffView={setShowDiffView}
+        handleUpdateToLatest={handleUpdateToLatest}
+        isUpdating={isUpdating}
+        syncedContent={syncedContent}
+        latestRenderedContent={latestRenderedContent}
+        variableValues={variableValuesData?.variableValues || {}}
+        toggleStates={variableValuesData?.toggleStates || {}}
+        excerpt={excerpt}
+        internalNotes={variableValuesData?.internalNotes || []}
+        redlineStatus={variableValuesData?.redlineStatus}
+        approvedBy={variableValuesData?.approvedBy}
+        approvedAt={variableValuesData?.approvedAt}
+        lastChangedBy={variableValuesData?.lastChangedBy}
+        isPublished={publishStatus?.isPublished || false}
+        isIncomplete={true}
+        onEditClick={() => setIsEditingEmbed(true)}
+      />
+    );
+  }
+
+  // View mode loading state - only show when actually loading
+  // EXCEPTION: If published or in freeform mode with content, don't treat as incomplete
+  const isPublishedOrFreeform = publishStatus?.isPublished || hasFreeformContent;
+  
+  if (!content && !isEditing && !isEditingEmbed && !isPublishedOrFreeform) {
+    const isLoading = isLoadingCachedContent || isLoadingExcerpt;
+    
+    // If still loading, show loading button
+    if (isLoading) {
+      return (
+        <Box xcss={styles2}>
+          <Box xcss={editButtonBorderContainerStyle}>
+            <Inline space="space.100" alignBlock="center">
+              <Button
+                appearance="default"
+                onClick={undefined}
+                shouldFitContainer={true}
+                iconAfter="chevron-down"
+                isDisabled={true}
+                spacing="compact"
+              >
+                Loading Editor...
+              </Button>
+            </Inline>
+          </Box>
         </Box>
-      </Box>
+      );
+    }
+    
+    // Loading done but no content = unpublished Embed
+    // Pass to EmbedViewMode with isIncomplete=true to show "under construction" UI
+    // This handles freshly deployed Embeds that haven't been published yet
+    return (
+      <EmbedViewMode
+        content={null}
+        isStale={false}
+        isCheckingStaleness={false}
+        showDiffView={false}
+        setShowDiffView={() => {}}
+        handleUpdateToLatest={() => {}}
+        isUpdating={false}
+        syncedContent={null}
+        latestRenderedContent={null}
+        variableValues={{}}
+        toggleStates={{}}
+        excerpt={excerpt}
+        internalNotes={[]}
+        isPublished={false}
+        isIncomplete={true}
+        onEditClick={() => setIsEditingEmbed(true)}
+      />
     );
   }
 
@@ -714,6 +936,15 @@ const App = () => {
           setValue={editSession.setValue}
           formKey={editSession.formKey}
           customHeading={editSession.customHeading}
+          complianceLevel={editSession.complianceLevel}
+          // Freeform mode props
+          isFreeformMode={watchedIsFreeformMode}
+          freeformContent={watchedFreeformContent}
+          // Form values for freeform modal warning check
+          variableValues={watchedVariableValues}
+          toggleStates={watchedToggleStates}
+          customInsertions={watchedCustomInsertions}
+          internalNotes={watchedInternalNotes}
           insertionType={insertionType}
           setInsertionType={setInsertionType}
           selectedPosition={selectedPosition}
@@ -744,6 +975,13 @@ const App = () => {
   // ============================================================================
   // VIEW MODE
   // ============================================================================
+  
+  // Check if Embed is incomplete (missing required variable values)
+  const incomplete = isEmbedIncomplete(excerpt, variableValuesData?.variableValues, {
+    isFreeformMode: variableValuesData?.isFreeformMode,
+    freeformContent: variableValuesData?.freeformContent
+  });
+  
   return (
     <EmbedViewMode
       content={content}
@@ -764,6 +1002,7 @@ const App = () => {
       approvedAt={variableValuesData?.approvedAt}
       lastChangedBy={variableValuesData?.lastChangedBy}
       isPublished={publishStatus?.isPublished || false}
+      isIncomplete={incomplete}
       onEditClick={() => setIsEditingEmbed(true)}
     />
   );

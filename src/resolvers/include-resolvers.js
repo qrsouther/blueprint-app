@@ -36,7 +36,7 @@ import { createErrorResponse, ERROR_CODES } from '../utils/error-codes.js';
 export async function saveVariableValues(req) {
   const functionStartTime = Date.now();
   try {
-    const { localId, excerptId, variableValues, toggleStates, customInsertions, internalNotes, customHeading, pageId: explicitPageId } = req.payload;
+    const { localId, excerptId, variableValues, toggleStates, customInsertions, internalNotes, customHeading, complianceLevel, isFreeformMode, freeformContent, pageId: explicitPageId } = req.payload;
     
     // Input validation
     if (!localId || typeof localId !== 'string' || localId.trim() === '') {
@@ -159,6 +159,9 @@ export async function saveVariableValues(req) {
       customInsertions: customInsertions || [],
       internalNotes: internalNotes || [],
       customHeading: customHeading || '',  // Custom chapter heading override
+      complianceLevel: complianceLevel || null,  // Compliance level (Standard, Bespoke, etc.)
+      isFreeformMode: isFreeformMode || false,  // Freeform content mode (bypasses Source structure)
+      freeformContent: freeformContent || '',  // Raw freeform content text
       updatedAt: now,
       lastSynced: now,  // Track when this Include instance last synced with Source
       syncedContentHash,  // Store hash of the content at sync time for staleness detection

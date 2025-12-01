@@ -87,7 +87,7 @@ export async function injectContentPOC(req) {
 <ac:structured-macro ac:name="expand" ac:schema-version="1" ac:macro-id="injected-${macroId}">
   <ac:parameter ac:name="title">📄 Injected Content (POC)</ac:parameter>
   <ac:rich-text-body>
-    <p><strong>Hello World!</strong></p>
+    <p><Strong>Hello World!</Strong></p>
     <p>This content was injected directly into the page via REST API.</p>
     <p>Content from payload: ${content || 'None provided'}</p>
     <p><em>Generated at: ${new Date().toISOString()}</em></p>

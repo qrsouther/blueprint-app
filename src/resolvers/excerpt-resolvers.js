@@ -25,7 +25,7 @@ export async function saveExcerpt(req) {
   logFunction('saveExcerpt', 'Starting save operation', { excerptId: req.payload.excerptId, excerptName: req.payload.excerptName });
 
   // Input validation
-  const { excerptName, category, content, excerptId, variableMetadata, toggleMetadata, documentationLinks, sourcePageId, sourceSpaceKey, sourceLocalId } = req.payload;
+  const { excerptName, category, content, excerptId, variableMetadata, toggleMetadata, documentationLinks, sourcePageId, sourceSpaceKey, sourceLocalId, bespoke } = req.payload;
 
   // Validate required fields
   if (!excerptName || typeof excerptName !== 'string' || excerptName.trim() === '') {
@@ -174,6 +174,7 @@ export async function saveExcerpt(req) {
     id: id,
     name: excerptName,
     category: category || 'General',
+    bespoke: bespoke !== undefined ? bespoke : (existingExcerpt?.bespoke || false),
     content: contentToProcess,
     variables: variables,
     toggles: toggles,
@@ -236,6 +237,7 @@ export async function saveExcerpt(req) {
       excerptId: id,
       excerptName: excerptName,
       category: category,
+      bespoke: excerpt.bespoke,
       content: content,
       variables: variables,
       toggles: toggles,

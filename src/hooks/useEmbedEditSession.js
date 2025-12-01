@@ -36,7 +36,10 @@ const DEFAULT_FORM_VALUES = {
   toggleStates: {},
   customInsertions: [],
   internalNotes: [],
-  customHeading: '' // Empty means use source name as default
+  customHeading: '', // Empty means use source name as default
+  complianceLevel: null, // null means auto-select based on Source's bespoke property
+  isFreeformMode: false, // Flag indicating freeform mode is active (for non-standard/tbd/na - bypasses Source structure)
+  freeformContent: '' // Raw text content user writes in freeform mode
 };
 
 /**
@@ -52,7 +55,10 @@ function normalizeFormData(data) {
     toggleStates: data.toggleStates || {},
     customInsertions: Array.isArray(data.customInsertions) ? data.customInsertions : [],
     internalNotes: Array.isArray(data.internalNotes) ? data.internalNotes : [],
-    customHeading: data.customHeading || ''
+    customHeading: data.customHeading || '',
+    complianceLevel: data.complianceLevel || null,
+    isFreeformMode: data.isFreeformMode || false,
+    freeformContent: data.freeformContent || ''
   };
 }
 
@@ -118,6 +124,9 @@ export const useEmbedEditSession = (localId, options = {}) => {
   const customInsertions = useWatch({ control, name: 'customInsertions' }) || [];
   const internalNotes = useWatch({ control, name: 'internalNotes' }) || [];
   const customHeading = useWatch({ control, name: 'customHeading' }) || '';
+  const complianceLevel = useWatch({ control, name: 'complianceLevel' });
+  const isFreeformMode = useWatch({ control, name: 'isFreeformMode' }) || false;
+  const freeformContent = useWatch({ control, name: 'freeformContent' }) || '';
   
   // ============================================================================
   // REACT QUERY - Initial Data Load (One-Time)
@@ -312,7 +321,10 @@ export const useEmbedEditSession = (localId, options = {}) => {
         variableValues: normalizeVariableValues(preservedVariableValues),
         toggleStates: {}, // Reset toggles - they may be different per Source
         customInsertions: currentValues.customInsertions, // Keep custom insertions
-        internalNotes: currentValues.internalNotes // Keep internal notes
+        internalNotes: currentValues.internalNotes, // Keep internal notes
+        complianceLevel: null, // Reset - will auto-select based on new Source's bespoke property
+        isFreeformMode: false, // Reset freeform mode when switching Sources
+        freeformContent: '' // Clear freeform content when switching Sources
       });
       
       // Update excerpt ID
@@ -330,7 +342,10 @@ export const useEmbedEditSession = (localId, options = {}) => {
         variableValues: preservedVariableValues,
         toggleStates: {},
         customInsertions: currentValues.customInsertions,
-        internalNotes: currentValues.internalNotes
+        internalNotes: currentValues.internalNotes,
+        complianceLevel: null, // Reset - will auto-select based on new Source's bespoke property
+        isFreeformMode: false, // Reset freeform mode when switching Sources
+        freeformContent: '' // Clear freeform content when switching Sources
       });
       
       // Track usage
@@ -383,7 +398,10 @@ export const useEmbedEditSession = (localId, options = {}) => {
         toggleStates: values.toggleStates,
         customInsertions: values.customInsertions,
         internalNotes: values.internalNotes,
-        customHeading: values.customHeading || ''
+        customHeading: values.customHeading || '',
+        complianceLevel: values.complianceLevel || null,
+        isFreeformMode: values.isFreeformMode || false,
+        freeformContent: values.freeformContent || ''
       });
       
       // Don't clear localStorage - it's backup until next Publish
@@ -437,7 +455,10 @@ export const useEmbedEditSession = (localId, options = {}) => {
         toggleStates: values.toggleStates,
         customInsertions: values.customInsertions,
         internalNotes: values.internalNotes,
-        customHeading: headingValue
+        customHeading: headingValue,
+        complianceLevel: values.complianceLevel || null,
+        isFreeformMode: values.isFreeformMode || false,
+        freeformContent: values.freeformContent || ''
       };
       
       // Save to Forge storage first
@@ -619,6 +640,9 @@ export const useEmbedEditSession = (localId, options = {}) => {
     customInsertions,
     internalNotes,
     customHeading,
+    complianceLevel,
+    isFreeformMode,
+    freeformContent,
     
     // Excerpt/Source
     excerptId,

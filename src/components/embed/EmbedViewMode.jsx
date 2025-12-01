@@ -51,7 +51,9 @@ import {
   Heading,
   Button,
   Icon,
-  Spinner
+  Spinner,
+  Strong,
+  SectionMessage
 } from '@forge/react';
 
 // Subtle border wrapper that appears only when stale
@@ -107,6 +109,7 @@ export function EmbedViewMode({
   lastChangedBy,
   // Compositor + Native Injection model props
   isPublished = false,
+  isIncomplete = false,
   onRepublish,
   // Locked Page Model props
   onEditClick
@@ -120,6 +123,45 @@ export function EmbedViewMode({
     setShowUpdateBanner(true);
     setShowDiffView(true);
   };
+
+  // ============================================================================
+  // INCOMPLETE EMBED: Show placeholder when required variables are missing
+  // ============================================================================
+  // When an Embed has unfilled required variables, show a placeholder instead
+  // of blank content. This appears for both published and unpublished states.
+  if (isIncomplete) {
+    const sourceName = excerpt?.name || 'Untitled';
+    return (
+      <Box xcss={xcss({ padding: 'space.050' })}>
+        {/* Edit button */}
+        {onEditClick && (
+          <Box xcss={editButtonBorderContainerStyle}>
+            <Button 
+              appearance="default" 
+              onClick={onEditClick}
+              shouldFitContainer={true}
+              iconAfter="chevron-down"
+              spacing="compact"
+            >
+              Edit the chapter below
+            </Button>
+          </Box>
+        )}
+        
+        {/* Source name heading */}
+        <Box xcss={xcss({ marginTop: 'space.150', marginBottom: 'space.100' })}>
+          <Heading size="medium">{sourceName}</Heading>
+        </Box>
+        
+        {/* Warning message */}
+        <SectionMessage appearance="warning">
+          <Text>
+            The <Strong>{sourceName}</Strong> chapter of this Blueprint is currently being drafted. Check back later.
+          </Text>
+        </SectionMessage>
+      </Box>
+    );
+  }
 
   // ============================================================================
   // COMPOSITOR MODEL: Minimal UI when content is published natively

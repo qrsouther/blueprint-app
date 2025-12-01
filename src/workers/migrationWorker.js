@@ -170,7 +170,7 @@ export async function handler(event) {
       const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
       const pageTitle = `Blueprint Standards (Migrated ${timestamp})`;
 
-      let pageContent = `<p><strong>Blueprint Standards - Migrated from MultiExcerpt</strong></p>`;
+      let pageContent = `<p><Strong>Blueprint Standards - Migrated from MultiExcerpt</Strong></p>`;
       pageContent += `<p>${imported.length} Blueprint Standards imported.</p><hr />`;
 
       // Create actual Source macros with content

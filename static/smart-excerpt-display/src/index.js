@@ -101,7 +101,7 @@ function updateVariablePreview() {
 
     if (variables.length > 0) {
         preview.style.display = 'block';
-        preview.innerHTML = '<strong>Detected variables:</strong> ' + variables.join(', ');
+        preview.innerHTML = '<Strong>Detected variables:</Strong> ' + variables.join(', ');
     } else {
         preview.style.display = 'none';
     }

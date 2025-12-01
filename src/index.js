@@ -39,7 +39,9 @@ import {
   bulkUpdateStorage as bulkUpdateStorageResolver,
   getAdminUrl as getAdminUrlResolver,
   setAdminUrl as setAdminUrlResolver,
-  getForgeEnvironment as getForgeEnvironmentResolver
+  getForgeEnvironment as getForgeEnvironmentResolver,
+  backfillBespokeProperty as backfillBespokePropertyResolver,
+  cacheIncompleteStatus as cacheIncompleteStatusResolver
 } from './resolvers/simple-resolvers.js';
 
 // Import excerpt CRUD resolver functions (Phase 3 modularization)
@@ -155,12 +157,16 @@ import {
   createArchetype as createArchetypeResolver,
   updateArchetype as updateArchetypeResolver,
   updateArchetypeSourceDefaults as updateArchetypeSourceDefaultsResolver,
+  updateArchetypeSourceOrder as updateArchetypeSourceOrderResolver,
+  removeArchetypeSource as removeArchetypeSourceResolver,
   copyArchetype as copyArchetypeResolver,
   deleteArchetype as deleteArchetypeResolver,
   getArchetypeChapters as getArchetypeChaptersResolver,
   toggleChapter as toggleChapterResolver,
   bulkPublishChapters as bulkPublishChaptersResolver,
-  initializePageWithArchetype as initializePageWithArchetypeResolver
+  initializePageWithArchetype as initializePageWithArchetypeResolver,
+  scanPageForMacros as scanPageForMacrosResolver,
+  deployArchetype as deployArchetypeResolver
 } from './resolvers/compositor-resolvers.js';
 
 // ⚠️ ONE-TIME USE MIGRATION FUNCTIONS - DELETE AFTER PRODUCTION MIGRATION ⚠️
@@ -354,6 +360,12 @@ resolver.define('manuallySoftDeleteEmbed', manuallySoftDeleteEmbedResolver);
 
 // Backfill redline fields for existing Embeds (one-time migration)
 resolver.define('backfillRedlineFields', backfillRedlineFieldsResolver);
+
+// Backfill bespoke property on all Sources (one-time migration)
+resolver.define('backfillBespokeProperty', backfillBespokePropertyResolver);
+
+// Cache incomplete status for faster unpublished Embed detection
+resolver.define('cacheIncompleteStatus', cacheIncompleteStatusResolver);
 
 // ============================================================================
 // MIGRATION RESOLVERS (Phase 4 modularization)
@@ -1068,6 +1080,12 @@ resolver.define('updateArchetype', updateArchetypeResolver);
 // Update source defaults for an archetype
 resolver.define('updateArchetypeSourceDefaults', updateArchetypeSourceDefaultsResolver);
 
+// Update source order for an archetype
+resolver.define('updateArchetypeSourceOrder', updateArchetypeSourceOrderResolver);
+
+// Remove a source from an archetype
+resolver.define('removeArchetypeSource', removeArchetypeSourceResolver);
+
 // Copy an archetype
 resolver.define('copyArchetype', copyArchetypeResolver);
 
@@ -1085,5 +1103,11 @@ resolver.define('bulkPublishChapters', bulkPublishChaptersResolver);
 
 // Initialize a page with a selected archetype
 resolver.define('initializePageWithArchetype', initializePageWithArchetypeResolver);
+
+// Scan page for existing Blueprint macros
+resolver.define('scanPageForMacros', scanPageForMacrosResolver);
+
+// Deploy an archetype to a page
+resolver.define('deployArchetype', deployArchetypeResolver);
 
 export const handler = resolver.getDefinitions();

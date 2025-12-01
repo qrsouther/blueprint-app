@@ -69,9 +69,11 @@ import {
   AdfRenderer,
   Lozenge,
   SectionMessage,
-  InlineEdit,
+  Pressable,
   ButtonGroup,
   Textfield,
+  TextArea,
+  Label,
   Tooltip,
   ProgressBar,
   xcss
@@ -82,6 +84,7 @@ import { ToggleConfigPanel } from '../ToggleConfigPanel';
 import { CustomInsertionsPanel } from '../CustomInsertionsPanel';
 import { DocumentationLinksDisplay } from './DocumentationLinksDisplay';
 import { CompositorModal } from '../compositor/CompositorModal';
+import { FreeformContentConfirmModal } from './FreeformContentConfirmModal';
 import { logger } from '../../utils/logger.js';
 import {
   excerptSelectorStyle,
@@ -103,6 +106,15 @@ export function EmbedEditMode({
   setValue,
   formKey,
   customHeading, // From form, not local state
+  complianceLevel, // From form - compliance level selection
+  // Freeform mode props
+  isFreeformMode = false, // From form - whether in freeform content mode
+  freeformContent = '', // From form - raw freeform content text
+  // Form values needed for freeform modal warning check
+  variableValues = {},
+  toggleStates = {},
+  customInsertions = [],
+  internalNotes = [],
   insertionType,
   setInsertionType,
   selectedPosition,
@@ -127,11 +139,50 @@ export function EmbedEditMode({
 }) {
   const [copySuccess, setCopySuccess] = useState(false);
   const [isCompositorModalOpen, setIsCompositorModalOpen] = useState(false);
+  const [isEditingHeading, setIsEditingHeading] = useState(false);
+  const [editingHeadingValue, setEditingHeadingValue] = useState('');
   const previousExcerptNameRef = useRef(excerpt?.name);
+  
+  // Freeform content modal state
+  const [isFreeformModalOpen, setIsFreeformModalOpen] = useState(false);
+  const [pendingComplianceLevel, setPendingComplianceLevel] = useState(null);
 
   // Get localId and pageId from context
   const localId = context?.localId || context?.extension?.localId;
   const pageId = context?.contentId || context?.extension?.content?.id;
+
+  // Build compliance level options based on Source's bespoke property
+  // Only show Standard when bespoke=false, only show Bespoke when bespoke=true
+  const isBespoke = excerpt?.bespoke || false;
+  
+  // Map compliance level to Lozenge appearance
+  const complianceAppearanceMap = {
+    'standard': 'success',
+    'bespoke': 'new',
+    'semi-standard': 'moved',
+    'non-standard': 'removed',
+    'tbd': 'default',
+    'na': 'default'
+  };
+  
+  // Build options with color circle emojis and Title Case labels
+  // Values injected into Lozenges will be ALL CAPS
+  const complianceLevelOptions = [
+    // Conditional options based on bespoke
+    ...(isBespoke 
+      ? [{ label: '🟣 Bespoke', value: 'bespoke', appearance: 'new' }]
+      : [{ label: '🟢 Standard', value: 'standard', appearance: 'success' }]
+    ),
+    // Always available options
+    { label: '🟡 Semi-Standard', value: 'semi-standard', appearance: 'moved' },
+    { label: '🔴 Non-Standard', value: 'non-standard', appearance: 'removed' },
+    { label: '⚪ TBD', value: 'tbd', appearance: 'default' },
+    { label: '⚪ N/A', value: 'na', appearance: 'default' }
+  ];
+  
+  // Get the default compliance level based on bespoke
+  const defaultComplianceLevel = isBespoke ? 'bespoke' : 'standard';
+  const effectiveComplianceLevel = complianceLevel || defaultComplianceLevel;
 
   // Initialize ref on mount
   useEffect(() => {
@@ -258,6 +309,34 @@ export function EmbedEditMode({
     }
   };
 
+  // Handler for freeform modal - user chose "No, keep the Embed"
+  const handleFreeformModalClose = () => {
+    setIsFreeformModalOpen(false);
+    setPendingComplianceLevel(null);
+    // Don't change compliance level - keep current value
+  };
+
+  // Handler for freeform modal - user chose "Yes, write my own"
+  const handleFreeformModalConfirm = () => {
+    if (pendingComplianceLevel) {
+      // Set the compliance level
+      setValue('complianceLevel', pendingComplianceLevel, { shouldDirty: true });
+      // Enable freeform mode
+      setValue('isFreeformMode', true, { shouldDirty: true });
+      // Clear existing config (variables, toggles, custom insertions, internal notes)
+      setValue('variableValues', {}, { shouldDirty: true });
+      setValue('toggleStates', {}, { shouldDirty: true });
+      setValue('customInsertions', [], { shouldDirty: true });
+      setValue('internalNotes', [], { shouldDirty: true });
+      // Trigger draft save
+      if (onBlur) {
+        setTimeout(() => onBlur(), 0);
+      }
+    }
+    setIsFreeformModalOpen(false);
+    setPendingComplianceLevel(null);
+  };
+
   return (
     <Stack space="space.100">
       {/* Top Section - Single Inline with Source Selector, Status, and ButtonGroup */}
@@ -380,68 +459,120 @@ export function EmbedEditMode({
         </SectionMessage>
       )}
 
-      <Tabs 
-        onChange={(index) => setSelectedTabIndex(index)}
-        selected={selectedTabIndex ?? 1}
-        id="embed-edit-tabs"
-      >
-        <TabList>
-          {hasToggles ? (
+      {/* Conditional: Show Freeform UI or Standard Tabs */}
+      {isFreeformMode ? (
+        /* Freeform Content Mode UI */
+        <Stack space="space.200">
+          <SectionMessage appearance="information" title="Freeform Content Mode">
+            <Text>
+              You are writing fully custom content for this chapter. The standardized 
+              Source structure (toggles, variables) is not being used.
+            </Text>
+          </SectionMessage>
+          
+          <Stack space="space.100">
+            <Label labelFor="freeform-content">Your Custom Content</Label>
+            <TextArea
+              id="freeform-content"
+              name="freeformContent"
+              placeholder="Write your custom content here. This will be published as the entire body of this chapter..."
+              value={freeformContent}
+              onChange={(e) => {
+                setValue('freeformContent', e.target.value, { shouldDirty: true });
+              }}
+              onBlur={() => {
+                if (onBlur) {
+                  onBlur();
+                }
+              }}
+              minimumRows={8}
+              resize="vertical"
+            />
+          </Stack>
+          
+          <Inline space="space.100" alignBlock="center">
+            <Button
+              appearance="subtle"
+              onClick={() => {
+                // Exit freeform mode but keep compliance level
+                setValue('isFreeformMode', false, { shouldDirty: true });
+                if (onBlur) {
+                  setTimeout(() => onBlur(), 0);
+                }
+              }}
+            >
+              Exit Freeform Mode
+            </Button>
+            <Text size="small" color="color.text.subtle">
+              (Returns to standard Embed editing)
+            </Text>
+          </Inline>
+        </Stack>
+      ) : (
+        /* Standard Tabs UI */
+        <Tabs 
+          onChange={(index) => setSelectedTabIndex(index)}
+          selected={selectedTabIndex ?? 1}
+          id="embed-edit-tabs"
+        >
+          <TabList>
+            {hasToggles ? (
+              <Tab>
+                <Heading size="medium" color="color.text.subtler">Toggles
+                </Heading>
+              </Tab>
+            ) : (
+              <Tooltip content="No Toggles defined for this Source.">
+                <Tab>
+                  <Heading size="medium" color="color.text.subtle">Toggles</Heading>
+                </Tab>
+              </Tooltip>
+            )}
             <Tab>
-              <Heading size="medium" color="color.text.subtler">Toggles
+              <Heading size="medium" color="color.text.subtle">Write</Heading>
+            </Tab>
+            <Tab>
+              <Heading size="medium" color="color.text.subtle">Custom
               </Heading>
             </Tab>
-          ) : (
-            <Tooltip content="No Toggles defined for this Source.">
-              <Tab>
-                <Heading size="medium" color="color.text.subtle">Toggles</Heading>
-              </Tab>
-            </Tooltip>
-          )}
-          <Tab>
-            <Heading size="medium" color="color.text.subtle">Write</Heading>
-          </Tab>
-          <Tab>
-            <Heading size="medium" color="color.text.subtle">Custom
-            </Heading>
-          </Tab>
-        </TabList>
-        {/* Toggles Tab */}
-        <TabPanel>
-          <ToggleConfigPanel
-            excerpt={excerpt}
-            control={control}
-            setValue={setValue}
-            onBlur={onBlur}
-          />
-        </TabPanel>
+          </TabList>
+          {/* Toggles Tab */}
+          <TabPanel>
+            <ToggleConfigPanel
+              excerpt={excerpt}
+              control={control}
+              setValue={setValue}
+              onBlur={onBlur}
+            />
+          </TabPanel>
 
-        {/* Write Tab - Variables */}
-        <TabPanel>
-          <VariableConfigPanel
-            excerpt={excerpt}
-            control={control}
-            setValue={setValue}
-            formKey={formKey}
-            onBlur={onBlur}
-          />
-        </TabPanel>
+          {/* Write Tab - Variables */}
+          <TabPanel>
+            <VariableConfigPanel
+              excerpt={excerpt}
+              control={control}
+              setValue={setValue}
+              formKey={formKey}
+              onBlur={onBlur}
+            />
+          </TabPanel>
 
-        {/* Custom Tab - Custom paragraph insertions and internal notes */}
-        <TabPanel>
-          <CustomInsertionsPanel
-            excerpt={excerpt}
-            control={control}
-            insertionType={insertionType}
-            setInsertionType={setInsertionType}
-            selectedPosition={selectedPosition}
-            setSelectedPosition={setSelectedPosition}
-            customText={customText}
-            setCustomText={setCustomText}
-            onBlur={onBlur}
-          />
-        </TabPanel>
-      </Tabs>
+          {/* Custom Tab - Custom paragraph insertions and internal notes */}
+          <TabPanel>
+            <CustomInsertionsPanel
+              excerpt={excerpt}
+              control={control}
+              insertionType={insertionType}
+              setInsertionType={setInsertionType}
+              selectedPosition={selectedPosition}
+              setSelectedPosition={setSelectedPosition}
+              customText={customText}
+              setCustomText={setCustomText}
+              onBlur={onBlur}
+            />
+          </TabPanel>
+        </Tabs>
+      )}
 
       {/* Preview - Always visible below tabs */}
       <Stack space="space.0">
@@ -455,48 +586,100 @@ export function EmbedEditMode({
           paddingBottom: 'space.0'
         })}>
           <Stack space="space.0">
-            {/* Chapter Heading - Editable above Preview */}
+            {/* Chapter Heading with Compliance Level - Editable above Preview */}
             {excerpt && (
               <Box xcss={xcss({ 
-                margin: 'space.0',
-                paddingLeft: 'space.150'
+                marginBottom: 'space.100',
+                paddingLeft: 'space.150',
+                paddingTop: 'space.100'
                 })}
                 >
-                <Inline space="space.025" alignBlock="baseline" alignInline="start">
-                  <Icon glyph="edit" label="Edit heading" size="medium" />
-                  <InlineEdit
-                    defaultValue={customHeading || excerpt?.name || ''}
-                    editView={({ errorMessage, ...fieldProps }) => (
-                      <Textfield 
-                        {...fieldProps} 
-                        autoFocus 
-                        placeholder="Enter chapter heading..."
-                        onBlur={(e) => {
-                          // Call the original onBlur from fieldProps if exists
-                          if (fieldProps.onBlur) fieldProps.onBlur(e);
-                          // Then call our draft save handler
-                          if (onBlur) onBlur();
+                <Inline space="space.100" alignBlock="center" alignInline="start">
+                  {/* Compliance Level Select with color emoji indicators */}
+                  <Box xcss={xcss({ width: '250px', paddingBottom: 'space.100' })}>
+                    <Select
+                      inputId="compliance-level-select"
+                      options={complianceLevelOptions}
+                      value={complianceLevelOptions.find(opt => opt.value === effectiveComplianceLevel)}
+                      onChange={(selected) => {
+                        const newLevel = selected.value;
+                        const freeformTriggerLevels = ['non-standard', 'tbd', 'na'];
+                        
+                        // Check if selecting a freeform-trigger level
+                        if (freeformTriggerLevels.includes(newLevel)) {
+                          // Store pending level and open confirmation modal
+                          setPendingComplianceLevel(newLevel);
+                          setIsFreeformModalOpen(true);
+                        } else {
+                          // Standard/bespoke/semi-standard - set directly and exit freeform mode if active
+                          setValue('complianceLevel', newLevel, { shouldDirty: true });
+                          if (isFreeformMode) {
+                            setValue('isFreeformMode', false, { shouldDirty: true });
+                          }
+                          if (onBlur) {
+                            setTimeout(() => onBlur(), 0);
+                          }
+                        }
+                      }}
+                      spacing="compact"
+                      isSearchable={false}
+                      menuPlacement="auto"
+                    />
+                  </Box>
+                  {/* Custom editable heading - Pressable switches to Textfield on click */}
+                  {isEditingHeading ? (
+                    <Inline space="space.050" alignBlock="center">
+                      <Box xcss={xcss({ minWidth: '400px', flexGrow: '1' })}>
+                        <Textfield
+                          value={editingHeadingValue}
+                          onChange={(e) => setEditingHeadingValue(e.target.value)}
+                          placeholder="Enter chapter heading..."
+                          autoFocus
+                        />
+                      </Box>
+                      <Button
+                        appearance="subtle"
+                        iconBefore="check-circle"
+                        onClick={() => {
+                          // Save the new heading value
+                          const headingValue = editingHeadingValue || '';
+                          setValue('customHeading', headingValue, { shouldDirty: true });
+                          setIsEditingHeading(false);
+                          // Trigger draft save
+                          if (onBlur) {
+                            setTimeout(() => onBlur(), 0);
+                          }
                         }}
                       />
-                    )}
-                    readView={() => (
-                      <Box xcss={xcss({ padding: 'space.0', margin: 'space.0' })}>
+                      <Button
+                        appearance="subtle"
+                        iconBefore="cross-circle"
+                        onClick={() => {
+                          // Cancel editing without saving
+                          setIsEditingHeading(false);
+                          setEditingHeadingValue(customHeading || excerpt?.name || '');
+                        }}
+                      />
+                    </Inline>
+                  ) : (
+                    <Pressable
+                      onClick={() => {
+                        setEditingHeadingValue(customHeading || excerpt?.name || '');
+                        setIsEditingHeading(true);
+                      }}
+                      xcss={xcss({
+                        backgroundColor: 'color.background.neutral.subtle',
+                        padding: 'space.050',
+                        borderRadius: 'border.radius.100',
+                        cursor: 'pointer'
+                      })}
+                    >
+                      <Inline space="space.050" alignBlock="center">
                         <Heading size="large">{customHeading || excerpt?.name || ''}</Heading>
-                      </Box>
-                    )}
-                    onConfirm={(value) => {
-                      // If user clears the field, use empty string (will fallback to excerpt.name on publish)
-                      const headingValue = value !== null && value !== undefined ? value : '';
-                      setValue('customHeading', headingValue, { shouldDirty: true });
-                      // Trigger blur save after heading change is confirmed
-                      // Use setTimeout to ensure form state has updated
-                      if (onBlur) {
-                        setTimeout(() => {
-                          onBlur();
-                        }, 0);
-                      }
-                    }}
-                  />
+                        <Text>✏️</Text>
+                      </Inline>
+                    </Pressable>
+                  )}
                 </Inline>
               </Box>
             )}
@@ -520,6 +703,19 @@ export function EmbedEditMode({
           pageId={pageId}
         />
       )}
+
+      {/* Freeform Content Confirmation Modal */}
+      <FreeformContentConfirmModal
+        isOpen={isFreeformModalOpen}
+        onClose={handleFreeformModalClose}
+        onConfirm={handleFreeformModalConfirm}
+        sourceName={excerpt?.name}
+        complianceLevel={pendingComplianceLevel}
+        variableValues={variableValues}
+        toggleStates={toggleStates}
+        customInsertions={customInsertions}
+        internalNotes={internalNotes}
+      />
     </Stack>
   );
 }

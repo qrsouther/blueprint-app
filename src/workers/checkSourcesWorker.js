@@ -65,10 +65,23 @@ export async function handler(event) {
     // Load all excerpts and group by page to minimize API calls
     const excerptsByPage = new Map(); // pageId -> [excerpts]
     const skippedExcerpts = [];
+    let bespokeBackfillCount = 0;
 
     for (const excerptSummary of excerptIndex.excerpts) {
       const excerpt = await storage.get(`excerpt:${excerptSummary.id}`);
       if (!excerpt) continue;
+
+      // BACKFILL: Set bespoke to false if undefined or null
+      // This ensures all Sources have an explicit bespoke property
+      if (excerpt.bespoke === undefined || excerpt.bespoke === null) {
+        excerpt.bespoke = false;
+        await storage.set(`excerpt:${excerptSummary.id}`, excerpt);
+        bespokeBackfillCount++;
+        logPhase('checkSourcesWorker', 'Backfilled bespoke property', { 
+          excerptId: excerptSummary.id, 
+          excerptName: excerpt.name 
+        });
+      }
 
       // Skip if this excerpt doesn't have page info
       if (!excerpt.sourcePageId || !excerpt.sourceLocalId) {
@@ -84,7 +97,8 @@ export async function handler(event) {
 
     logPhase('checkSourcesWorker', 'Grouped excerpts by page', {
       totalPages: excerptsByPage.size,
-      skippedCount: skippedExcerpts.length
+      skippedCount: skippedExcerpts.length,
+      bespokeBackfillCount
     });
 
     await updateProgress(progressId, {
@@ -390,6 +404,9 @@ export async function handler(event) {
     if (contentConversionsCount > 0) {
       statusMessage += `, ${contentConversionsCount} converted to ADF`;
     }
+    if (bespokeBackfillCount > 0) {
+      statusMessage += `, ${bespokeBackfillCount} backfilled with bespoke:false`;
+    }
 
     const finalResults = {
       orphanedSources,
@@ -397,6 +414,7 @@ export async function handler(event) {
       activeCount: checkedSources.length,
       staleEntriesRemoved: 0, // Not running cleanup
       contentConversionsCount,
+      bespokeBackfillCount,
       completedAt: new Date().toISOString()
     };
 
@@ -410,6 +428,7 @@ export async function handler(event) {
       activeCount: checkedSources.length,
       orphanedCount: orphanedSources.length,
       contentConversionsCount,
+      bespokeBackfillCount,
       results: finalResults
     });
 
@@ -418,7 +437,8 @@ export async function handler(event) {
       duration: `${Date.now() - functionStartTime}ms`,
       activeCount: checkedSources.length,
       orphanedCount: orphanedSources.length,
-      conversionsCount: contentConversionsCount
+      conversionsCount: contentConversionsCount,
+      bespokeBackfillCount
     });
 
     return {
@@ -428,7 +448,8 @@ export async function handler(event) {
         checkedCount: checkedSources.length + orphanedSources.length,
         activeCount: checkedSources.length,
         orphanedCount: orphanedSources.length,
-        contentConversionsCount
+        contentConversionsCount,
+        bespokeBackfillCount
       }
     };
 

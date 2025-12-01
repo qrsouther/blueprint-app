@@ -333,6 +333,9 @@ export async function getVariableValues(req) {
         customInsertions: data.customInsertions || [],
         internalNotes: data.internalNotes || [],
         customHeading: data.customHeading || '',  // Custom chapter heading override
+        complianceLevel: data.complianceLevel || null,  // Compliance level (Standard, Bespoke, Semi-Standard, etc.)
+        isFreeformMode: data.isFreeformMode || false,  // Freeform content mode (bypasses Source structure)
+        freeformContent: data.freeformContent || '',  // Raw freeform content text
         lastSynced: data.lastSynced,
         excerptId: data.excerptId,
         syncedContentHash: data.syncedContentHash,  // Hash for staleness detection (non-published)
@@ -340,6 +343,7 @@ export async function getVariableValues(req) {
         publishedSourceContentHash: data.publishedSourceContentHash,  // Source's contentHash at publish time (for published content staleness detection)
         publishedSourceContent: data.publishedSourceContent,  // Source's ADF content at publish time (for diff view when published)
         publishedAt: data.publishedAt,  // When content was published
+        cachedIncomplete: data.cachedIncomplete,  // Cached incomplete status for fast unpublished Embed detection
         redlineStatus: data.redlineStatus || 'reviewable',  // Redline approval status
         approvedBy: data.approvedBy,
         approvedAt: data.approvedAt,
@@ -1746,5 +1750,147 @@ export async function bulkUpdateStorage(req) {
       failed: 0,
       errors: []
     };
+  }
+}
+
+/**
+ * Backfill bespoke property on all existing Sources
+ *
+ * Iterates through all Sources in the excerpt-index and adds bespoke: false
+ * to any Source that doesn't already have the property defined.
+ *
+ * This is a one-time migration utility to ensure all Sources have the bespoke
+ * property after the feature is introduced.
+ *
+ * @returns {Promise<Object>} Result with { success, updated, skipped, errors }
+ */
+export async function backfillBespokeProperty(req) {
+  logFunction('backfillBespokeProperty', 'START', {});
+
+  const results = {
+    updated: 0,
+    skipped: 0,
+    errors: []
+  };
+
+  try {
+    // Get the excerpt index
+    const index = await storage.get('excerpt-index') || { excerpts: [] };
+
+    if (!index.excerpts || index.excerpts.length === 0) {
+      logSuccess('backfillBespokeProperty', 'No excerpts to backfill', { updated: 0 });
+      return {
+        success: true,
+        data: {
+          updated: 0,
+          skipped: 0,
+          errors: []
+        }
+      };
+    }
+
+    logPhase('backfillBespokeProperty', 'Processing excerpts', { count: index.excerpts.length });
+
+    for (const { id } of index.excerpts) {
+      try {
+        const excerpt = await storage.get(`excerpt:${id}`);
+
+        if (!excerpt) {
+          results.errors.push({ id, error: 'Excerpt not found in storage' });
+          continue;
+        }
+
+        // Check if bespoke property already exists
+        if (excerpt.bespoke !== undefined) {
+          results.skipped++;
+          continue;
+        }
+
+        // Add bespoke: false to the excerpt
+        excerpt.bespoke = false;
+        excerpt.updatedAt = new Date().toISOString();
+
+        // Recalculate content hash since we modified the object
+        excerpt.contentHash = calculateContentHash(excerpt);
+
+        // Save the updated excerpt
+        await storage.set(`excerpt:${id}`, excerpt);
+        results.updated++;
+
+      } catch (excerptError) {
+        logFailure('backfillBespokeProperty', 'Error processing excerpt', excerptError, { id });
+        results.errors.push({ id, error: excerptError.message });
+      }
+    }
+
+    logSuccess('backfillBespokeProperty', 'Completed', {
+      updated: results.updated,
+      skipped: results.skipped,
+      errorCount: results.errors.length
+    });
+
+    return {
+      success: results.errors.length === 0,
+      data: {
+        updated: results.updated,
+        skipped: results.skipped,
+        errors: results.errors
+      }
+    };
+
+  } catch (error) {
+    logFailure('backfillBespokeProperty', 'Error', error);
+    return {
+      success: false,
+      error: error.message,
+      data: {
+        updated: results.updated,
+        skipped: results.skipped,
+        errors: results.errors
+      }
+    };
+  }
+}
+
+/**
+ * Cache the incomplete status for an Embed
+ *
+ * Stores whether an Embed is incomplete (missing required variables) in storage.
+ * This allows subsequent page loads to skip the excerpt query entirely for
+ * unpublished incomplete Embeds, showing the "under construction" warning faster.
+ *
+ * The cache is automatically cleared when the Embed is published.
+ *
+ * @param {Object} req - Request object
+ * @param {string} req.payload.localId - Embed local ID
+ * @param {boolean} req.payload.isIncomplete - Whether the Embed is incomplete
+ * @returns {Promise<Object>} Result with success status
+ */
+export async function cacheIncompleteStatus(req) {
+  const { localId, isIncomplete } = req.payload || {};
+
+  logFunction('cacheIncompleteStatus', 'START', { localId, isIncomplete });
+
+  try {
+    if (!localId || typeof localId !== 'string') {
+      return { success: false, error: 'localId is required' };
+    }
+
+    const key = `macro-vars:${localId}`;
+    const data = await storage.get(key) || {};
+
+    // Only cache if not already published (publishing clears this)
+    if (!data.publishedAt) {
+      await storage.set(key, {
+        ...data,
+        cachedIncomplete: isIncomplete
+      });
+      logSuccess('cacheIncompleteStatus', 'Cached incomplete status', { localId, isIncomplete });
+    }
+
+    return { success: true };
+  } catch (error) {
+    logFailure('cacheIncompleteStatus', 'Error caching status', error, { localId });
+    return { success: false, error: error.message };
   }
 }
