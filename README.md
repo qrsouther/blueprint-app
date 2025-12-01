@@ -26,7 +26,7 @@ The Blueprint App consists of three major systems: the **Source** macro, the **E
 
 | <h3>🎯 Embed</h3>*CSS, Implementers, et al.* | <h3>📦 Source</h3>*Architecture* | <h3>⚙️ Admin</h3>*Architecture, CSS Managers, MOps Leadership* |
 |:-------------------------------------|:----------------------- |:------------------------------------------------------|
-|Macros that render content from a selected Source, to be personalized and displayed on a client's Blueprint page.<br><br>[View the Embed macro's detailed features](#-embed-macro-features-and-workflow)|Macros consisting of reusable content templates, written primarily by the Architecture team.<br><br>[View the Source macro's detailed features](#-source-macro-features-and-workflow)|Admin view to manage and report on all Sources and Embeds.<br><br>[View the Admin page's detailed features](#-admin-ui-features)|
+|Macros that inject content from a selected Source directly into the page, personalized for each client's Blueprint.<br><br>[View the Embed macro's detailed features](#-embed-macro-features-and-workflow)|Macros consisting of reusable content templates, written primarily by the Architecture team.<br><br>[View the Source macro's detailed features](#-source-macro-features-and-workflow)|Admin view to manage and report on all Sources and Embeds.<br><br>[View the Admin page's detailed features](#-admin-ui-features)|
 
 🤔 If you're familiar with the following technologies, the Blueprint App is...
 
@@ -51,7 +51,7 @@ The Blueprint App consists of three major systems: the **Source** macro, the **E
 
 🚫 Not a page builder (doesn't control full page layout)
 
-🚫 Not a static site generator (renders dynamically in Confluence)
+🚫 Not a static site generator (content is injected into Confluence pages)
 
 🚫 Not a headless CMS (tightly coupled to Confluence)
 
@@ -89,28 +89,32 @@ This is the editing for the Embed macro.
   </tr>
 </table>
 
-✅ **Every** action described above -- filling in variable values, toggle switching, inserting custom paragraphs -- auto-saves within half a second of your change. Check the Saving/Saved indicator at the top-right of the Embed's Edit screen!
+✅ **Every** action described above -- filling in variable values, toggle switching, inserting custom paragraphs -- auto-saves within half a second of your change and triggers content injection into the page. Check the Saving/Saved indicator at the top-right of the Embed's Edit screen!
 
-### Embed 'View Mode'
+### Embed 'View Mode' (Native Content Display)
 
-This is the view that is displayed on the Blueprint page when _reading_ it, rather than editing it. With the exception of Internal Notes, it is what a client will see and read when we provide them their Blueprint.
+With content injection, Embed content is displayed as **native Confluence content** directly on the page. There is no iframe or separate rendering context—the content is part of the page itself, just like any manually-written Confluence content.
 
 <table>
   <tr>
-    <td><Strong>Optimistic Rendering</Strong></td>
-    <td>Cached content appears immediately (no "Loading..." messages). Fresh content fetched and compared in background. Display updates automatically if Source has changed. Users see content instantly, then freshest content appears within seconds — seamless experience.</td>
+    <td><Strong>Native Rendering</Strong></td>
+    <td>Content appears instantly as native Confluence content—no loading states, no iframes. The rendered content is stored directly in the page and displayed by Confluence's native rendering engine. This means content is searchable, exportable, and visible in Page History.</td>
   </tr>
   <tr>
     <td><Strong>Staleness Detection</Strong></td>
-    <td> Subtle <em>Checking for Source updates...</em> indicator appears during staleness check upon page load. When Source has changed, a prominent green <Strong>Review Update</Strong> button appears.<br><br>Staleness check happens 2-3 seconds after page loads. Prior to and during the check, cached content displays while the check runs in background.</td>
+    <td>When accessing Edit Mode, the system checks if the Source has been updated since the last injection. If changes are detected, a prominent green <Strong>Review Update</Strong> button appears, allowing users to review and accept the update at their convenience.</td>
   </tr>
   <tr>
     <td><Strong>Update Available banner</Strong></td>
-    <td>This banner appears only when user clicks the Review Update button — if the user doesn't have time to check the available update, they can get to it later or work on other Embeds if they like, until they're ready to review and accept the update.<br><br>A side-by-side diff view compares current (cached) Embed content with updated content from the Source level. All toggle tags -- even those that the writer hasn't enabled in the Embed -- are visible in the diff view, so that the writer can be aware of newly-added or changed toggle content and decide whether they wish to enable it now.<br><br>Users can click the Update button to get their Embed onto the new version immediately after reviewing how it will change their Embed's rendered output.</td>
+    <td>This banner appears in Edit Mode when Source changes are detected. A side-by-side diff view compares current injected content with the updated Source content. All toggle tags—even disabled ones—are visible in the diff view, so writers can see newly-added content and decide whether to enable it.<br><br>Clicking Update re-renders the content with the latest Source and re-injects it into the page.</td>
   </tr>
   <tr>
     <td><Strong>Documentation Links Display</Strong></td>
-    <td>Links that are configured at the Source level are displayed at the top of rendered Embed content, similar to the gray boxes traditionally used in MultiExcerpts.</td>
+    <td>Links configured at the Source level are injected at the top of the Embed's chapter content, similar to the gray info boxes traditionally used in MultiExcerpts.</td>
+  </tr>
+  <tr>
+    <td><Strong>Page History Integration</Strong></td>
+    <td>Because content is injected into page storage, all rendered Embed content—including custom insertions and internal notes—is captured in Confluence's native Page History. Users can use Confluence's built-in version comparison to see how Blueprint content has changed over time.</td>
   </tr>
 </table>
 
@@ -203,7 +207,7 @@ The main and most important portion of the **Sources** tab is the **Usage table*
 
 The Status column for each Embed in the Usage table will show _Up to date_ or _Update Available_ with timestamps. A stale Embed can be force-updated from within the Usage table.
 
-The **Recovery Options** button will be clickable if an Embed has multiple historic saved versions. We temporarily (for 14 days) store the raw content of historic versions of every Embed, in case a user accidentally erases or deletes an Embed from a page and cannot recover it themselves. Clicking this button opens a modal which lists out all recoverable historic versions and their save timestamps, and previews their stored values/metadata.
+The **Recovery Options** button provides access to Embed recovery tools. With content injection, rendered content is captured in Confluence's native Page History, so users can use Confluence's built-in version comparison and restore features to recover previous content. The Recovery Options modal provides additional tools for recovering Embed configurations from Forge storage.
 
 The **🧑🏻‍🏫 Redlines** tab provides a queue-based interface for reading and approving system for reviewing recently updated Embeds on Blueprint pages.
 
@@ -271,12 +275,11 @@ The **Query Results** display shows whether the record was found, its data type,
   <tr>
     <td><Strong>Restore Version</Strong></td>
     <td>
-      Opens the Emergency Recovery modal which contains two tabs:
+      Opens the Emergency Recovery modal for recovering Embed configurations:
       <ul>
-        <li><Strong>Deleted Embeds</Strong>: View and restore soft-deleted Embeds. An Embed becomes soft-deleted when its macro is removed from a Confluence page (either accidentally or intentionally) and then detected as orphaned by an admin cleanup operation. Instead of permanently deleting the configuration, the system moves it to a recovery namespace, preserving all variable values, toggle states, custom insertions, and internal notes. Soft-deleted Embeds are recoverable for 90 days.</li>
-        <li><Strong>Version History</Strong>: View and restore previous versions of active Embeds (Embeds that still exist on their pages). Every time an Embed's configuration is modified (variable values, toggle states, custom insertions, etc.), a version snapshot is automatically created. These version snapshots are retained for 14 days, allowing you to restore an active Embed to any previous state within that window.</li>
+        <li><Strong>Deleted Embeds</Strong>: View and restore soft-deleted Embeds. An Embed becomes soft-deleted when its macro is removed from a Confluence page and then detected as orphaned by an admin cleanup operation. The system preserves all variable values, toggle states, custom insertions, and internal notes in a recovery namespace. Soft-deleted Embeds are recoverable for 90 days.</li>
       </ul>
-      Use this to recover Embeds that were accidentally deleted or restore an Embed to a previous version. Creates a backup snapshot before restoring to ensure the current version is preserved.
+      <Strong>Note:</Strong> With content injection, rendered content is captured in Confluence's native Page History. To recover previous rendered content, use Confluence's built-in Page History feature. The Emergency Recovery modal is for recovering Embed <em>configurations</em> from Forge storage.
     </td>
   </tr>
 </table>
@@ -335,47 +338,53 @@ After selecting a Source from the left-side nav, the following toolbar buttons a
   </tr>
   <tr>
     <td><Strong>Force Update to All Pages</Strong></td>
-    <td>Pushes the latest Source content to all Embed instances across all pages that use this Source. This button is only enabled when there are stale Embed instances (Source has been modified since Embeds last synced).<br><br>This is generally only going to be used when a Source has been changed and the change was either trivial and completely non-destructive (i.e., fixing a typo), or the change was absolutely necessary and urgently needs to be propagated to all Blueprints.<br><br>This function updates all cached Embed configurations with the current Source content, variable definitions, toggle definitions, and documentation links. Requires confirmation before executing.</td>
+    <td>Re-injects the latest Source content to all Embed instances across all pages that use this Source. This button is only enabled when there are stale Embed instances (Source has been modified since Embeds last synced).<br><br>This is generally only going to be used when a Source has been changed and the change was either trivial and completely non-destructive (i.e., fixing a typo), or the change was absolutely necessary and urgently needs to be propagated to all Blueprints.<br><br>This function re-renders each Embed with the current Source content, variable definitions, toggle definitions, and documentation links, then re-injects the content into each page. Requires confirmation before executing.</td>
   </tr>
 </table>
 
 ---
 
-## 📊 Performance Expectations and Mitigations
+## 📊 Content Injection Architecture
 
-Confluence Forge apps are instantiated as individual iframes, and as such each Embed macro on a Blueprint page runs in its own isolated iframe. Without caching, each iframe would independently fetch data from Forge storage on every page load.
+The Blueprint App uses **native content injection** to deliver Embed content directly into Confluence pages. Unlike traditional Forge apps that render content inside iframes, Blueprint injects fully-rendered content into the page storage itself, making it native Confluence content.
 
-We anticipate that each Blueprint will contain somewhere between 30 and 60 Embeds, depending on the client vertical and their business' complexity.
+### How Content Injection Works
 
-In order to reduce loadtimes and create the appearance of near-immediate loading, we've implemented an **optimistic rendering strategy** with aggressive caching specifically within the 'Embed View' (the rendered iframe shown within a Published Blueprint page).
+1. **Edit Mode:** Users configure Embeds using Forge UI (variables, toggles, custom insertions). This configuration is saved to Forge storage.
 
-### Caching Mechanisms
+2. **Content Rendering:** When saved, the system renders the Source content with all substitutions applied (variables filled in, toggles filtered, custom insertions placed).
 
-1. **On First Load (Uncached):** Each Embed fetches data from Forge storage, processes it, and stores the rendered content in cache (`macro-cache:{localId}`). An initial load of a Blueprint page with no cached content may take 5-10 seconds to gradually load and render all iframes, similar to MultiExcerpt Include macros on traditional Blueprint pages.
+3. **Page Injection:** The rendered content is injected directly into Confluence page storage via the Content Injection API, appearing as native Confluence content with chapter markers for tracking.
 
-2. **On Subsequent Loads (Cached):** Each Embed (nearly) immediately displays cached content from storage, then performs a background refresh to check for updates. This creates the appearance of instant loading while ensuring content stays current.
+4. **Native Display:** When viewing the page, content is rendered by Confluence itself—not inside an iframe—resulting in instant display with no loading states.
 
-### Performance Expectations
+### Performance Benefits
 
-Thanks to our optimistic rendering strategy, we estimate the following performance characteristics for **cached** Blueprint pages:
+| Aspect | Old Model (Iframes) | New Model (Content Injection) |
+|--------|---------------------|-------------------------------|
+| Page Load | 5-10s (50 iframes spawning) | Instant (native content) |
+| Content Display | Gradual iframe loading | Immediate native render |
+| Confluence Search | Not indexed | Fully indexed |
+| Page Export/PDF | Inconsistent capture | Full content included |
+| Page History | Config only | Full rendered content |
+| Copy/Paste | Limited (iframe boundaries) | Native selection |
 
-| # Embeds | Performance |
-|----------|-------------|
-| 1 Embed | Instant display (~100ms) + 500ms-1s background refresh |
-| 5 Embeds | Instant display (~100ms) + 1-2s background refresh |
-| 20 Embeds | Instant display (~100ms) + 3-5s background refresh |
-| 50+ Embeds | Instant display (~100ms) + 5-10s background refresh |
+### What This Means for Users
 
-**Key Points:**
-- **Instant display** shows cached content near immediately -- readers should rarely see any 'Loading...' messages for long, if at all
-- **Background refresh** happens _after_ content is already visible, with a 2-3 second delay (plus randomized jitter) to prevent network bursts
-- If the Source has data that isn't reflected in the Embed's cached version, the Embed will automatically update its display once the background refresh completes
-- No user action is required - readers see cached content instantly, then the freshest content appears within a few seconds
+- **Instant content display:** No "Loading..." messages or gradual iframe population
+- **Searchable content:** All Blueprint content appears in Confluence search results
+- **Complete exports:** PDF exports and page copies include all Embed content
+- **Version history:** Confluence's Page History captures the full rendered content, not just configuration
+- **Native experience:** Content behaves like any other Confluence content (selectable, printable, accessible)
 
 ---
 ## Sample Storage Structure
 
-The following are examples of the JSON blobs that store Source and Embed content in Forge key-value storage.
+The following are examples of the JSON blobs stored in **Forge key-value storage**. These store Source definitions and Embed configurations.
+
+**Note:** With content injection, there are two storage locations:
+- **Forge Storage:** Source definitions (`excerpt:{id}`) and Embed configurations (`macro-vars:{localId}`) — shown below
+- **Confluence Page Storage:** Rendered content injected via Content Injection API — stored directly in the page, visible in Page History
 
 #### Source (excerpt:{id}):
 ```javascript
@@ -605,35 +614,45 @@ This structure aims to make this app easier to update, extend, and debug.
 
 ```
 blueprint-app/
-├── manifest.yml                # Forge app manifest and module declarations
-├── package.json                # Project dependencies and scripts
+├── manifest.yml                  # Forge app manifest and module declarations
+├── package.json                  # Project dependencies and scripts
 ├── src/
-│   ├── index.js                # App entry point: registers all resolvers
+│   ├── index.js                  # App entry point: registers all resolvers
 │   ├── resolvers/
-│   │   ├── source-resolvers.js   # CRUD for Source macros
-│   │   ├── embed-resolvers.js    # CRUD for Embed macros
-│   │   ├── admin-resolvers.js    # Admin and reporting endpoints
-│   │   └── version-resolvers.js  # Storage versioning & recovery
+│   │   ├── excerpt-resolvers.js      # CRUD for Source macros
+│   │   ├── include-resolvers.js      # CRUD for Embed macros
+│   │   ├── injection-resolver.js     # Content injection engine (core)
+│   │   ├── compositor-resolvers.js   # Chapter-based composition and archetype management
+│   │   ├── redline-resolvers.js      # Redlining/review workflow
+│   │   ├── verification-resolvers.js # Source/Embed verification & staleness
+│   │   ├── usage-resolvers.js        # Usage tracking and reporting
+│   │   └── version-resolvers.js      # Storage versioning & recovery
 │   ├── components/
-│   │   ├── SourceDisplay.jsx       # Source macro display
-│   │   ├── SourceConfig.jsx        # Source macro configuration UI
-│   │   ├── EmbedDisplay.jsx        # Embed macro display (– with variable/toggle substitution)
-│   │   ├── EmbedConfig.jsx         # Embed macro configuration UI (with preview, free write, notes)
-│   │   ├── AdminDashboard.jsx      # Main admin dashboard (includes verification)
-│   │   ├── ExcerptPreviewModal.jsx # Preview and recovery for excerpt content
-│   │   └── EmergencyRecoveryModal.jsx  # Admin UI for version restore and recovery
+│   │   ├── admin/                    # Admin page components (22 files)
+│   │   ├── embed/                    # Embed macro UI components
+│   │   │   ├── EmbedEditMode.jsx         # Configuration UI (variables, toggles, etc.)
+│   │   │   ├── EmbedViewMode.jsx         # View mode with staleness detection
+│   │   │   └── UpdateAvailableBanner.jsx # Diff view for Source updates
+│   │   ├── compositor/               # Chapter composition UI
+│   │   │   ├── CompositorModal.jsx       # Bulk chapter management
+│   │   │   └── ChapterList.jsx           # Chapter ordering and preview
+│   │   └── common/                   # Shared UI components
 │   ├── utils/
-│   │   ├── storage-validator.js    # Pre-flight and integrity checks for storage writes
-│   │   ├── logger.js               # Centralized logging utility
-│   │   └── version-manager.js      # Snapshot/restore and version pruning logic
-│   └── constants.js                # App-wide constants (storage keys, limits, etc.)
+│   │   ├── storage-format-utils.js   # ADF → Storage format conversion
+│   │   ├── adf-rendering-utils.js    # ADF manipulation (variables, toggles, etc.)
+│   │   ├── storage-validator.js      # Pre-flight integrity checks
+│   │   ├── hash-utils.js             # Content hashing for staleness detection
+│   │   └── logger.js                 # Centralized logging utility
+│   ├── hooks/                        # React hooks for state management
+│   ├── styles/                       # xcss style definitions
+│   └── workers/                      # Async background job processors
 ```
 
-*Note: Only core src files and main configuration files are shown. Tests, build artifacts, and auxiliary markdown documents are omitted here.*
+*Note: Only core src files are shown. Tests, build artifacts, and documentation files are omitted.*
 
-The Blueprint App is a focused content management solution for Confluence Cloud. It enables SeatGeek to create reusable content blocks called **Sources**, which are then inserted into Client-specific Blueprint documents as **Embeds** with configurable variable values. The **Admin** page tabulates the data on Source and Embed usages, and provides a queue-based content review and approval tool.
+The Blueprint App is a focused content management solution for Confluence Cloud. It enables SeatGeek to create reusable content blocks called **Sources**, which are then injected into Client-specific Blueprint documents as **Embeds** with configurable variable values. The **Admin** page tabulates the data on Source and Embed usages, and provides a queue-based content review and approval tool.
 
-Designed as an Atlassian Forge serverless application, it runs securely on Atlassian's infrastructure.
+Designed as an Atlassian Forge serverless application with **native content injection**, it runs securely on Atlassian's infrastructure while delivering content that is fully searchable, exportable, and tracked in Page History.
 
 **Front end:**
 - React 18 with Forge UI Kit components (@forge/react)
@@ -648,51 +667,64 @@ Designed as an Atlassian Forge serverless application, it runs securely on Atlas
 
 **Architecture Pattern:**
 
-The Blueprint App uses a four-layer architecture that separates concerns and ensures security:
+The Blueprint App uses a **content injection architecture** with four layers:
 
-- **UI Layer:** React components in Forge iframes (sandboxed, cannot directly access Confluence)
-  - **What it is:** The user interface (buttons, forms, previews) runs in isolated iframe containers embedded in Confluence pages
-  - **Why it matters:** This isolation prevents the UI from directly accessing or modifying Confluence data, ensuring security and preventing conflicts with other apps
-  - **Functional impact:** The UI can display data and capture user input, but must request all Confluence operations through the backend
-  - **Data perspective:** UI components hold temporary state (form values, selected options) but don't store persistent data
+- **Edit UI Layer:** React components in Forge UI (for configuration only)
+  - **What it is:** The editing interface (variable inputs, toggle switches, custom insertion fields) runs in Forge UI panels when users click to configure an Embed
+  - **Why it matters:** Provides a rich, interactive editing experience while keeping configuration separate from rendered content
+  - **Functional impact:** Users configure their Embed settings through this UI; changes trigger content re-rendering and injection into the page
+  - **Data perspective:** UI captures configuration state and sends it to backend for processing and injection
 
-- **Bridge Layer:** `invoke()` calls from frontend to backend resolvers
-  - **What it is:** A secure communication channel that allows the UI to request operations from backend functions
-  - **Why it matters:** This is the only way the sandboxed UI can request data or trigger actions—all requests are validated and controlled
-  - **Functional impact:** When a user clicks "Save" or selects a Source, the UI calls `invoke('saveExcerpt', {...})` which triggers a backend function
-  - **Data perspective:** Data flows one-way: UI → invoke() → backend resolver (requests) and backend → invoke() → UI (responses)
+- **Injection Engine:** Content rendering and page storage injection
+  - **What it is:** Backend resolvers that render Source content with all substitutions applied, then inject the result directly into Confluence page storage
+  - **Why it matters:** This is the core innovation—content becomes native Confluence content, not iframe-rendered content
+  - **Functional impact:** When a user saves an Embed configuration, the engine renders the content (variables substituted, toggles filtered, custom insertions placed) and injects it into the page with chapter markers
+  - **Data perspective:** Transforms Source ADF + Embed configuration → Rendered ADF → Confluence storage format → Page injection
 
-- **Storage Layer:** Key-value store with structured JSON documents
-  - **What it is:** Encrypted database where all Blueprint data is stored (Sources, Embed configurations, usage tracking)
-  - **Why it matters:** Provides fast, secure persistence without requiring Confluence page edits for every change
-  - **Functional impact:** When you save a Source or configure an Embed, the data is stored here immediately, enabling instant lookups and updates
-  - **Data perspective:** Stores structured JSON objects like `{id: "...", name: "Relocations", content: {...}, variables: [...]}` under keys like `excerpt:{id}`
+- **Storage Layer:** Forge key-value store for configuration and metadata
+  - **What it is:** Encrypted database storing Sources, Embed configurations, usage tracking, and version metadata
+  - **Why it matters:** Provides fast configuration storage separate from page content; enables staleness detection via content hashing
+  - **Functional impact:** Source definitions, Embed variable values, toggle states, and redline statuses are stored here
+  - **Data perspective:** Stores JSON objects like `excerpt:{id}` (Sources) and `macro-vars:{localId}` (Embed configs)
 
-- **API Layer:** Resolvers call Confluence REST API when needed (page reads/writes)
-  - **What it is:** Backend functions (resolvers) that have permission to read from and write to Confluence pages via Atlassian's REST API
-  - **Why it matters:** Only the backend can safely interact with Confluence—it handles authentication, rate limiting, and data validation
-  - **Functional impact:** When you publish a page with a Source macro, the resolver reads the page content, processes it, and stores it. When viewing an Embed, the resolver fetches the latest Source data
-  - **Data perspective:** Converts between Confluence's page format (ADF documents) and the app's internal storage format, ensuring data consistency
+- **Page Storage Layer:** Native Confluence content via Content Injection API
+  - **What it is:** The actual rendered Embed content stored directly in Confluence page storage, appearing as native page content
+  - **Why it matters:** Content is searchable, exportable, visible in Page History, and renders instantly without iframes
+  - **Functional impact:** When viewing a Blueprint page, users see native Confluence content that was injected by the Blueprint App—no loading states, no iframes
+  - **Data perspective:** Chapter-marked HTML/storage format content injected between `<!-- BLUEPRINT-CHAPTER-START -->` and `<!-- BLUEPRINT-CHAPTER-END -->` markers
 
 ### Data Flow
 
-**Content Creation:**
+**Content Creation (Source):**
 1. User (i.e., Solutions Architect) writes Source macro body content in Confluence editor (ADF)
-2. On save → Resolver calculates `contentHash`, stores to `excerpt:{id}`
-3. Auto-detects `{{variables}}` and `{{toggle:name}}` syntax
+2. On page publish → Resolver calculates `contentHash`, stores Source to `excerpt:{id}`
+3. Auto-detects `{{variables}}` and `{{toggle:name}}` syntax from content
 
-**Content Instantiation:**
-1. User (i.e., CSS) configures Embed macro → Selects Source (if not already selected within a preconfigured Confluence Template) + opts into or out of Toggles + inputs Variable values
-2. On auto-save (500ms debounce as user edits) → Resolver stores config to `macro-vars:{localId}`, renders content
-   - **Variable substitution:** Performed via structured tree traversal of the ADF document, preserving formatting and document structure (not simple string replacement)
-3. Cached rendered ADF stored for fast view-mode display
+**Content Configuration & Injection (Embed):**
+1. User (i.e., CSS) opens Embed Edit Mode → Selects Source + configures Toggles + inputs Variable values + adds custom insertions/notes
+2. On save (500ms debounce as user edits):
+   - Configuration is saved to Forge storage (`macro-vars:{localId}`)
+   - Content is rendered with all substitutions applied:
+     - **Variable substitution:** Structured ADF tree traversal, preserving formatting
+     - **Toggle filtering:** Disabled toggle blocks are removed
+     - **Custom insertions:** Placed at specified paragraph positions
+     - **Internal notes:** Injected with inline markers
+   - Rendered content is **injected into page storage** via Content Injection API
+3. Page now contains native Confluence content between chapter markers
 
-**Important:** Embed configuration changes are saved automatically to Forge storage as a user types or makes changes in the Embed editor. This data is persisted independently of Confluence page publishing actions. This means:
-- Changes are saved as you edit (with 500ms debounce), _even if you don't click "Update" or "Publish" on the Confluence page_
-- If you close the page or navigate away without publishing, your Embed configuration changes __were__ still saved
-- When the page is viewed later (or published later), the saved Embed configuration will still be used
+**Content Injection Details:**
+- Rendered content is converted from ADF to Confluence storage format
+- Content is wrapped in chapter markers: `<!-- BLUEPRINT-CHAPTER-START: {chapterId} -->`
+- Chapter heading (h2) is injected for Confluence TOC compatibility
+- Chapter divider (hr) marks the end of each chapter
+- Content appears as native page content—searchable, exportable, in Page History
 
-This is expected behavior—Embed data is stored in Forge storage, not in the Confluence page content itself, and SeatGeek developed this app in a specific way to ensure that users do NOT lose data as they work.
+**Important:** Embed configuration AND rendered content are both persisted:
+- **Configuration** (variable values, toggle states) → Forge storage (`macro-vars:{localId}`)
+- **Rendered content** → Confluence page storage (injected via Content Injection API)
+- Changes are saved as you edit (with 500ms debounce)
+- Page History captures the full rendered content at each injection point
+- If you need to recover previous content, use Confluence's native Page History
 
 **Staleness Detection:**
 1. Embed stores `syncedContentHash` (copy of Source's `contentHash` at time of sync)
@@ -741,20 +773,22 @@ This is expected behavior—Embed data is stored in Forge storage, not in the Co
 
 **Internal Notes Rendering & Filtering:**
 
-Internal Notes are rendered in ADF format with two components:
+Internal Notes are injected into page storage with two components:
 - **Inline markers:** Text nodes with superscript Unicode numbers (¹, ², ³, etc.) displayed at paragraph positions where notes exist
 - **Notes panel:** ADF `expand` node with `title: '🔒 Internal Notes'` that contains the full note content
 - **Position constraints:** One note per paragraph position (button disabled if position already has a note)
 
+Because Internal Notes are injected into the page, they are visible in Page History and appear in the native Confluence content.
+
 **External Content Filtering:**
 
-Internal Notes will ultimately be filtered out and hidden from client view via the coming Salesforce-to-Confluence custom integration. The filtering logic for the Salesforce representation of the Blueprint document:
+Internal Notes are filtered out and hidden from client view via the Salesforce-to-Confluence integration. The filtering logic for the Salesforce representation of the Blueprint document:
 
 *Filter Rules:*
 1. Remove all ADF `expand` nodes (type: 'expand') - this hides the entire Internal Notes panel
 2. Remove text nodes with `textColor: '#6554C0'` - this removes the inline footnote markers (¹, ², ³)
 
-**Architecture Note:** The actual filtering logic will be implemented in a separate Confluence-Salesforce integration app. The filtering rules are documented in `/Users/quinnsouther/Documents/Code projects/confluence-salesforce-integration/ARCHITECTURAL_OPTIONS.md`.
+**Architecture Note:** The actual filtering logic is implemented in a separate Confluence-Salesforce integration app.
 
 ### Centralized Logging System
 
@@ -855,16 +889,12 @@ Bugs or deficiencies that are directly related to this app (as opposed to inhere
 
 ---
 
-#### Font Size (14px Fixed)
-**Issue:** Embed body text renders at 14px and cannot be changed to 16px or any other size.
+#### ~~Font Size (14px Fixed)~~ — RESOLVED
+**Previous Issue:** Embed body text rendered at 14px and could not be changed to 16px or any other size due to Forge UI Kit's `AdfRenderer` component having hardcoded internal styles.
 
-**Root Cause:** Forge UI Kit's `AdfRenderer` component has hardcoded internal styles that ignore parent container font-size CSS. The ADF specification doesn't include a fontSize mark type, making it impossible to override this behavior through styling or ADF manipulation.
+**Resolution:** With the content injection architecture, Embed content is now rendered natively by Confluence, not by Forge UI Kit's AdfRenderer. Content uses Confluence's standard typography, which displays at the expected font sizes.
 
-**Workaround:** None available with current Forge UI Kit architecture.
-
-**Future Resolution:** This limitation will be resolved in the planned "Custom UI" rewrite, which will use a single iframe/compositor model with full CSS control. In that architecture, 16px body text will be the standard.
-
-**Community Discussion:** [Atlassian Community Thread - Different font size UI Kits Text vs AdfRenderer](https://community.developer.atlassian.com/t/different-font-size-ui-kits-text-vs-adfrenderer/96454)
+**Historical Context:** [Atlassian Community Thread - Different font size UI Kits Text vs AdfRenderer](https://community.developer.atlassian.com/t/different-font-size-ui-kits-text-vs-adfrenderer/96454)
 
 ## 🤝 Contributing
 
