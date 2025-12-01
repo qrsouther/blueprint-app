@@ -94,36 +94,14 @@ export async function saveExcerpt(req) {
   const spaceKey = sourceSpaceKey || req.context?.extension?.space?.key;
 
   // Generate or reuse excerpt ID
-  // If excerptId is missing, try to find existing Source by name + category + pageId to avoid duplicates
+  // Note: Duplicate detection by name/category/pageId was removed due to O(n) storage calls
+  // causing 30+ second timeouts. If duplicate prevention is needed, consider adding
+  // name/category/pageId to the excerpt-index for O(1) lookup.
   let id = excerptId;
-  if (!id && excerptName && pageId) {
-    try {
-      const index = await storage.get('excerpt-index') || { excerpts: [] };
-      // Look for existing Source with same name, category, and pageId
-      for (const indexEntry of index.excerpts) {
-        const existingExcerpt = await storage.get(`excerpt:${indexEntry.id}`);
-        if (existingExcerpt &&
-            existingExcerpt.name === excerptName &&
-            (existingExcerpt.category || 'General') === (category || 'General') &&
-            existingExcerpt.sourcePageId === pageId) {
-          id = existingExcerpt.id;
-          logPhase('saveExcerpt', 'Found existing Source by name/category/pageId, reusing excerptId', {
-            excerptId: id,
-            name: excerptName,
-            category: category || 'General',
-            pageId
-          });
-          break;
-        }
-      }
-    } catch (lookupError) {
-      logWarning('saveExcerpt', 'Error looking up existing Source, will create new one', lookupError);
-    }
-  }
-  
-  // Generate new UUID if still no ID found
   if (!id) {
+    // No excerptId provided - this is a new Source, generate a new ID
     id = generateUUID();
+    logPhase('saveExcerpt', 'Generated new excerptId for new Source', { excerptId: id, name: excerptName });
   }
 
   // Provide default empty ADF object if content is missing (for new Sources)

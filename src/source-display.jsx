@@ -203,8 +203,8 @@ const App = () => {
         <Stack space="space.100">
           {excerptData && (
             <Inline space="space.100" alignBlock="baseline">
-              <Lozenge appearance="success" isBold>Standard</Lozenge>
-              <Heading level={3}>{excerptData.name || excerptData.category}</Heading>
+              <Text>{excerptData.bespoke ? '🟣' : '🟢'}</Text>
+              <Heading size="medium">{excerptData.name || excerptData.category}</Heading>
               <Lozenge appearance="default">{excerptData.category}</Lozenge>
             </Inline>
           )}

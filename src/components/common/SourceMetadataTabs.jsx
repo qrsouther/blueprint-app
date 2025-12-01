@@ -185,7 +185,7 @@ export function SourceMetadataTabs({
             // Config variant: stacked layout
             <>
               <Label labelFor={fieldId('excerptName')}>
-                Blueprint Standard Source Name
+                Blueprint Source Name
               </Label>
               <StableTextfield
                 id={fieldId('excerptName')}
