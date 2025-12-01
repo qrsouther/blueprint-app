@@ -54,6 +54,7 @@ import React, { Fragment, useState, useEffect, useRef } from 'react';
 import {
   Text,
   Em,
+  Strong,
   Heading,
   Button,
   Stack,
@@ -135,7 +136,9 @@ export function EmbedEditMode({
   onClose,
   // New props for simplified architecture
   onBlur,  // Handler for localStorage draft saves on blur
-  onReset  // Handler for resetting to original state
+  onReset,  // Handler for resetting to original state
+  // Confluence edit mode flag - when true, show restricted UI with guidance message
+  isConfluenceEditMode = false
 }) {
   const [copySuccess, setCopySuccess] = useState(false);
   const [isCompositorModalOpen, setIsCompositorModalOpen] = useState(false);
@@ -360,30 +363,30 @@ export function EmbedEditMode({
 
         {/* Status Indicators and ButtonGroup */}
         <Inline space="space.100" alignBlock="center">
-          {/* Last published timestamp */}
-          {publishStatus?.isPublished && !needsRepublish && publishStatus.publishedAt && (
+          {/* Last published timestamp - hidden in Confluence edit mode */}
+          {publishStatus?.isPublished && !needsRepublish && publishStatus.publishedAt && !isConfluenceEditMode && (
             <Text size="small" color="color.text.subtle">
               Last published: {new Date(publishStatus.publishedAt).toLocaleString()}
             </Text>
           )}
 
-          {/* Draft status indicator - shows during blur, exit, reset, source switch (NOT during publish) */}
-          {saveStatus === 'saving' && !isPublishing && (
+          {/* Draft status indicator - shows during blur, exit, reset, source switch (NOT during publish, hidden in Confluence edit mode) */}
+          {saveStatus === 'saving' && !isPublishing && !isConfluenceEditMode && (
             <Fragment>
               <Spinner size="small" label="Saving draft" />
               <Text size="small"><Em>Draft Saving...</Em></Text>
             </Fragment>
           )}
-          {saveStatus === 'saved' && !isPublishing && (
+          {saveStatus === 'saved' && !isPublishing && !isConfluenceEditMode && (
             <Fragment>
               <Icon glyph="check-circle" color="success" size="small" label="Draft saved" />
               <Text size="small"><Em>Draft Saved</Em></Text>
             </Fragment>
           )}
 
-          {/* ButtonGroup: GUID copy, Exit, Reset, Publish */}
+          {/* ButtonGroup: GUID copy, Exit, Reset, Publish (some hidden in Confluence edit mode) */}
           <ButtonGroup>
-            {/* GUID copy button */}
+            {/* GUID copy button - always available */}
             {localId && (
               <Button
                 appearance="default"
@@ -394,14 +397,14 @@ export function EmbedEditMode({
                 {copySuccess ? 'Copied!' : 'CopyGUID'}
               </Button>
             )}
-            {/* Exit button (renamed from Done) */}
-            {onClose && (
+            {/* Exit button (renamed from Done) - only in View Mode editing */}
+            {onClose && !isConfluenceEditMode && (
               <Button appearance="default" onClick={onClose}>
                 Exit
               </Button>
             )}
-            {/* Reset button - show when source changed OR form has unsaved changes */}
-            {canReset && (
+            {/* Reset button - hidden in Confluence edit mode */}
+            {canReset && !isConfluenceEditMode && (
               <Button 
                 appearance="default" 
                 onClick={handleReset}
@@ -410,8 +413,8 @@ export function EmbedEditMode({
                 Reset
               </Button>
             )}
-            {/* Blueprint Settings button - opens Compositor Modal */}
-            {pageId && (
+            {/* Blueprint Settings button - hidden in Confluence edit mode */}
+            {pageId && !isConfluenceEditMode && (
               <Button
                 appearance="subtle"
                 onClick={() => setIsCompositorModalOpen(true)}
@@ -419,8 +422,8 @@ export function EmbedEditMode({
                 Blueprint Settings
               </Button>
             )}
-            {/* Publish button */}
-            {excerpt && onPublish && (
+            {/* Publish button - hidden in Confluence edit mode */}
+            {excerpt && onPublish && !isConfluenceEditMode && (
               <Button
                 appearance="primary"
                 onClick={handlePublishWithHeading}
@@ -433,8 +436,8 @@ export function EmbedEditMode({
         </Inline>
       </Inline>
 
-      {/* Publish Progress Indicator */}
-      {isPublishing && (
+      {/* Publish Progress Indicator - hidden in Confluence edit mode */}
+      {isPublishing && !isConfluenceEditMode && (
         <Box xcss={xcss({ marginTop: 'space.200' })}>
           <ProgressBar
             ariaLabel="Publishing chapter to page"
@@ -459,8 +462,24 @@ export function EmbedEditMode({
         </SectionMessage>
       )}
 
-      {/* Conditional: Show Freeform UI or Standard Tabs */}
-      {isFreeformMode ? (
+      {/* Confluence Edit Mode: Show guidance message instead of full editing UI */}
+      {isConfluenceEditMode ? (
+        <Box xcss={xcss({ marginTop: 'space.200', marginBottom: 'space.200' })}>
+          <SectionMessage title="Edit Embeds in View Mode" appearance="information">
+            <Stack space="space.150">
+              <Text>
+                To edit this Embed's content, please exit the page editor and use View Mode instead.
+              </Text>
+              <Text>
+                In View Mode, click the <Strong>"Edit the Chapter"</Strong> button below the Embed to configure variables, toggles, and custom insertions.
+              </Text>
+              <Text size="small" color="color.text.subtle">
+                This ensures your changes are properly saved and published.
+              </Text>
+            </Stack>
+          </SectionMessage>
+        </Box>
+      ) : isFreeformMode ? (
         /* Freeform Content Mode UI */
         <Stack space="space.200">
           <SectionMessage appearance="information" title="Freeform Content Mode">
@@ -574,126 +593,128 @@ export function EmbedEditMode({
         </Tabs>
       )}
 
-      {/* Preview - Always visible below tabs */}
-      <Stack space="space.0">
-        <DocumentationLinksDisplay documentationLinks={excerpt?.documentationLinks} />
-        <Box xcss={xcss({
-          borderColor: 'color.border',
-          borderWidth: 'border.width',
-          borderStyle: 'solid',
-          borderRadius: 'border.radius',
-          paddingTop: 'space.0',
-          paddingBottom: 'space.0'
-        })}>
-          <Stack space="space.0">
-            {/* Chapter Heading with Compliance Level - Editable above Preview */}
-            {excerpt && (
-              <Box xcss={xcss({ 
-                marginBottom: 'space.100',
-                paddingLeft: 'space.150',
-                paddingTop: 'space.100'
-                })}
-                >
-                <Inline space="space.100" alignBlock="center" alignInline="start">
-                  {/* Compliance Level Select with color emoji indicators */}
-                  <Box xcss={xcss({ width: '250px', paddingBottom: 'space.100' })}>
-                    <Select
-                      inputId="compliance-level-select"
-                      options={complianceLevelOptions}
-                      value={complianceLevelOptions.find(opt => opt.value === effectiveComplianceLevel)}
-                      onChange={(selected) => {
-                        const newLevel = selected.value;
-                        const freeformTriggerLevels = ['non-standard', 'tbd', 'na'];
-                        
-                        // Check if selecting a freeform-trigger level
-                        if (freeformTriggerLevels.includes(newLevel)) {
-                          // Store pending level and open confirmation modal
-                          setPendingComplianceLevel(newLevel);
-                          setIsFreeformModalOpen(true);
-                        } else {
-                          // Standard/bespoke/semi-standard - set directly and exit freeform mode if active
-                          setValue('complianceLevel', newLevel, { shouldDirty: true });
-                          if (isFreeformMode) {
-                            setValue('isFreeformMode', false, { shouldDirty: true });
-                          }
-                          if (onBlur) {
-                            setTimeout(() => onBlur(), 0);
-                          }
-                        }
-                      }}
-                      spacing="compact"
-                      isSearchable={false}
-                      menuPlacement="auto"
-                    />
-                  </Box>
-                  {/* Custom editable heading - Pressable switches to Textfield on click */}
-                  {isEditingHeading ? (
-                    <Inline space="space.050" alignBlock="center">
-                      <Box xcss={xcss({ minWidth: '400px', flexGrow: '1' })}>
-                        <Textfield
-                          value={editingHeadingValue}
-                          onChange={(e) => setEditingHeadingValue(e.target.value)}
-                          placeholder="Enter chapter heading..."
-                          autoFocus
-                        />
-                      </Box>
-                      <Button
-                        appearance="subtle"
-                        iconBefore="check-circle"
-                        onClick={() => {
-                          // Save the new heading value
-                          const headingValue = editingHeadingValue || '';
-                          setValue('customHeading', headingValue, { shouldDirty: true });
-                          setIsEditingHeading(false);
-                          // Trigger draft save
-                          if (onBlur) {
-                            setTimeout(() => onBlur(), 0);
+      {/* Preview - Always visible below tabs (hidden in Confluence edit mode) */}
+      {!isConfluenceEditMode && (
+        <Stack space="space.0">
+          <DocumentationLinksDisplay documentationLinks={excerpt?.documentationLinks} />
+          <Box xcss={xcss({
+            borderColor: 'color.border',
+            borderWidth: 'border.width',
+            borderStyle: 'solid',
+            borderRadius: 'border.radius',
+            paddingTop: 'space.0',
+            paddingBottom: 'space.0'
+          })}>
+            <Stack space="space.0">
+              {/* Chapter Heading with Compliance Level - Editable above Preview */}
+              {excerpt && (
+                <Box xcss={xcss({ 
+                  marginBottom: 'space.100',
+                  paddingLeft: 'space.150',
+                  paddingTop: 'space.100'
+                  })}
+                  >
+                  <Inline space="space.100" alignBlock="center" alignInline="start">
+                    {/* Compliance Level Select with color emoji indicators */}
+                    <Box xcss={xcss({ width: '250px', paddingBottom: 'space.100' })}>
+                      <Select
+                        inputId="compliance-level-select"
+                        options={complianceLevelOptions}
+                        value={complianceLevelOptions.find(opt => opt.value === effectiveComplianceLevel)}
+                        onChange={(selected) => {
+                          const newLevel = selected.value;
+                          const freeformTriggerLevels = ['non-standard', 'tbd', 'na'];
+                          
+                          // Check if selecting a freeform-trigger level
+                          if (freeformTriggerLevels.includes(newLevel)) {
+                            // Store pending level and open confirmation modal
+                            setPendingComplianceLevel(newLevel);
+                            setIsFreeformModalOpen(true);
+                          } else {
+                            // Standard/bespoke/semi-standard - set directly and exit freeform mode if active
+                            setValue('complianceLevel', newLevel, { shouldDirty: true });
+                            if (isFreeformMode) {
+                              setValue('isFreeformMode', false, { shouldDirty: true });
+                            }
+                            if (onBlur) {
+                              setTimeout(() => onBlur(), 0);
+                            }
                           }
                         }}
+                        spacing="compact"
+                        isSearchable={false}
+                        menuPlacement="auto"
                       />
-                      <Button
-                        appearance="subtle"
-                        iconBefore="cross-circle"
-                        onClick={() => {
-                          // Cancel editing without saving
-                          setIsEditingHeading(false);
-                          setEditingHeadingValue(customHeading || excerpt?.name || '');
-                        }}
-                      />
-                    </Inline>
-                  ) : (
-                    <Pressable
-                      onClick={() => {
-                        setEditingHeadingValue(customHeading || excerpt?.name || '');
-                        setIsEditingHeading(true);
-                      }}
-                      xcss={xcss({
-                        backgroundColor: 'color.background.neutral.subtle',
-                        padding: 'space.050',
-                        borderRadius: 'border.radius.100',
-                        cursor: 'pointer'
-                      })}
-                    >
+                    </Box>
+                    {/* Custom editable heading - Pressable switches to Textfield on click */}
+                    {isEditingHeading ? (
                       <Inline space="space.050" alignBlock="center">
-                        <Heading size="large">{customHeading || excerpt?.name || ''}</Heading>
-                        <Text>✏️</Text>
+                        <Box xcss={xcss({ minWidth: '400px', flexGrow: '1' })}>
+                          <Textfield
+                            value={editingHeadingValue}
+                            onChange={(e) => setEditingHeadingValue(e.target.value)}
+                            placeholder="Enter chapter heading..."
+                            autoFocus
+                          />
+                        </Box>
+                        <Button
+                          appearance="subtle"
+                          iconBefore="check-circle"
+                          onClick={() => {
+                            // Save the new heading value
+                            const headingValue = editingHeadingValue || '';
+                            setValue('customHeading', headingValue, { shouldDirty: true });
+                            setIsEditingHeading(false);
+                            // Trigger draft save
+                            if (onBlur) {
+                              setTimeout(() => onBlur(), 0);
+                            }
+                          }}
+                        />
+                        <Button
+                          appearance="subtle"
+                          iconBefore="cross-circle"
+                          onClick={() => {
+                            // Cancel editing without saving
+                            setIsEditingHeading(false);
+                            setEditingHeadingValue(customHeading || excerpt?.name || '');
+                          }}
+                        />
                       </Inline>
-                    </Pressable>
-                  )}
-                </Inline>
-              </Box>
-            )}
-            {/* Preview Content */}
-            {isAdf ? (
-              <Box xcss={adfContentContainerStyle}>
-                <AdfRenderer document={previewContent} />
-              </Box>
-            ) : (
-              <Text>{previewContent || 'No content'}</Text>
-            )}
-          </Stack>
-        </Box>
-      </Stack>
+                    ) : (
+                      <Pressable
+                        onClick={() => {
+                          setEditingHeadingValue(customHeading || excerpt?.name || '');
+                          setIsEditingHeading(true);
+                        }}
+                        xcss={xcss({
+                          backgroundColor: 'color.background.neutral.subtle',
+                          padding: 'space.050',
+                          borderRadius: 'border.radius.100',
+                          cursor: 'pointer'
+                        })}
+                      >
+                        <Inline space="space.050" alignBlock="center">
+                          <Heading size="large">{customHeading || excerpt?.name || ''}</Heading>
+                          <Text>✏️</Text>
+                        </Inline>
+                      </Pressable>
+                    )}
+                  </Inline>
+                </Box>
+              )}
+              {/* Preview Content */}
+              {isAdf ? (
+                <Box xcss={adfContentContainerStyle}>
+                  <AdfRenderer document={previewContent} />
+                </Box>
+              ) : (
+                <Text>{previewContent || 'No content'}</Text>
+              )}
+            </Stack>
+          </Box>
+        </Stack>
+      )}
 
       {/* Compositor Modal */}
       {pageId && (

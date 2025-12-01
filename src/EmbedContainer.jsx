@@ -881,6 +881,10 @@ const App = () => {
     const pageId = context?.contentId || context?.extension?.content?.id;
     const needsRepublish = publishStatus?.isPublished && editSession.isDirty;
 
+    // Determine if we're in Confluence's page edit mode (vs our internal View Mode editing)
+    // When isEditing=true but isEditingEmbed=false, user is in Confluence editor
+    const isConfluenceEditMode = isEditing && !isEditingEmbed;
+
     return (
       <Fragment>
         {/* Draft Recovery Banner */}
@@ -967,6 +971,8 @@ const App = () => {
           onBlur={editSession.handleBlur}
           // Reset handler
           onReset={handleReset}
+          // Confluence edit mode flag - shows restricted UI with guidance message
+          isConfluenceEditMode={isConfluenceEditMode}
         />
       </Fragment>
     );

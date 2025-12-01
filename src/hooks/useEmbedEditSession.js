@@ -348,6 +348,25 @@ export const useEmbedEditSession = (localId, options = {}) => {
         freeformContent: '' // Clear freeform content when switching Sources
       });
       
+      // Also save to Forge storage immediately
+      // This ensures the Source selection persists even if user exits without explicit save
+      // (e.g., when editing in Confluence's page edit mode)
+      await invoke('saveVariableValues', {
+        localId,
+        excerptId: newExcerptId,
+        variableValues: normalizeVariableValues(preservedVariableValues),
+        toggleStates: {},
+        customInsertions: currentValues.customInsertions,
+        internalNotes: currentValues.internalNotes,
+        customHeading: currentValues.customHeading || '',
+        complianceLevel: null,
+        isFreeformMode: false,
+        freeformContent: ''
+      });
+      
+      // Invalidate React Query cache so View Mode picks up the change
+      await queryClient.invalidateQueries({ queryKey: ['variableValues', localId] });
+      
       // Track usage
       const pageId = context?.contentId || context?.extension?.content?.id;
       if (pageId) {
@@ -370,7 +389,7 @@ export const useEmbedEditSession = (localId, options = {}) => {
       logger.errors('[useEmbedEditSession] Source switch failed:', error);
       setSaveStatus('error');
     }
-  }, [localId, excerptId, originalExcerptId, getValues, reset, context]);
+  }, [localId, excerptId, originalExcerptId, getValues, reset, context, queryClient]);
   
   // ============================================================================
   // SAVE AND EXIT

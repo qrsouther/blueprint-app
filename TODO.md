@@ -6,6 +6,40 @@ This file tracks ongoing tasks, future enhancements, and technical debt for the 
 
 ## Current Sprint / Active Work
 
+### README Rewrite for Content Injection Architecture
+**Status:** 🔴 TODO
+**Priority:** HIGH
+**Created:** 2025-12-01
+
+**Context:**
+The app has transitioned from rendered iframes (where each Embed macro spawned its own iframe to display content) to a **content injection model** (where content is injected directly into Confluence page storage). This is a fundamental architectural change that the README.md does not currently reflect.
+
+**Key Architectural Changes to Document:**
+1. **Old Model (Iframes):** Each Embed macro rendered content in an isolated iframe at view time
+2. **New Model (Content Injection):** Content is injected directly into Confluence page storage via the Forge Content Injection API
+3. **Benefits:** Better performance, native Confluence rendering, Page History captures all content, no iframe overhead
+4. **User Impact:** Content now appears in Page History, Page Export, Search, etc. as native Confluence content
+
+**README Sections to Update:**
+- **Architecture Overview:** Explain the content injection model
+- **How It Works:** Update flow diagrams to show injection vs rendering
+- **Data Flow:** Source content → Variable substitution → Toggle filtering → Page storage injection
+- **Page History Integration:** Explain that all injected content is versioned by Confluence
+- **Performance Benefits:** No more iframe spawn overhead (5-10× faster page loads)
+
+**Files to Reference:**
+- `docs/architecture/CONTENT_INJECTION_PROPOSALS.md` - Detailed injection architecture
+- `docs/implementation/PHASE_1_INJECTION_ENGINE.md` - Implementation details
+- `src/resolvers/injection-resolver.js` - Core injection logic
+
+**Success Criteria:**
+- [ ] README explains content injection model clearly
+- [ ] Old iframe model references removed or marked as legacy
+- [ ] New developer can understand the architecture in <10 minutes
+- [ ] Accurate description of how content flows from Source → Embed → Page
+
+---
+
 ### Test Priority 5: Version History & Recovery
 **Status:** 🔄 IN PROGRESS - Test Guide Created
 **Priority:** High
