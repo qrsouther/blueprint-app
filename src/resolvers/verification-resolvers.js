@@ -671,10 +671,36 @@ async function getAllKeysWithPrefix(prefix, maxPages = 50) {
  *
  * Forge storage limit: 250MB per app
  * Returns usage in bytes, MB, and percentage of limit
+ * 
+ * Caching: Results are cached for 24 hours to reduce API calls.
+ * Pass forceRefresh: true in req.payload to bypass cache.
  */
-export async function getStorageUsage(_req) {
+export async function getStorageUsage(req) {
+  const { forceRefresh = false } = req.payload || {};
+  const CACHE_KEY = 'storage-usage-cache';
+  const CACHE_DURATION_MS = 24 * 60 * 60 * 1000; // 24 hours
+
   try {
-    logFunction('getStorageUsage', 'Calculating storage usage');
+    // Check cache first unless force refresh is requested
+    if (!forceRefresh) {
+      const cached = await storage.get(CACHE_KEY);
+      if (cached && cached.timestamp && cached.data) {
+        const cacheAge = Date.now() - cached.timestamp;
+        if (cacheAge < CACHE_DURATION_MS) {
+          logFunction('getStorageUsage', 'Returning cached storage usage', {
+            cacheAgeHours: (cacheAge / (60 * 60 * 1000)).toFixed(2)
+          });
+          return {
+            success: true,
+            data: cached.data,
+            cached: true,
+            cacheAgeMs: cacheAge
+          };
+        }
+      }
+    }
+
+    logFunction('getStorageUsage', 'Calculating storage usage', { forceRefresh });
 
     // Query all keys from storage in parallel (with pagination)
     // This is much faster than sequential calls and reduces timeout risk
@@ -785,23 +811,37 @@ export async function getStorageUsage(_req) {
       });
     }
 
+    const resultData = {
+      totalBytes,
+      totalMB: parseFloat(totalMB.toFixed(2)),
+      limitMB,
+      warningThresholdMB,
+      percentUsed: parseFloat(percentUsed.toFixed(1)),
+      exceedsWarningThreshold,
+      keyCount: allKeys.length,
+      sourcesCount,
+      embedsCount,
+      breakdown: {
+        bytes: breakdown,
+        mb: breakdownMB
+      }
+    };
+
+    // Cache the result for 24 hours
+    try {
+      await storage.set(CACHE_KEY, {
+        timestamp: Date.now(),
+        data: resultData
+      });
+    } catch (cacheError) {
+      // Don't fail the request if caching fails
+      logWarning('getStorageUsage', 'Failed to cache storage usage', { error: cacheError.message });
+    }
+
     return {
       success: true,
-      data: {
-        totalBytes,
-        totalMB: parseFloat(totalMB.toFixed(2)),
-        limitMB,
-        warningThresholdMB,
-        percentUsed: parseFloat(percentUsed.toFixed(1)),
-        exceedsWarningThreshold,
-        keyCount: allKeys.length,
-        sourcesCount,
-        embedsCount,
-        breakdown: {
-          bytes: breakdown,
-          mb: breakdownMB
-        }
-      }
+      data: resultData,
+      cached: false
     };
 
   } catch (error) {

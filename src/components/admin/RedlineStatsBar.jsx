@@ -20,6 +20,7 @@
  * @param {Function} onSortChange - Callback to update sort field
  * @param {string|null} groupBy - Current group field
  * @param {Function} onGroupChange - Callback to update group field
+ * @param {boolean} isActive - Whether the tab is active (default: true)
  */
 
 import React, { useCallback } from 'react';
@@ -93,9 +94,10 @@ function RedlineStatsBarComponent({
   onSortChange,
   groupBy,
   onGroupChange,
-  onManualRefresh
+  onManualRefresh,
+  isActive = true
 }) {
-  const { data: stats, isLoading, error } = useRedlineStatsQuery();
+  const { data: stats, isLoading, error } = useRedlineStatsQuery(isActive);
   
   // Use ref to access current filters without causing callback recreation
   const filtersRef = React.useRef(filters);

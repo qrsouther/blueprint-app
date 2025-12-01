@@ -7,7 +7,7 @@
  * Extracted during Phase 3 of index.js modularization.
  */
 
-import { storage } from '@forge/api';
+import { storage, startsWith } from '@forge/api';
 import api, { route } from '@forge/api';
 import { generateUUID } from '../utils.js';
 import { detectVariables, detectToggles } from '../utils/detection-utils.js';
@@ -202,6 +202,9 @@ export async function saveExcerpt(req) {
   // Update index
   await updateExcerptIndex(excerpt);
 
+  // Clear cache to ensure fresh data on next getAllExcerpts call
+  await clearExcerptsCache();
+
   logSuccess('saveExcerpt', 'Excerpt saved successfully', {
     excerptId: id,
     duration: `${Date.now() - functionStartTime}ms`
@@ -339,6 +342,9 @@ export async function updateExcerptContent(req) {
     // Update index
     await updateExcerptIndex(updatedExcerpt);
 
+    // Clear cache to ensure fresh data on next getAllExcerpts call
+    await clearExcerptsCache();
+
     return { success: true, unchanged: false };
   } catch (error) {
     logFailure('updateExcerptContent', 'Error updating excerpt content', error, { excerptId: extractedExcerptId });
@@ -351,25 +357,76 @@ export async function updateExcerptContent(req) {
 }
 
 /**
- * Get all excerpts with full details (for admin page)
+ * Note: Backend caching removed for getAllExcerpts due to size constraints (data exceeds 245KB limit).
+ * React Query handles client-side caching instead (5 minute staleTime).
+ * This function is kept for compatibility but is now a no-op.
+ * Client-side cache invalidation is handled by React Query when mutations occur.
  */
-export async function getAllExcerpts() {
+async function clearExcerptsCache() {
+  // No-op: Backend caching removed due to size limits
+  // React Query will handle cache invalidation on the client side via query invalidation
+}
+
+/**
+ * Get all excerpts with full details (for admin page)
+ * 
+ * Optimizations:
+ * - Uses storage.query() to batch fetch all excerpts instead of individual gets
+ * - Note: Backend caching removed due to size constraints (data exceeds 245KB limit)
+ * - React Query provides client-side caching (5 minute staleTime)
+ */
+export async function getAllExcerpts(req = {}) {
   try {
-    const index = await storage.get('excerpt-index') || { excerpts: [] };
+    logFunction('getAllExcerpts', 'Fetching all excerpts');
 
-    // Load full details for each excerpt
-    const excerptPromises = index.excerpts.map(async (indexEntry) => {
-      const fullExcerpt = await storage.get(`excerpt:${indexEntry.id}`);
-      return fullExcerpt;
+    // Use storage.query() to batch fetch all excerpts with prefix 'excerpt:'
+    // This is much more efficient than individual storage.get() calls
+    const allExcerpts = [];
+    let cursor = await storage.query().where('key', startsWith('excerpt:')).getMany();
+    let pageCount = 1;
+    const maxPages = 20; // Safety limit to prevent timeouts
+
+    // Add first page
+    if (cursor.results && cursor.results.length > 0) {
+      // Extract values from query results (results contain { key, value } objects)
+      const excerpts = cursor.results
+        .map(item => item.value)
+        .filter(value => value !== null && value !== undefined);
+      allExcerpts.push(...excerpts);
+    }
+
+    // Paginate through remaining pages
+    while (cursor.nextCursor && pageCount < maxPages) {
+      cursor = await storage.query()
+        .where('key', startsWith('excerpt:'))
+        .cursor(cursor.nextCursor)
+        .getMany();
+      
+      if (cursor.results && cursor.results.length > 0) {
+        const excerpts = cursor.results
+          .map(item => item.value)
+          .filter(value => value !== null && value !== undefined);
+        allExcerpts.push(...excerpts);
+      }
+      pageCount++;
+    }
+
+    if (cursor.nextCursor && pageCount >= maxPages) {
+      logWarning('getAllExcerpts', `Hit page limit (${maxPages}) for excerpt query. Results may be incomplete.`);
+    }
+
+    const resultData = {
+      excerpts: allExcerpts
+    };
+
+    logSuccess('getAllExcerpts', 'Fetched all excerpts', {
+      count: allExcerpts.length,
+      pages: pageCount
     });
-
-    const excerpts = await Promise.all(excerptPromises);
 
     return {
       success: true,
-      data: {
-        excerpts: excerpts.filter(e => e !== null)
-      }
+      data: resultData
     };
   } catch (error) {
     logFailure('getAllExcerpts', 'Error getting all excerpts', error);
@@ -406,6 +463,9 @@ export async function deleteExcerpt(req) {
     const index = await storage.get('excerpt-index') || { excerpts: [] };
     index.excerpts = index.excerpts.filter(e => e.id !== excerptId);
     await storage.set('excerpt-index', index);
+
+    // Clear cache to ensure fresh data on next getAllExcerpts call
+    await clearExcerptsCache();
 
     return {
       success: true
@@ -499,6 +559,9 @@ export async function updateExcerptMetadata(req) {
 
     // Update the index
     await updateExcerptIndex(excerpt);
+
+    // Clear cache to ensure fresh data on next getAllExcerpts call
+    await clearExcerptsCache();
 
     return {
       success: true

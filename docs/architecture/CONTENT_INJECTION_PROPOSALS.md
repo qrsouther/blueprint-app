@@ -1928,6 +1928,25 @@ Task: Develop content injection architecture proposals for Blueprint App
 | 2025-11-26 21:10 | Claude Opus 4 | Added Compositor Integration section: chapter-based content model, Edit Mode visibility solutions, custom content preservation algorithm, redlining per chapter |
 | 2025-11-26 21:45 | Claude Opus 4 | Added Simplified Compositor section: archetype-based composition, UI Kit Modal approach, code reuse analysis |
 | 2025-11-26 22:30 | Claude Opus 4 | **Final architecture decision:** Locked Page Model. All 12 stakeholder questions resolved. Explicit Publish model (not auto-inject). Page locked to users; app owns writes. |
+| 2025-12-01 | Claude Opus 4.5 | **Implementation update:** HTML comment markers (`<!-- BLUEPRINT-CHAPTER-START -->`) are stripped by Confluence during page save. Implemented Content Properties macro boundaries (`ac:name="details"` with `hidden=true` parameter) instead. This is the Confluence-sanctioned way to persist invisible boundary markers. |
+
+---
+
+## Implementation Note (2025-12-01)
+
+The chapter boundary approach documented in this proposal (HTML comment markers) was discovered to not work in practice—Confluence strips HTML comments from page storage during save operations.
+
+**Final Implementation:** Content Properties macros (Confluence's `details` macro) with the `hidden=true` parameter:
+- START boundary: `<ac:structured-macro ac:name="details"><ac:parameter ac:name="hidden">true</ac:parameter><ac:parameter ac:name="id">blueprint-start-{localId}</ac:parameter>...`
+- END boundary: `<ac:structured-macro ac:name="details"><ac:parameter ac:name="hidden">true</ac:parameter><ac:parameter ac:name="id">blueprint-end-{localId}</ac:parameter>...`
+
+This approach:
+- Uses an officially supported Confluence macro with a documented `hidden` parameter
+- Reliably persists across page saves
+- Stores the Embed's `localId` in the `id` parameter for detection
+- Is invisible to users but findable by the injection engine
+
+Additionally, the Section macro wrapper was removed from body content entirely. Content is now injected as plain paragraphs, enabling inline comments (Redline system) on all content, not just headings.
 
 ---
 

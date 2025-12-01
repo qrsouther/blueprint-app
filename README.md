@@ -691,7 +691,7 @@ The Blueprint App uses a **content injection architecture** with four layers:
   - **What it is:** The actual rendered Embed content stored directly in Confluence page storage, appearing as native page content
   - **Why it matters:** Content is searchable, exportable, visible in Page History, and renders instantly without iframes
   - **Functional impact:** When viewing a Blueprint page, users see native Confluence content that was injected by the Blueprint App—no loading states, no iframes
-  - **Data perspective:** Chapter-marked HTML/storage format content injected between `<!-- BLUEPRINT-CHAPTER-START -->` and `<!-- BLUEPRINT-CHAPTER-END -->` markers
+  - **Data perspective:** Chapter-marked HTML/storage format content injected between hidden Content Properties macros (`ac:name="details"` with `hidden=true`) that serve as boundary markers
 
 ### Data Flow
 
@@ -714,10 +714,17 @@ The Blueprint App uses a **content injection architecture** with four layers:
 
 **Content Injection Details:**
 - Rendered content is converted from ADF to Confluence storage format
-- Content is wrapped in chapter markers: `<!-- BLUEPRINT-CHAPTER-START: {chapterId} -->`
-- Chapter heading (h2) is injected for Confluence TOC compatibility
-- Chapter divider (hr) marks the end of each chapter
-- Content appears as native page content—searchable, exportable, in Page History
+- Content is wrapped in hidden Content Properties boundary markers (Confluence's `details` macro with `hidden=true` parameter)
+- The `id` parameter of each boundary marker stores the Embed's `localId` for reliable chapter detection
+- Chapter heading (h2) is injected outside any wrapper macro to enable inline comments
+- Body content is injected as native paragraphs (no Section macro wrapper) to support inline comments throughout
+- Content appears as native page content—searchable, exportable, in Page History, and fully commentable
+
+**Why Content Properties Macros for Boundaries:**
+- Confluence strips HTML comments (`<!-- -->`) and HTML `hidden` attributes from page storage
+- The [Content Properties macro](https://support.atlassian.com/confluence-cloud/docs/insert-the-page-properties-macro/) has an officially supported `hidden` parameter that persists
+- Boundary markers are invisible to users but reliably detected by the injection engine for chapter updates/removals
+- This enables precise chapter boundary detection without visible UI artifacts
 
 **Important:** Embed configuration AND rendered content are both persisted:
 - **Configuration** (variable values, toggle states) → Forge storage (`macro-vars:{localId}`)

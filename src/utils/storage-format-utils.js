@@ -89,6 +89,56 @@ export function escapeHtml(text) {
 }
 
 /**
+ * Strip leading heading tags from storage format HTML
+ *
+ * Removes any h1-h6 heading element that appears at the start of the content.
+ * Used to prevent duplicate headings when we inject our own heading above the Section macro.
+ *
+ * @param {string} storageHtml - Storage format HTML content
+ * @returns {string} HTML with leading heading removed
+ */
+export function stripLeadingHeading(storageHtml) {
+  if (!storageHtml || typeof storageHtml !== 'string') {
+    return storageHtml || '';
+  }
+
+  // Match any heading tag (h1-h6) at the start, with optional whitespace/newlines before it
+  // Also match the closing tag and any whitespace/newlines after it
+  // Pattern: optional whitespace, <h[1-6][^>]*>content</h[1-6]>, optional whitespace
+  const headingPattern = /^\s*<h[1-6][^>]*>[\s\S]*?<\/h[1-6]>\s*/i;
+  
+  const cleaned = storageHtml.replace(headingPattern, '');
+  
+  return cleaned;
+}
+
+/**
+ * Build a hidden Content Properties (details) macro as a chapter boundary marker
+ *
+ * Uses Confluence's official Content Properties macro with hidden=true parameter.
+ * This is the only reliable way to persist invisible boundary markers in Confluence
+ * storage format, as HTML comments and hidden HTML attributes are stripped.
+ *
+ * Per Confluence docs: https://support.atlassian.com/confluence-cloud/docs/insert-the-page-properties-macro/
+ * - The `hidden` parameter hides the macro visually but preserves it in storage
+ * - The `id` parameter identifies specific macros (we use localId)
+ * - A table with key-value structure is required inside the macro
+ *
+ * @param {string} localId - Embed macro localId (stored in the id parameter)
+ * @param {string} markerType - Either 'START' or 'END'
+ * @returns {string} Hidden Content Properties macro XML
+ */
+function buildBoundaryMarker(localId, markerType) {
+  return `<ac:structured-macro ac:name="details" ac:schema-version="1">
+<ac:parameter ac:name="hidden">true</ac:parameter>
+<ac:parameter ac:name="id">blueprint-${markerType.toLowerCase()}-${localId}</ac:parameter>
+<ac:rich-text-body>
+<table><tbody><tr><th><p>blueprint-chapter</p></th><td><p>${markerType}</p></td></tr></tbody></table>
+</ac:rich-text-body>
+</ac:structured-macro>`;
+}
+
+/**
  * Compliance level configuration mapping
  * Maps compliance level values to emoji and label for injected content
  */
@@ -117,28 +167,33 @@ function buildStatusMacro(complianceLevel, isBespoke = false) {
 }
 
 /**
- * Build complete chapter HTML structure using Confluence Section macro
+ * Build complete chapter HTML structure using hidden Content Properties boundary markers
  *
- * Creates the full chapter structure wrapped in a Section macro:
- * - Section macro as container with blueprint parameters (these are preserved!)
- * - Status lozenge based on compliance level, followed by H2 heading (native, TOC-readable)
- * - Body content
- * - Simple <hr> divider at end for visual separation
+ * Creates the full chapter structure:
+ * - START boundary (hidden Content Properties macro with localId)
+ * - H2 heading (native, TOC-readable, supports inline comments)
+ * - Body content (NOT wrapped in Section macro - allows inline comments everywhere)
+ * - END boundary (hidden Content Properties macro with localId)
  *
- * Why Section macro:
- * - Confluence preserves ac:parameter elements on structured macros
- * - Section renders invisibly (no visual box/border)
- * - Divider macro doesn't actually support parameters (just renders <hr>)
- * - data-* attributes, class names, and custom attributes are all stripped
+ * Why Content Properties macro for boundaries:
+ * - Confluence strips HTML comments, hidden HTML attributes, and other markers
+ * - Content Properties macro has official `hidden` parameter that persists
+ * - The `id` parameter stores our localId for reliable identification
+ * - This is the Confluence-sanctioned way to store invisible metadata
+ *
+ * Why no Section macro wrapper:
+ * - Content inside Section macros cannot receive inline comments
+ * - Without Section, all body content supports inline Redline comments
+ * - Confluence TOC still picks up the heading (it's native <h2>)
  *
  * @param {Object} options
- * @param {string} options.chapterId - Unique chapter identifier
- * @param {string} options.localId - Embed macro localId
+ * @param {string} options.chapterId - Unique chapter identifier (unused with new approach but kept for compatibility)
+ * @param {string} options.localId - Embed macro localId (used in boundary markers)
  * @param {string} options.heading - Chapter heading text
  * @param {string} options.bodyContent - Rendered body content (storage format)
  * @param {string} options.complianceLevel - Compliance level (standard, bespoke, semi-standard, non-standard, tbd, na)
  * @param {boolean} options.isBespoke - Fallback for when complianceLevel is null
- * @returns {string} Complete chapter HTML wrapped in section macro
+ * @returns {string} Complete chapter HTML with boundary markers
  */
 export function buildChapterStructure({ chapterId, localId, heading, bodyContent, complianceLevel = null, isBespoke = false }) {
   if (!chapterId || !localId) {
@@ -148,16 +203,14 @@ export function buildChapterStructure({ chapterId, localId, heading, bodyContent
   const escapedHeading = escapeHtml(heading || 'Untitled Chapter');
   const statusMacro = buildStatusMacro(complianceLevel, isBespoke);
 
-  // Use Section macro as container - parameters are preserved!
-  // Section macro itself forms the boundary, no need for <hr />
-  return `<ac:structured-macro ac:name="section" ac:schema-version="1">
-<ac:parameter ac:name="blueprint-chapter">${chapterId}</ac:parameter>
-<ac:parameter ac:name="blueprint-local">${localId}</ac:parameter>
-<ac:rich-text-body>
+  // Build chapter with hidden Content Properties boundary markers
+  const startMarker = buildBoundaryMarker(localId, 'START');
+  const endMarker = buildBoundaryMarker(localId, 'END');
+
+  return `${startMarker}
 <h2>${statusMacro} ${escapedHeading}</h2>
 ${bodyContent || ''}
-</ac:rich-text-body>
-</ac:structured-macro>`;
+${endMarker}`;
 }
 
 /**
@@ -166,15 +219,15 @@ ${bodyContent || ''}
  * Creates a "Under Construction" placeholder that appears when a chapter
  * has been added via Compositor but not yet configured/published.
  *
- * Uses Section macro as container with parameters.
+ * Uses hidden Content Properties boundary markers (no Section macro wrapper).
  *
  * @param {Object} options
- * @param {string} options.chapterId - Unique chapter identifier
- * @param {string} options.localId - Embed macro localId
+ * @param {string} options.chapterId - Unique chapter identifier (unused but kept for compatibility)
+ * @param {string} options.localId - Embed macro localId (used in boundary markers)
  * @param {string} options.heading - Chapter heading text
  * @param {string} options.complianceLevel - Compliance level (standard, bespoke, semi-standard, non-standard, tbd, na)
  * @param {boolean} options.isBespoke - Fallback for when complianceLevel is null
- * @returns {string} Placeholder HTML wrapped in section macro
+ * @returns {string} Placeholder HTML with boundary markers
  */
 export function buildChapterPlaceholder({ chapterId, localId, heading, complianceLevel = null, isBespoke = false }) {
   if (!chapterId || !localId) {
@@ -191,16 +244,15 @@ export function buildChapterPlaceholder({ chapterId, localId, heading, complianc
 </ac:rich-text-body>
 </ac:structured-macro>`;
 
-  // Use Section macro as container - parameters are preserved!
-  return `<ac:structured-macro ac:name="section" ac:schema-version="1">
-<ac:parameter ac:name="blueprint-chapter">${chapterId}</ac:parameter>
-<ac:parameter ac:name="blueprint-local">${localId}</ac:parameter>
-<ac:rich-text-body>
+  // Build chapter with hidden Content Properties boundary markers
+  const startMarker = buildBoundaryMarker(localId, 'START');
+  const endMarker = buildBoundaryMarker(localId, 'END');
+
+  return `${startMarker}
 <h2>${statusMacro} ${escapedHeading}</h2>
 ${placeholderContent}
 <hr />
-</ac:rich-text-body>
-</ac:structured-macro>`;
+${endMarker}`;
 }
 
 /**
@@ -211,15 +263,15 @@ ${placeholderContent}
  * compliance levels and chooses to write their own content.
  *
  * Converts plain text into <p> tags, handling newlines as paragraph breaks.
- * Uses Section macro as container to maintain redlining capability.
+ * Uses hidden Content Properties boundary markers (no Section macro wrapper).
  *
  * @param {Object} options
- * @param {string} options.chapterId - Unique chapter identifier
- * @param {string} options.localId - Embed macro localId
+ * @param {string} options.chapterId - Unique chapter identifier (unused but kept for compatibility)
+ * @param {string} options.localId - Embed macro localId (used in boundary markers)
  * @param {string} options.heading - Chapter heading text
  * @param {string} options.freeformContent - Raw text content (newlines create paragraph breaks)
  * @param {string} options.complianceLevel - Compliance level (non-standard, tbd, na)
- * @returns {string} Complete chapter HTML wrapped in section macro
+ * @returns {string} Complete chapter HTML with boundary markers
  */
 export function buildFreeformChapter({ chapterId, localId, heading, freeformContent = '', complianceLevel }) {
   if (!chapterId || !localId) {
@@ -242,53 +294,107 @@ export function buildFreeformChapter({ chapterId, localId, heading, freeformCont
   // If no content, show a placeholder message
   const bodyContent = paragraphs || '<p><em>No content provided.</em></p>';
 
-  // Use Section macro as container - same structure as standard chapters
-  return `<ac:structured-macro ac:name="section" ac:schema-version="1">
-<ac:parameter ac:name="blueprint-chapter">${chapterId}</ac:parameter>
-<ac:parameter ac:name="blueprint-local">${localId}</ac:parameter>
-<ac:parameter ac:name="blueprint-freeform">true</ac:parameter>
-<ac:rich-text-body>
+  // Build chapter with hidden Content Properties boundary markers
+  const startMarker = buildBoundaryMarker(localId, 'START');
+  const endMarker = buildBoundaryMarker(localId, 'END');
+
+  return `${startMarker}
 <h2>${statusMacro} ${escapedHeading}</h2>
 ${bodyContent}
-</ac:rich-text-body>
-</ac:structured-macro>`;
+${endMarker}`;
 }
 
 /**
  * Find and extract chapter content from page body
  *
- * Locates a chapter by its ID within the page storage content
+ * Locates a chapter by its localId within the page storage content
  * and returns its position and content.
  *
- * Searches for Section macro with blueprint-chapter parameter matching chapterId.
- * The entire section macro (from opening to closing tag) is the chapter.
+ * NEW chapter structure (Content Properties boundaries):
+ * - START boundary: hidden details macro with id="blueprint-start-${localId}"
+ * - H2 heading
+ * - Body content (no Section wrapper)
+ * - END boundary: hidden details macro with id="blueprint-end-${localId}"
+ *
+ * LEGACY chapter structure (Section macro - for backwards compatibility):
+ * - <h2> heading
+ * - Section macro with blueprint-chapter and blueprint-local parameters
+ *
+ * Detection logic:
+ * 1. Primary: Look for Content Properties boundaries by localId
+ * 2. Fallback: Look for Section macro with blueprint-local parameter
  *
  * @param {string} pageBody - Full page storage content
- * @param {string} chapterId - Chapter ID to find
+ * @param {string} localId - Embed localId to find
  * @returns {Object|null} { startIndex, endIndex, content, localId } or null if not found
  */
-export function findChapter(pageBody, chapterId) {
-  if (!pageBody || !chapterId) return null;
+export function findChapter(pageBody, localId) {
+  if (!pageBody || !localId) return null;
 
-  // Look for our parameter: <ac:parameter ac:name="blueprint-chapter">{chapterId}</ac:parameter>
-  const paramPattern = `<ac:parameter ac:name="blueprint-chapter">${chapterId}</ac:parameter>`;
-  console.log('[findChapter] DEBUG - searching for pattern:', paramPattern);
+  // PRIMARY: Look for new Content Properties boundary markers
+  // The START marker has: <ac:parameter ac:name="id">blueprint-start-${localId}</ac:parameter>
+  const startMarkerId = `blueprint-start-${localId}`;
+  const endMarkerId = `blueprint-end-${localId}`;
   
-  const paramIndex = pageBody.indexOf(paramPattern);
-  console.log('[findChapter] DEBUG - paramIndex:', paramIndex);
+  const startIdPattern = `<ac:parameter ac:name="id">${startMarkerId}</ac:parameter>`;
+  const endIdPattern = `<ac:parameter ac:name="id">${endMarkerId}</ac:parameter>`;
   
-  if (paramIndex === -1) {
-    // Debug: try to find any blueprint-chapter param to see what's there
-    const anyBlueprintParam = pageBody.indexOf('ac:parameter ac:name="blueprint-chapter"');
-    console.log('[findChapter] DEBUG - any blueprint-chapter param at:', anyBlueprintParam);
-    if (anyBlueprintParam !== -1) {
-      console.log('[findChapter] DEBUG - surrounding content:', pageBody.substring(anyBlueprintParam, anyBlueprintParam + 150));
+  console.log('[findChapter] DEBUG - searching for start marker:', startIdPattern);
+  
+  const startIdIndex = pageBody.indexOf(startIdPattern);
+  const endIdIndex = pageBody.indexOf(endIdPattern);
+  
+  if (startIdIndex !== -1 && endIdIndex !== -1) {
+    console.log('[findChapter] DEBUG - found Content Properties boundaries');
+    
+    // Find the opening of the START details macro (search backwards from the id parameter)
+    const beforeStartId = pageBody.substring(0, startIdIndex);
+    const startMacroOpen = beforeStartId.lastIndexOf('<ac:structured-macro');
+    
+    if (startMacroOpen === -1) {
+      console.log('[findChapter] DEBUG - could not find START macro opening');
+      return null;
     }
+    
+    // Find the closing of the END details macro
+    // Search forward from endIdIndex for </ac:structured-macro>
+    const afterEndId = pageBody.indexOf('</ac:structured-macro>', endIdIndex);
+    if (afterEndId === -1) {
+      console.log('[findChapter] DEBUG - could not find END macro closing');
+      return null;
+    }
+    const endMacroClose = afterEndId + '</ac:structured-macro>'.length;
+    
+    const chapterContent = pageBody.substring(startMacroOpen, endMacroClose);
+    
+    console.log('[findChapter] DEBUG - found chapter via Content Properties boundaries:', {
+      startIndex: startMacroOpen,
+      endIndex: endMacroClose,
+      contentLength: chapterContent.length
+    });
+    
+    return {
+      startIndex: startMacroOpen,
+      endIndex: endMacroClose,
+      content: chapterContent,
+      localId: localId
+    };
+  }
+  
+  console.log('[findChapter] DEBUG - Content Properties boundaries not found, trying legacy Section macro');
+
+  // FALLBACK: Look for legacy Section macro structure
+  // Look for: <ac:parameter ac:name="blueprint-local">${localId}</ac:parameter>
+  const legacyParamPattern = `<ac:parameter ac:name="blueprint-local">${localId}</ac:parameter>`;
+  const legacyParamIndex = pageBody.indexOf(legacyParamPattern);
+  
+  if (legacyParamIndex === -1) {
+    console.log('[findChapter] DEBUG - no legacy blueprint-local parameter found');
     return null;
   }
 
   // Find the opening <ac:structured-macro tag (search backwards from parameter)
-  const beforeParam = pageBody.substring(0, paramIndex);
+  const beforeParam = pageBody.substring(0, legacyParamIndex);
   const macroStart = beforeParam.lastIndexOf('<ac:structured-macro');
   if (macroStart === -1) {
     console.log('[findChapter] DEBUG - no opening macro tag found');
@@ -337,18 +443,33 @@ export function findChapter(pageBody, chapterId) {
     return null;
   }
 
-  // Extract localId from blueprint-local parameter if present
-  const content = pageBody.substring(macroStart, macroEnd);
-  let localId = null;
-  const localParamMatch = content.match(/<ac:parameter ac:name="blueprint-local">([^<]+)<\/ac:parameter>/);
-  if (localParamMatch) {
-    localId = localParamMatch[1];
+  // Now find the chapter START (heading before Section macro)
+  let chapterStart = macroStart;
+  
+  // Look for <h2> tag immediately before the Section macro
+  const h2Pattern = /<h2[^>]*>/gi;
+  let lastH2Index = -1;
+  let match;
+  
+  // Find all <h2> tags before the Section macro
+  while ((match = h2Pattern.exec(beforeParam)) !== null) {
+    lastH2Index = match.index;
+  }
+  
+  if (lastH2Index !== -1) {
+    // Check if this <h2> is "close enough" to the Section macro (within 500 chars)
+    const distanceToMacro = macroStart - lastH2Index;
+    if (distanceToMacro < 500) {
+      chapterStart = lastH2Index;
+      console.log('[findChapter] DEBUG - found <h2> at', lastH2Index, 'distance:', distanceToMacro);
+    }
   }
 
-  console.log('[findChapter] DEBUG - found chapter from', macroStart, 'to', macroEnd);
+  const content = pageBody.substring(chapterStart, macroEnd);
+  console.log('[findChapter] DEBUG - found chapter from', chapterStart, 'to', macroEnd);
 
   return {
-    startIndex: macroStart,
+    startIndex: chapterStart,
     endIndex: macroEnd,
     content,
     localId
@@ -362,13 +483,13 @@ export function findChapter(pageBody, chapterId) {
  * Used when user opts out of a chapter via Compositor.
  *
  * @param {string} pageBody - Full page storage content
- * @param {string} chapterId - Chapter ID to remove
+ * @param {string} localId - Embed localId to remove
  * @returns {string} Updated page body with chapter removed
  */
-export function removeChapter(pageBody, chapterId) {
-  if (!pageBody || !chapterId) return pageBody;
+export function removeChapter(pageBody, localId) {
+  if (!pageBody || !localId) return pageBody;
 
-  const chapter = findChapter(pageBody, chapterId);
+  const chapter = findChapter(pageBody, localId);
   if (!chapter) return pageBody;
 
   // Remove the chapter and any surrounding whitespace
@@ -383,11 +504,11 @@ export function removeChapter(pageBody, chapterId) {
  * Check if a chapter exists in the page body
  *
  * @param {string} pageBody - Full page storage content
- * @param {string} chapterId - Chapter ID to check
+ * @param {string} localId - Embed localId to check
  * @returns {boolean} True if chapter exists
  */
-export function chapterExists(pageBody, chapterId) {
-  return findChapter(pageBody, chapterId) !== null;
+export function chapterExists(pageBody, localId) {
+  return findChapter(pageBody, localId) !== null;
 }
 
 /**

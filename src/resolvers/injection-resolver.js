@@ -19,7 +19,8 @@ import {
   buildChapterStructure,
   buildChapterPlaceholder,
   buildFreeformChapter,
-  findChapter
+  findChapter,
+  stripLeadingHeading
 } from '../utils/storage-format-utils.js';
 import {
   filterContentByToggles,
@@ -423,12 +424,11 @@ export async function publishChapter(req) {
     console.log('[publishChapter] DEBUG - chapterId:', chapterId);
     console.log('[publishChapter] DEBUG - embedConfig.chapterId:', embedConfig.chapterId);
 
-    // 7. Check if chapter already exists in page
-    console.log('[publishChapter] DEBUG - searching for chapter in page body');
+    // 7. Check if chapter already exists in page (search by localId for new Content Properties boundaries)
+    console.log('[publishChapter] DEBUG - searching for chapter by localId:', localId);
     console.log('[publishChapter] DEBUG - page body length:', pageBody.length);
-    console.log('[publishChapter] DEBUG - page body contains blueprint-chapter param:', pageBody.includes('ac:parameter ac:name="blueprint-chapter"'));
     
-    const existingChapter = findChapter(pageBody, chapterId);
+    const existingChapter = findChapter(pageBody, localId);
     console.log('[publishChapter] DEBUG - existingChapter found:', existingChapter !== null);
     if (existingChapter) {
       console.log('[publishChapter] DEBUG - existingChapter.startIndex:', existingChapter.startIndex);
@@ -452,12 +452,16 @@ export async function publishChapter(req) {
         complianceLevel
       });
     } else {
+      // Strip leading heading from body content to prevent duplicate headings
+      // (We add our own heading above the Section macro)
+      const cleanedBodyContent = stripLeadingHeading(storageContent);
+      
       // Use standard chapter builder with rendered Source content
       chapterHtml = buildChapterStructure({
         chapterId,
         localId,
         heading: heading,
-        bodyContent: storageContent,
+        bodyContent: cleanedBodyContent,
         complianceLevel,
         isBespoke: excerpt.bespoke || false
       });
@@ -671,9 +675,9 @@ export async function injectPlaceholder(req) {
 
     const chapterId = `chapter-${localId}`;
 
-    // Check if chapter already exists
-    if (findChapter(pageBody, chapterId)) {
-      logPhase('injectPlaceholder', 'Chapter already exists', { chapterId });
+    // Check if chapter already exists (search by localId for new Content Properties boundaries)
+    if (findChapter(pageBody, localId)) {
+      logPhase('injectPlaceholder', 'Chapter already exists', { localId, chapterId });
       return { success: true, message: 'Chapter already exists', chapterId };
     }
 
@@ -773,8 +777,12 @@ export async function removeChapterFromPage(req) {
     const pageBody = pageData.body.storage.value;
     const currentVersion = pageData.version.number;
 
+    // Extract localId from chapterId (format: "chapter-{localId}")
+    // findChapter now searches by localId for new Content Properties boundaries
+    const localId = chapterId.startsWith('chapter-') ? chapterId.slice(8) : chapterId;
+
     // Find and remove chapter
-    const chapter = findChapter(pageBody, chapterId);
+    const chapter = findChapter(pageBody, localId);
     if (!chapter) {
       return { success: true, message: 'Chapter not found (already removed)' };
     }

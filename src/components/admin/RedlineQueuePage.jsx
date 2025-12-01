@@ -33,7 +33,7 @@ const fullWidthContainerStyle = xcss({
   maxWidth: '100%'
 });
 
-export function RedlineQueuePage() {
+export function RedlineQueuePage({ isActive = true }) {
   // Phase 4: Filter, sort, and group state management
   const [filters, setFilters] = useState({ status: ['all'], searchTerm: '' });
   const [sortBy, setSortBy] = useState('status');
@@ -52,10 +52,12 @@ export function RedlineQueuePage() {
   const queryClient = useQueryClient();
 
   // Phase 5: Fetch queue data and current user
+  // Only fetch when tab is active to avoid unnecessary API calls
   const { data: queueData, isLoading: queueLoading, error: queueError } = useRedlineQueueQuery(
     filters,
     sortBy,
-    groupBy
+    groupBy,
+    isActive // Pass enabled flag
   );
   const { data: currentUserId, isLoading: userLoading } = useCurrentUserQuery();
 
@@ -185,6 +187,7 @@ export function RedlineQueuePage() {
           groupBy={groupBy}
           onGroupChange={handleGroupChange}
           onManualRefresh={handleManualRefresh}
+          isActive={isActive}
         />
 
         {/* Phase 5: Queue display */}

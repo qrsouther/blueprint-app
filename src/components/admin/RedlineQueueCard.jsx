@@ -169,23 +169,30 @@ function RedlineStatusBadge({ status }) {
 }
 
 // Isolated TextArea component to prevent cursor jumping
-// Uses uncontrolled component pattern with ref to maintain cursor position
-// Exposes ref via forwardRef so parent can read current value
+// Uses internal state to track the current value reliably
+// Exposes getValue() via forwardRef so parent can read the actual current value
 const CommentTextAreaComponent = React.forwardRef(({ value, onChange, placeholder, localId, actionType }, ref) => {
-  const textAreaRef = React.useRef(null);
+  // Track the current value internally - this is always up to date
+  const currentValueRef = React.useRef(value || '');
   
-  // Combine internal ref with forwarded ref
-  React.useImperativeHandle(ref, () => textAreaRef.current, []);
+  // Expose getValue method to parent via ref
+  // This ensures parent always gets the actual current value, not stale state
+  React.useImperativeHandle(ref, () => ({
+    getValue: () => currentValueRef.current,
+    // Also expose value property for backwards compatibility
+    value: currentValueRef.current
+  }));
   
-  // Sync ref value when value prop changes externally (e.g., when action changes)
+  // Reset internal value when action changes (new comment form)
   React.useEffect(() => {
-    if (textAreaRef.current && textAreaRef.current.value !== value) {
-      textAreaRef.current.value = value;
-    }
-  }, [value, localId, actionType]); // Only sync when these change, not on every render
+    currentValueRef.current = value || '';
+  }, [localId, actionType]); // Only reset when these change
   
-  // Handle change events
+  // Handle change events - update internal ref immediately
   const handleChange = React.useCallback((e) => {
+    // Update our internal ref immediately - this is synchronous
+    currentValueRef.current = e.target.value;
+    // Also notify parent (for any UI state needs)
     if (onChange) {
       onChange(e);
     }
@@ -194,7 +201,6 @@ const CommentTextAreaComponent = React.forwardRef(({ value, onChange, placeholde
   return (
     <TextArea
       key={`comment-${localId}-${actionType}`}
-      ref={textAreaRef}
       placeholder={placeholder}
       defaultValue={value}
       onChange={handleChange}
@@ -270,9 +276,9 @@ function RedlineQueueCardComponent({ embedData, currentUserId, onStatusChange })
     try {
       let commentResult = null;
 
-      // Read current value directly from TextArea ref (uncontrolled component)
-      // This ensures we get the actual current value, not stale state
-      const currentCommentText = commentTextAreaRef.current?.value || commentText || '';
+      // Read current value directly from TextArea ref via getValue()
+      // This ensures we get the actual current value, not stale React state
+      const currentCommentText = commentTextAreaRef.current?.getValue?.() || commentTextAreaRef.current?.value || commentText || '';
       const trimmedCommentText = currentCommentText.trim();
 
       // CRITICAL: Notify parent of status change IMMEDIATELY (before mutation)

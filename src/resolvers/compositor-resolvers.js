@@ -584,6 +584,80 @@ export async function removeArchetypeSource(req) {
 }
 
 /**
+ * Get sources for an archetype
+ *
+ * Returns the sources that belong to an archetype, already ordered by sourceOrder.
+ * This is the single source of truth for what sources an archetype contains.
+ * Eliminates race conditions by returning everything the frontend needs in one call.
+ *
+ * @param {Object} req - Request object
+ * @param {string} req.payload.archetypeId - Archetype ID
+ * @returns {Promise<Object>} { sources: [...], sourceDefaults: {...} }
+ */
+export async function getArchetypeSources(req) {
+  const { archetypeId } = req.payload || {};
+
+  logFunction('getArchetypeSources', 'START', { archetypeId });
+
+  try {
+    if (!archetypeId) {
+      return { success: false, error: 'Missing required parameter: archetypeId' };
+    }
+
+    // Get archetype from storage
+    let archetype = await storage.get(`archetype:${archetypeId}`);
+    
+    // Fallback to hardcoded if not in storage
+    if (!archetype) {
+      archetype = getArchetypeById(archetypeId);
+    }
+
+    if (!archetype) {
+      return { success: false, error: `Archetype not found: ${archetypeId}` };
+    }
+
+    // If no sourceOrder, return empty array
+    if (!archetype.sourceOrder || !Array.isArray(archetype.sourceOrder) || archetype.sourceOrder.length === 0) {
+      logSuccess('getArchetypeSources', 'No sources configured for archetype', { archetypeId });
+      return {
+        success: true,
+        data: {
+          sources: [],
+          sourceDefaults: archetype.sourceDefaults || {}
+        }
+      };
+    }
+
+    // Batch fetch only the sources we need (in order)
+    const sourcePromises = archetype.sourceOrder.map(sourceId => 
+      storage.get(`excerpt:${sourceId}`)
+    );
+    
+    const sourcesRaw = await Promise.all(sourcePromises);
+    
+    // Filter out null/undefined (sources that no longer exist) and maintain order
+    const sources = sourcesRaw.filter(source => source !== null && source !== undefined);
+
+    logSuccess('getArchetypeSources', 'Sources loaded for archetype', { 
+      archetypeId, 
+      requestedCount: archetype.sourceOrder.length,
+      foundCount: sources.length 
+    });
+
+    return {
+      success: true,
+      data: {
+        sources,
+        sourceDefaults: archetype.sourceDefaults || {}
+      }
+    };
+  } catch (error) {
+    logFailure('getArchetypeSources', 'Error', error, { archetypeId });
+    return { success: false, error: error.message };
+  }
+}
+
+/**
  * Delete an archetype
  *
  * Removes an archetype from storage.
@@ -838,8 +912,8 @@ export async function bulkPublishChapters(req) {
           isBespoke: excerpt.bespoke || false
         });
 
-        // Check if chapter already exists in page
-        const existingChapter = findChapter(pageBody, chapterId);
+        // Check if chapter already exists in page (search by localId for new Content Properties boundaries)
+        const existingChapter = findChapter(pageBody, localId);
 
         if (existingChapter) {
           // Replace existing chapter (entire layout block)
@@ -1077,6 +1151,126 @@ export async function scanPageForMacros(req) {
 }
 
 /**
+ * Find a Source by exact name from the excerpt-index
+ *
+ * @param {string} sourceName - Exact name of the Source to find
+ * @returns {Promise<string|null>} Source ID (UUID) if found, null otherwise
+ */
+async function findSourceByName(sourceName) {
+  try {
+    const excerptIndex = await storage.get('excerpt-index') || { excerpts: [] };
+    const found = excerptIndex.excerpts?.find(e => e.name === sourceName);
+    return found?.id || null;
+  } catch (error) {
+    logWarning('findSourceByName', 'Error finding source by name', { sourceName, error: error.message });
+    return null;
+  }
+}
+
+/**
+ * Build hardcoded page header content
+ *
+ * Creates the hardcoded header structure:
+ * 1. Intro/Legend Embed at the top
+ * 2. 2-Column Layout with Fundamentals Embed in left column and TOC in right column
+ *
+ * @param {Object} options
+ * @param {string} options.extensionKey - Extension key for Embed macros
+ * @param {string} options.extensionId - Extension ID for Embed macros
+ * @param {string} options.envLabel - Environment label
+ * @param {string} options.forgeEnv - Forge environment
+ * @returns {Promise<string>} Storage format XML for header content
+ */
+async function buildHardcodedPageHeader({ extensionKey, extensionId, envLabel, forgeEnv }) {
+  logPhase('buildHardcodedPageHeader', 'START', {});
+
+  // Find required Sources by name
+  const introLegendSourceId = await findSourceByName('Intro/Legend');
+  const fundamentalsSourceId = await findSourceByName('Fundamentals - Key dates, Stack model');
+
+  const headerParts = [];
+
+  // 1. Intro/Legend Embed at the top
+  if (introLegendSourceId) {
+    const introLocalId = crypto.randomUUID();
+    
+    // Create storage entry for Intro/Legend Embed
+    await storage.set(`macro-vars:${introLocalId}`, {
+      excerptId: introLegendSourceId,
+      toggleStates: {},
+      variableValues: {},
+      customInsertions: {},
+      internalNotes: [],
+      customHeading: null,
+      complianceLevel: null,
+      cachedIncomplete: true,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    });
+
+    const introEmbedMacro = `<ac:adf-extension><ac:adf-node type="extension"><ac:adf-attribute key="extension-key">${extensionKey}</ac:adf-attribute><ac:adf-attribute key="extension-type">com.atlassian.ecosystem</ac:adf-attribute><ac:adf-attribute key="parameters"><ac:adf-parameter key="local-id">${introLocalId}</ac:adf-parameter><ac:adf-parameter key="extension-id">${extensionId}</ac:adf-parameter><ac:adf-parameter key="extension-title">🎯 Blueprint App - Embed${envLabel}</ac:adf-parameter><ac:adf-parameter key="layout">default</ac:adf-parameter><ac:adf-parameter key="forge-environment">${forgeEnv}</ac:adf-parameter><ac:adf-parameter key="render">native</ac:adf-parameter></ac:adf-attribute><ac:adf-attribute key="text">🎯 Blueprint App - Embed${envLabel}</ac:adf-attribute><ac:adf-attribute key="layout">default</ac:adf-attribute><ac:adf-attribute key="local-id">${introLocalId}</ac:adf-attribute></ac:adf-node></ac:adf-extension>`;
+    
+    headerParts.push(introEmbedMacro);
+    logSuccess('buildHardcodedPageHeader', 'Intro/Legend Embed added', { sourceId: introLegendSourceId });
+  } else {
+    logWarning('buildHardcodedPageHeader', 'Intro/Legend Source not found', {});
+  }
+
+  // 2. 2-Column Layout: Fundamentals Embed (left) + TOC (right)
+  if (fundamentalsSourceId) {
+    const fundamentalsLocalId = crypto.randomUUID();
+    
+    // Create storage entry for Fundamentals Embed
+    await storage.set(`macro-vars:${fundamentalsLocalId}`, {
+      excerptId: fundamentalsSourceId,
+      toggleStates: {},
+      variableValues: {},
+      customInsertions: {},
+      internalNotes: [],
+      customHeading: null,
+      complianceLevel: null,
+      cachedIncomplete: true,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    });
+
+    const fundamentalsEmbedMacro = `<ac:adf-extension><ac:adf-node type="extension"><ac:adf-attribute key="extension-key">${extensionKey}</ac:adf-attribute><ac:adf-attribute key="extension-type">com.atlassian.ecosystem</ac:adf-attribute><ac:adf-attribute key="parameters"><ac:adf-parameter key="local-id">${fundamentalsLocalId}</ac:adf-parameter><ac:adf-parameter key="extension-id">${extensionId}</ac:adf-parameter><ac:adf-parameter key="extension-title">🎯 Blueprint App - Embed${envLabel}</ac:adf-parameter><ac:adf-parameter key="layout">default</ac:adf-parameter><ac:adf-parameter key="forge-environment">${forgeEnv}</ac:adf-parameter><ac:adf-parameter key="render">native</ac:adf-parameter></ac:adf-attribute><ac:adf-attribute key="text">🎯 Blueprint App - Embed${envLabel}</ac:adf-attribute><ac:adf-attribute key="layout">default</ac:adf-attribute><ac:adf-attribute key="local-id">${fundamentalsLocalId}</ac:adf-attribute></ac:adf-node></ac:adf-extension>`;
+
+    // Left column: Fundamentals Embed
+    const leftColumn = `<ac:structured-macro ac:name="column" ac:schema-version="1">
+<ac:parameter ac:name="width">50%</ac:parameter>
+<ac:rich-text-body>
+${fundamentalsEmbedMacro}
+</ac:rich-text-body>
+</ac:structured-macro>`;
+
+    // Right column: Table of Contents macro
+    const rightColumn = `<ac:structured-macro ac:name="column" ac:schema-version="1">
+<ac:parameter ac:name="width">50%</ac:parameter>
+<ac:rich-text-body>
+<ac:structured-macro ac:name="toc" ac:schema-version="1">
+<ac:parameter ac:name="outline">true</ac:parameter>
+<ac:parameter ac:name="maxLevel">3</ac:parameter>
+</ac:structured-macro>
+</ac:rich-text-body>
+</ac:structured-macro>`;
+
+    headerParts.push(leftColumn);
+    headerParts.push(rightColumn);
+    logSuccess('buildHardcodedPageHeader', '2-Column Layout added', { sourceId: fundamentalsSourceId });
+  } else {
+    logWarning('buildHardcodedPageHeader', 'Fundamentals Source not found', {});
+  }
+
+  if (headerParts.length === 0) {
+    logWarning('buildHardcodedPageHeader', 'No hardcoded header content generated - Sources not found', {});
+    return '';
+  }
+
+  return headerParts.join('\n\n');
+}
+
+/**
  * Deploy an archetype to a page
  *
  * Inserts Blueprint Embed macros for each Source in the archetype's sourceOrder,
@@ -1225,8 +1419,26 @@ export async function deployArchetype(req) {
       return `<ac:adf-extension><ac:adf-node type="extension"><ac:adf-attribute key="extension-key">${extensionKey}</ac:adf-attribute><ac:adf-attribute key="extension-type">com.atlassian.ecosystem</ac:adf-attribute><ac:adf-attribute key="parameters"><ac:adf-parameter key="local-id">${config.localId}</ac:adf-parameter><ac:adf-parameter key="extension-id">${extensionId}</ac:adf-parameter><ac:adf-parameter key="extension-title">🎯 Blueprint App - Embed${envLabel}</ac:adf-parameter><ac:adf-parameter key="layout">default</ac:adf-parameter><ac:adf-parameter key="forge-environment">${forgeEnv}</ac:adf-parameter><ac:adf-parameter key="render">native</ac:adf-parameter></ac:adf-attribute><ac:adf-attribute key="text">🎯 Blueprint App - Embed${envLabel}</ac:adf-attribute><ac:adf-attribute key="layout">default</ac:adf-attribute><ac:adf-attribute key="local-id">${config.localId}</ac:adf-attribute></ac:adf-node></ac:adf-extension>`;
     }).join('\n\n');
 
+    // Build hardcoded page header (Intro/Legend Embed + 2-column layout)
+    logPhase('deployArchetype', 'BUILDING_HEADER', {});
+    const hardcodedHeader = await buildHardcodedPageHeader({
+      extensionKey,
+      extensionId,
+      envLabel,
+      forgeEnv
+    });
+
+    // Combine header and archetype Embeds
+    const contentParts = [];
+    if (hardcodedHeader) {
+      contentParts.push(hardcodedHeader);
+    }
+    if (macrosXhtml) {
+      contentParts.push(macrosXhtml);
+    }
+
     // Wrap in a simple structure
-    const pageContent = `<p></p>\n${macrosXhtml}\n<p></p>`;
+    const pageContent = `<p></p>\n${contentParts.join('\n\n')}\n<p></p>`;
 
     // Update page content
     logPhase('deployArchetype', 'UPDATING_PAGE', { pageId });

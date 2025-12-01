@@ -1275,11 +1275,15 @@ export async function postRedlineComment(req) {
 /**
  * Find suitable text near an Embed macro for inline comment targeting
  *
+ * Page structure: [Embed macro] → [Chapter Heading h2] → [Section macro with body]
+ * The chapter heading sits BETWEEN the Embed macro and the injected Section content.
+ *
  * Strategy:
  * 1. Find the Embed macro (extension node) with matching localId
- * 2. Look for the closest heading before the macro
- * 3. If no heading, look for the first text paragraph after the macro
- * 4. Count occurrences of that text in the document
+ * 2. Look FORWARD for the chapter heading (immediately after Embed macro)
+ * 3. Fallback: Look backwards for a heading (for legacy structure)
+ * 4. Last resort: Look forward for the first text paragraph
+ * 5. Count occurrences of that text in the document for textSelectionMatchIndex
  *
  * @param {Object} adfContent - ADF document
  * @param {string} targetLocalId - Embed localId to find
@@ -1329,7 +1333,24 @@ function findTextNearEmbed(adfContent, targetLocalId) {
     return { textSelection: null };
   }
 
-  // Strategy 1: Look backwards for the closest heading
+  // Strategy 1: Look FORWARD for the chapter heading (it comes immediately after Embed macro)
+  // With heading outside Section macro, the chapter heading is always the first heading after the Embed
+  for (let i = embedNodeIndex + 1; i < contentNodes.length; i++) {
+    const node = contentNodes[i];
+    if (node.type === 'heading' && node.content && node.content.length > 0) {
+      const headingText = extractText(node);
+      if (headingText && headingText.trim().length > 0) {
+        const { matchCount, matchIndex } = countTextOccurrences(adfContent, headingText);
+        return { textSelection: headingText, matchCount, matchIndex };
+      }
+    }
+    // Stop searching if we hit another extension node (different chapter)
+    if (node.type === 'extension') {
+      break;
+    }
+  }
+
+  // Strategy 2: Fallback - look backwards for a heading (for legacy structure)
   for (let i = embedNodeIndex - 1; i >= 0; i--) {
     const node = contentNodes[i];
     if (node.type === 'heading' && node.content && node.content.length > 0) {
@@ -1341,7 +1362,7 @@ function findTextNearEmbed(adfContent, targetLocalId) {
     }
   }
 
-  // Strategy 2: Look forward for the first paragraph with text
+  // Strategy 3: Look forward for the first paragraph with text
   for (let i = embedNodeIndex + 1; i < contentNodes.length; i++) {
     const node = contentNodes[i];
     if (node.type === 'paragraph' && node.content && node.content.length > 0) {

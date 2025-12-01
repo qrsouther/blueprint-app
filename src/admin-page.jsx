@@ -1,4 +1,4 @@
-import React, { Fragment, useState, useEffect, useRef } from 'react';
+import React, { Fragment, useState, useEffect, useRef, useCallback } from 'react';
 import ForgeReconciler, {
   Text,
   Strong,
@@ -407,29 +407,40 @@ const App = () => {
     return nextCheck.toISOString();
   };
 
+  // Fetch storage usage function (can be called on demand or automatically)
+  const fetchStorageUsage = useCallback(async (forceRefresh = false) => {
+    try {
+      setStorageUsageLoading(true);
+      const result = await invoke('getStorageUsage', { forceRefresh });
+
+      if (result.success && result.data) {
+        setStorageUsage(result.data);
+        setStorageUsageError(null);
+      } else {
+        setStorageUsageError(result.error || 'Failed to calculate storage usage');
+      }
+    } catch (error) {
+      logger.errors('Error fetching storage usage:', error);
+      setStorageUsageError(error.message);
+    } finally {
+      setStorageUsageLoading(false);
+    }
+  }, []);
+
   // Fetch storage usage on mount
   useEffect(() => {
-    const fetchStorageUsage = async () => {
-      try {
-        setStorageUsageLoading(true);
-        const result = await invoke('getStorageUsage');
+    fetchStorageUsage(false);
+  }, [fetchStorageUsage]);
 
-        if (result.success && result.data) {
-          setStorageUsage(result.data);
-          setStorageUsageError(null);
-        } else {
-          setStorageUsageError(result.error || 'Failed to calculate storage usage');
-        }
-      } catch (error) {
-        logger.errors('Error fetching storage usage:', error);
-        setStorageUsageError(error.message);
-      } finally {
-        setStorageUsageLoading(false);
-      }
-    };
+  // Auto-refresh storage usage every 24 hours
+  useEffect(() => {
+    const intervalMs = 24 * 60 * 60 * 1000; // 24 hours
+    const intervalId = setInterval(() => {
+      fetchStorageUsage(true); // Force refresh after 24 hours
+    }, intervalMs);
 
-    fetchStorageUsage();
-  }, []); // Only run once on mount
+    return () => clearInterval(intervalId);
+  }, [fetchStorageUsage]);
 
   // TODO: Development Environment Background Color (Nice-to-have)
   // Attempted to add a unique background color to distinguish Development Admin from Production Admin.
@@ -1220,8 +1231,8 @@ const App = () => {
 
         alert(message);
 
-        // Reload excerpts to show newly imported ones
-        const reloadResult = await invoke('getAllExcerpts');
+        // Reload excerpts to show newly imported ones (force refresh to bypass cache)
+        const reloadResult = await invoke('getAllExcerpts', { forceRefresh: true });
         if (reloadResult.success && reloadResult.data) {
           const sanitized = (reloadResult.data.excerpts || []).map(excerpt => ({
             ...excerpt,
@@ -2190,7 +2201,7 @@ const App = () => {
 
         <TabPanel>
           <Box xcss={tabPanelContentStyles}>
-            <RedlineQueuePage />
+            <RedlineQueuePage isActive={selectedTab === 1} />
           </Box>
         </TabPanel>
 
@@ -2821,6 +2832,7 @@ const App = () => {
         exceedsWarningThreshold={storageUsage?.exceedsWarningThreshold}
         isLoading={storageUsageLoading}
         error={storageUsageError}
+        onRefresh={() => fetchStorageUsage(true)}
       />
       </Fragment>
     </Box>

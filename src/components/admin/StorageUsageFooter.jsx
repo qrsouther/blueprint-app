@@ -15,6 +15,7 @@
  * @param {boolean} props.exceedsWarningThreshold - Whether storage exceeds warning threshold
  * @param {boolean} props.isLoading - Whether storage usage is being calculated
  * @param {string|null} props.error - Error message if calculation failed
+ * @param {Function} props.onRefresh - Callback function to refresh storage usage data
  * @returns {JSX.Element}
  */
 
@@ -23,6 +24,7 @@ import {
   Box,
   Inline,
   Code,
+  Button,
   xcss
 } from '@forge/react';
 
@@ -48,7 +50,8 @@ export function StorageUsageFooter({
   embedsCount,
   exceedsWarningThreshold,
   isLoading,
-  error
+  error,
+  onRefresh
 }) {
   // Don't render anything while loading
   if (isLoading) {
@@ -59,7 +62,17 @@ export function StorageUsageFooter({
   if (error) {
     return (
       <Box xcss={footerStyles}>
-        <Inline space="space.050" alignBlock="center" alignInline="end">
+        <Inline space="space.100" alignBlock="center" alignInline="end">
+          {onRefresh && (
+            <Button
+              appearance="subtle"
+              iconBefore="refresh"
+              onClick={onRefresh}
+              isDisabled={isLoading}
+            >
+              Refresh
+            </Button>
+          )}
           <Code>Storage Usage: Error loading ({error})</Code>
         </Inline>
       </Box>
@@ -74,7 +87,17 @@ export function StorageUsageFooter({
 
   return (
     <Box xcss={footerStyles}>
-      <Inline space="space.050" alignBlock="center" alignInline="end">
+      <Inline space="space.100" alignBlock="center" alignInline="end">
+        {onRefresh && (
+          <Button
+            appearance="subtle"
+            iconBefore="refresh"
+            onClick={onRefresh}
+            isDisabled={isLoading}
+          >
+            Refresh
+          </Button>
+        )}
         <Code>Storage Usage: {totalMB} MB / {limitMB} MB ({percentUsed}%)    •    {sourcesCount} Sources    •    {embedsCount} Embeds</Code>
       </Inline>
     </Box>

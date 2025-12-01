@@ -48,12 +48,15 @@ const QUEUE_INVALIDATION_DELAY_MS = 60000; // 1 minute
  * @param {Object} filters - Filter criteria { status: [], pageIds: [], excerptIds: [], searchTerm: '' }
  * @param {string} sortBy - Sort field: "status" | "page" | "source" | "updated"
  * @param {string|null} groupBy - Group field: "status" | "page" | "source" | null
+ * @param {boolean} enabled - Whether the query should run (default: true)
  * @returns {Object} React Query result with { embeds, groups }
  */
-export const useRedlineQueueQuery = (filters = {}, sortBy = 'status', groupBy = null) => {
+export const useRedlineQueueQuery = (filters = {}, sortBy = 'status', groupBy = null, enabled = true) => {
   // Fetch ALL embeds once (unfiltered, unsorted) - this is cached and reused
+  // Only fetch when enabled (tab is active) to avoid unnecessary API calls
   const { data: allEmbedsData, isLoading, error } = useQuery({
     queryKey: ['redlineQueue', 'all'], // Single query key for all embeds
+    enabled: enabled, // Only fetch when tab is active
     queryFn: async () => {
       logger.queries('Fetching all redline queue embeds (unfiltered)');
 
@@ -396,11 +399,13 @@ export const useConfluenceUserQuery = (accountId) => {
  * Fetches aggregate counts of Embeds by redline status.
  * Used to display queue summary stats in the UI.
  *
+ * @param {boolean} enabled - Whether the query should run (default: true)
  * @returns {Object} React Query result with stats { reviewable, preApproved, needsRevision, approved, total }
  */
-export const useRedlineStatsQuery = () => {
+export const useRedlineStatsQuery = (enabled = true) => {
   return useQuery({
     queryKey: ['redlineStats'],
+    enabled: enabled, // Only fetch when tab is active
     queryFn: async () => {
       logger.queries('Fetching redline stats');
 

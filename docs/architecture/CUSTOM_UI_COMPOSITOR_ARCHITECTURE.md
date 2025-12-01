@@ -1261,6 +1261,16 @@ The Custom UI Compositor architecture is **technically sound** and would provide
 
 ---
 
+## Implementation Update (2025-12-01)
+
+The content boundary approaches discussed in this document (HTML comments, VisuallyHidden components) were discovered to not work in practice—Confluence strips HTML comments and custom HTML attributes from page storage.
+
+**Final Implementation:** Content Properties macros (Confluence's `details` macro) with the `hidden=true` parameter are used as chapter boundary markers. This is the only reliable way to persist invisible boundary markers in Confluence storage format.
+
+See `src/utils/storage-format-utils.js` for the current `buildBoundaryMarker()` implementation.
+
+---
+
 **Related Documents:**
 - TODO.md - Current roadmap
 - PERFORMANCE_TEST_GUIDE.md - Testing methodology
