@@ -321,6 +321,10 @@ export const useCheckAllIncludesMutation = () => {
       queryClient.invalidateQueries({ queryKey: ['excerpts', 'list'] });
       // Also invalidate individual excerpt usage queries
       queryClient.invalidateQueries({ queryKey: ['excerpt'] });
+      // Invalidate redline queue to refresh with latest embed data
+      // (embeds may have been soft-deleted, orphaned status updated, etc.)
+      queryClient.invalidateQueries({ queryKey: ['redlineQueue', 'all'] });
+      queryClient.invalidateQueries({ queryKey: ['redlineStats'] });
     },
     onError: (error) => {
       logger.errors('Check All Includes failed:', error);

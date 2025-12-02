@@ -29,9 +29,7 @@ export const cardStyles = xcss({
   boxShadow: 'elevation.shadow.raised',
   backgroundColor: 'color.background.neutral.subtle',
   minWidth: '250px',
-  flexGrow: 1,
-  flexShrink: 1,
-  flexBasis: '250px'
+  flexGrow: 1
 });
 
 /**
@@ -193,5 +191,6 @@ export const sectionMarginStyles = xcss({
  * Adds margin below TabList to separate tabs from content
  */
 export const tabPanelContentStyles = xcss({
-  marginBlockStart: 'space.200'
+  marginBlockStart: 'space.100',
+  display: 'block'
 });

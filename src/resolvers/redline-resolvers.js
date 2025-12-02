@@ -35,6 +35,7 @@ import { listVersions } from '../utils/version-manager.js';
 import { logPhase, logSuccess, logFailure, logWarning } from '../utils/forge-logger.js';
 import { fetchPageContent, checkMacroExistsInADF } from '../workers/helpers/page-scanner.js';
 import { createErrorResponse, ERROR_CODES } from '../utils/error-codes.js';
+import { extractChapterBodyFromAdf } from '../utils/storage-format-utils.js';
 
 /**
  * Get redline queue with filtering, sorting, and grouping
@@ -256,6 +257,8 @@ export async function getRedlineQueue(req) {
       internalNotes: config.internalNotes || [],
       cachedContent: config.cachedContent,
       syncedContent: config.syncedContent,
+      injectedContent: null, // Will be populated from page content for published embeds
+      publishedAt: config.publishedAt || null, // Track if/when content was published to page
       redlineStatus: config.redlineStatus || 'reviewable',
       approvedContentHash: config.approvedContentHash,
       approvedBy: config.approvedBy,
@@ -328,6 +331,8 @@ export async function getRedlineQueue(req) {
           internalNotes: config.internalNotes || [],
           cachedContent: config.cachedContent,
           syncedContent: config.syncedContent,
+          injectedContent: null, // Will be populated from page content for published embeds
+          publishedAt: config.publishedAt || null, // Track if/when content was published to page
               redlineStatus: config.redlineStatus || 'reviewable',
           approvedContentHash: config.approvedContentHash,
           approvedBy: config.approvedBy,
@@ -345,6 +350,100 @@ export async function getRedlineQueue(req) {
       logPhase('getRedlineQueue', 'Skipping page data fetch (not needed)', { 
         reason: 'No search/sort/group by page',
         embeds: embedConfigs.length 
+      });
+    }
+
+    // ============================================================================
+    // FETCH INJECTED CONTENT FROM PAGES
+    // For published embeds, fetch the actual content from the Confluence page
+    // instead of relying on stored syncedContent (which may be outdated or empty)
+    // ============================================================================
+    
+    // Group published embeds by pageId for efficient batch fetching
+    const publishedEmbedsByPage = {};
+    for (let i = 0; i < embedConfigs.length; i++) {
+      const embed = embedConfigs[i];
+      
+      // Only fetch for published embeds that have a pageId
+      if (embed.publishedAt && embed.pageId) {
+        if (!publishedEmbedsByPage[embed.pageId]) {
+          publishedEmbedsByPage[embed.pageId] = [];
+        }
+        publishedEmbedsByPage[embed.pageId].push({
+          embedIndex: i,
+          localId: embed.localId
+        });
+      }
+    }
+
+    const pageIds = Object.keys(publishedEmbedsByPage);
+    if (pageIds.length > 0) {
+      logPhase('getRedlineQueue', 'Fetching injected content from pages', { 
+        pageCount: pageIds.length,
+        publishedEmbedCount: pageIds.reduce((sum, pid) => sum + publishedEmbedsByPage[pid].length, 0)
+      });
+
+      // Fetch pages in batches to respect rate limits
+      const PAGE_BATCH_SIZE = 20;
+      const pageAdfCache = {};
+
+      for (let i = 0; i < pageIds.length; i += PAGE_BATCH_SIZE) {
+        const batchPageIds = pageIds.slice(i, i + PAGE_BATCH_SIZE);
+        
+        // Fetch page content in parallel for this batch
+        const pageResults = await Promise.all(
+          batchPageIds.map(async (pageId) => {
+            try {
+              const result = await fetchPageContent(pageId);
+              return { pageId, result };
+            } catch (error) {
+              logWarning('getRedlineQueue', 'Failed to fetch page for injected content', { 
+                pageId, 
+                error: error.message 
+              });
+              return { pageId, result: { success: false, error: error.message } };
+            }
+          })
+        );
+
+        // Cache successful page fetches
+        for (const { pageId, result } of pageResults) {
+          if (result.success && result.adfContent) {
+            pageAdfCache[pageId] = result.adfContent;
+          }
+        }
+      }
+
+      // Extract chapter content for each published embed
+      for (const pageId of pageIds) {
+        const adfContent = pageAdfCache[pageId];
+        if (!adfContent) continue;
+
+        const embedsOnPage = publishedEmbedsByPage[pageId];
+        for (const { embedIndex, localId } of embedsOnPage) {
+          try {
+            const chapterBody = extractChapterBodyFromAdf(adfContent, localId);
+            if (chapterBody) {
+              embedConfigs[embedIndex].injectedContent = chapterBody;
+              logPhase('getRedlineQueue', 'Extracted injected content', { 
+                localId, 
+                nodeCount: chapterBody.content?.length || 0
+              });
+            }
+            // Note: No warning if chapter body not found - embed may not be published on this page
+          } catch (error) {
+            logWarning('getRedlineQueue', 'Failed to extract chapter body', { 
+              localId, 
+              pageId, 
+              error: error.message 
+            });
+          }
+        }
+      }
+
+      logSuccess('getRedlineQueue', 'Finished fetching injected content', {
+        pagesProcessed: Object.keys(pageAdfCache).length,
+        pagesFailed: pageIds.length - Object.keys(pageAdfCache).length
       });
     }
 

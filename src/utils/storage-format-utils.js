@@ -541,3 +541,203 @@ export function getAllChapterIds(pageBody) {
   return ids;
 }
 
+/**
+ * Extract the macro ID from an ADF extension node
+ *
+ * Checks multiple possible locations for the macro's ID parameter.
+ * The id parameter is used for our boundary markers (blueprint-start-{localId}).
+ *
+ * @param {Object} node - ADF extension node
+ * @returns {string|null} The macro ID or null if not found
+ */
+function getMacroIdFromExtension(node) {
+  if (!node || !node.attrs) return null;
+
+  // Check various parameter locations
+  // Format 1: attrs.parameters.macroParams.id.value (Forge macro format)
+  if (node.attrs.parameters?.macroParams?.id?.value) {
+    return node.attrs.parameters.macroParams.id.value;
+  }
+
+  // Format 2: attrs.parameters.id (simple parameter format)
+  if (node.attrs.parameters?.id) {
+    return node.attrs.parameters.id;
+  }
+
+  // Format 3: Direct in attrs (less common)
+  if (node.attrs.id) {
+    return node.attrs.id;
+  }
+
+  // Format 4: Check for Confluence native macro parameters
+  // Native macros like details/page-properties store params in macroParams without .value wrapper
+  if (node.attrs.parameters?.macroParams?.id) {
+    const idParam = node.attrs.parameters.macroParams.id;
+    if (typeof idParam === 'string') {
+      return idParam;
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Check if an ADF node is a details macro with matching ID
+ *
+ * @param {Object} node - ADF node to check
+ * @param {string} markerId - Expected marker ID (e.g., "blueprint-start-abc123")
+ * @returns {boolean} True if this is the matching boundary marker
+ */
+function isBoundaryMarker(node, markerId) {
+  if (!node) return false;
+
+  // Extension nodes represent macros in ADF
+  if (node.type !== 'extension' && node.type !== 'bodiedExtension') {
+    return false;
+  }
+
+  // Get macro ID from various possible locations
+  const nodeId = getMacroIdFromExtension(node);
+  
+  // Direct ID match
+  if (nodeId === markerId) {
+    return true;
+  }
+
+  return false;
+}
+
+/**
+ * Extract chapter body content from ADF page content
+ *
+ * Finds the content between blueprint-start-{localId} and blueprint-end-{localId}
+ * boundary markers and returns it as a valid ADF document.
+ *
+ * Chapter ADF structure:
+ * - extension node (blueprint-start-{localId} marker)
+ * - heading node (h2 with chapter title)
+ * - body content nodes (paragraphs, tables, etc.)
+ * - extension node (blueprint-end-{localId} marker)
+ *
+ * This function extracts just the body content (excluding markers and heading).
+ *
+ * @param {Object} adfContent - Full page ADF content (type: 'doc')
+ * @param {string} localId - Embed localId to find
+ * @returns {Object|null} ADF document with chapter body content, or null if not found
+ */
+export function extractChapterBodyFromAdf(adfContent, localId) {
+  if (!adfContent || !localId) return null;
+
+  // Ensure we have a doc with content array
+  if (adfContent.type !== 'doc' || !Array.isArray(adfContent.content)) {
+    return null;
+  }
+
+  const startMarkerId = `blueprint-start-${localId}`;
+  const endMarkerId = `blueprint-end-${localId}`;
+
+  const topLevelContent = adfContent.content;
+  let startIndex = -1;
+  let endIndex = -1;
+
+  // Find start and end markers in top-level content
+  for (let i = 0; i < topLevelContent.length; i++) {
+    const node = topLevelContent[i];
+
+    if (startIndex === -1 && isBoundaryMarker(node, startMarkerId)) {
+      startIndex = i;
+    } else if (startIndex !== -1 && isBoundaryMarker(node, endMarkerId)) {
+      endIndex = i;
+      break;
+    }
+  }
+
+  // If markers not found at top level, search recursively
+  if (startIndex === -1 || endIndex === -1) {
+    return extractChapterBodyRecursive(adfContent, startMarkerId, endMarkerId);
+  }
+
+  // Extract content between markers (exclusive of markers)
+  // Skip the first node after start marker if it's a heading (chapter title)
+  let bodyStartIndex = startIndex + 1;
+  const firstContentNode = topLevelContent[bodyStartIndex];
+  
+  if (firstContentNode && firstContentNode.type === 'heading') {
+    bodyStartIndex++;
+  }
+
+  // Extract body nodes (from after heading to before end marker)
+  const bodyNodes = topLevelContent.slice(bodyStartIndex, endIndex);
+
+  if (bodyNodes.length === 0) {
+    return null;
+  }
+
+  // Return as valid ADF document
+  return {
+    type: 'doc',
+    version: 1,
+    content: bodyNodes
+  };
+}
+
+/**
+ * Recursively search for chapter content in nested ADF structures
+ *
+ * Used when boundary markers are not at the top level (e.g., inside layouts).
+ *
+ * @param {Object} node - ADF node to search
+ * @param {string} startMarkerId - Start marker ID
+ * @param {string} endMarkerId - End marker ID
+ * @returns {Object|null} ADF document with chapter body content, or null if not found
+ */
+function extractChapterBodyRecursive(node, startMarkerId, endMarkerId) {
+  if (!node || typeof node !== 'object') return null;
+
+  // If this node has content, search within it
+  if (Array.isArray(node.content)) {
+    let startIndex = -1;
+    let endIndex = -1;
+
+    // Look for markers in this content array
+    for (let i = 0; i < node.content.length; i++) {
+      const child = node.content[i];
+
+      if (startIndex === -1 && isBoundaryMarker(child, startMarkerId)) {
+        startIndex = i;
+      } else if (startIndex !== -1 && isBoundaryMarker(child, endMarkerId)) {
+        endIndex = i;
+        break;
+      }
+    }
+
+    // Found markers in this content array
+    if (startIndex !== -1 && endIndex !== -1) {
+      let bodyStartIndex = startIndex + 1;
+      const firstContentNode = node.content[bodyStartIndex];
+
+      if (firstContentNode && firstContentNode.type === 'heading') {
+        bodyStartIndex++;
+      }
+
+      const bodyNodes = node.content.slice(bodyStartIndex, endIndex);
+
+      if (bodyNodes.length > 0) {
+        return {
+          type: 'doc',
+          version: 1,
+          content: bodyNodes
+        };
+      }
+    }
+
+    // Not found in this array, search children recursively
+    for (const child of node.content) {
+      const result = extractChapterBodyRecursive(child, startMarkerId, endMarkerId);
+      if (result) return result;
+    }
+  }
+
+  return null;
+}
+

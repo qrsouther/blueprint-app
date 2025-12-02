@@ -46,15 +46,8 @@ import {
 } from '@forge/react';
 import { router } from '@forge/bridge';
 import { useSetRedlineStatusMutation, usePostRedlineCommentMutation } from '../../hooks/redline-hooks';
-import { EmbedViewMode } from '../embed/EmbedViewMode';
 import { logger } from '../../utils/logger.js';
-import {
-  cleanAdfForRenderer,
-  filterContentByToggles,
-  substituteVariablesInAdf,
-  insertCustomParagraphsInAdf,
-  insertInternalNotesInAdf
-} from '../../utils/adf-rendering-utils';
+import { cleanAdfForRenderer } from '../../utils/adf-rendering-utils';
 
 // Card styling - dynamic background based on status
 const getCardStyles = (status) => {
@@ -74,6 +67,7 @@ const getCardStyles = (status) => {
     borderStyle: 'solid',
     borderColor: 'color.border',
     width: '100%',
+    display: 'block',
     marginBottom: 'space.100',
     marginTop: 'space.100'
   });
@@ -370,71 +364,41 @@ function RedlineQueueCardComponent({ embedData, currentUserId, onStatusChange })
     }
   }, [postedCommentId, embedData.pageId]);
 
-  // Render preview content using EmbedViewMode
+  // Render preview content using AdfRenderer
+  // ONLY shows content that's actually published (injected) on the Confluence page
   const renderPreview = () => {
-    // Check for synced content (ADF document)
-    let rawContent = embedData.syncedContent || embedData.cachedContent;
-
-    if (!rawContent) {
+    // Check if we have injected content from the actual page
+    const hasInjectedContent = embedData.injectedContent && 
+                               typeof embedData.injectedContent === 'object' && 
+                               embedData.injectedContent.type === 'doc';
+    
+    // If no injected content found, show "not published" message
+    // Do NOT fall back to syncedContent/cachedContent as that's misleading
+    if (!hasInjectedContent) {
       return (
         <Box xcss={previewPlaceholderStyles}>
-          <Text color="color.text.subtlest">No preview available</Text>
+          <Text color="color.text.subtlest">Content not published to page</Text>
           <Text size="small" color="color.text.subtlest">
-            Content will appear after first sync
+            This chapter has not been published or was removed from the page
           </Text>
         </Box>
       );
     }
 
-    // Process the content through the same pipeline as EmbedContainer.jsx
-    const isAdf = rawContent && typeof rawContent === 'object' && rawContent.type === 'doc';
+    // Use the injected content from the page (already transformed)
+    let processedContent = cleanAdfForRenderer(embedData.injectedContent);
 
-    let processedContent = rawContent;
-    if (isAdf) {
-      // Fix for GitHub issue #2 - Free Write paragraph insertion position with enabled toggles
-      // FIX: Insert custom paragraphs BEFORE toggle filtering (same as EmbedContainer.jsx fix above)
-      // This is less critical here since it's admin view-only, but should be consistent.
-      // Apply transformations in order: variables → custom insertions → internal notes → toggles → clean
-      processedContent = substituteVariablesInAdf(processedContent, embedData.variableValues || {});
-      processedContent = insertCustomParagraphsInAdf(processedContent, embedData.customInsertions || []);
-      processedContent = insertInternalNotesInAdf(processedContent, embedData.internalNotes || []);
-      processedContent = filterContentByToggles(processedContent, embedData.toggleStates || {});
-      processedContent = cleanAdfForRenderer(processedContent);
-    }
-
-    // Create a minimal excerpt object for EmbedViewMode
-    const mockExcerpt = {
-      id: embedData.excerptId,
-      name: embedData.sourceName,
-      category: embedData.sourceCategory,
-      content: rawContent,
-      variables: [],
-      toggles: []
-    };
-
+    // Render content using AdfRenderer directly
     return (
       <Stack space="space.100">
-        {/* Use EmbedViewMode for consistent rendering */}
         <Box
           backgroundColor="elevation.surface.overlay"
           padding="space.200"
           borderRadius="border.radius"
           borderColor="color.border.accent.gray"
-          borderWidth="border.width"        >
-          <EmbedViewMode
-            content={processedContent}
-            isStale={false}
-            isCheckingStaleness={false}
-            showDiffView={false}
-            setShowDiffView={() => {}}
-            handleUpdateToLatest={() => {}}
-            isUpdating={false}
-            syncedContent={rawContent}
-            latestRenderedContent={processedContent}
-            variableValues={embedData.variableValues || {}}
-            toggleStates={embedData.toggleStates || {}}
-            excerpt={mockExcerpt}
-          />
+          borderWidth="border.width"
+        >
+          <AdfRenderer document={processedContent} />
         </Box>
       </Stack>
     );
