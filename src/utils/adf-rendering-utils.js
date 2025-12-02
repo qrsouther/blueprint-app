@@ -9,8 +9,11 @@
  * - Cleaning ADF for Forge's AdfRenderer compatibility
  * - Toggle-based conditional content filtering
  * - Variable substitution with visual indicators for unset variables
+ * - Smart case matching (auto-capitalize at sentence starts)
  * - Custom paragraph and internal note insertions
  */
+
+import { maybeUpgradeCase } from './detection-utils.js';
 
 /**
  * Clean ADF for Forge's AdfRenderer
@@ -279,12 +282,41 @@ export const stripToggleMarkers = (adfNode) => {
  *
  * Replaces {{variableName}} placeholders with actual values.
  * Unset variables (empty values) are wrapped in code marks for visual distinction.
+ * 
+ * Smart Case Matching:
+ * When variable definitions with occurrences are provided, automatically upgrades
+ * lowercase variable values to sentence case when they appear at sentence starts.
+ * Only upgrades case (never downgrades) - if user types "Season Ticket", it stays as-is.
  *
  * @param {Object} adfNode - ADF node to process
  * @param {Object} variableValues - Map of variable names to values
+ * @param {Array} variables - Optional array of variable definitions with occurrences
+ *                            (from Source.variables, includes isAtSentenceStart flags)
  * @returns {Object} ADF node with variables substituted
  */
-export const substituteVariablesInAdf = (adfNode, variableValues) => {
+export const substituteVariablesInAdf = (adfNode, variableValues, variables = null) => {
+  // Build occurrence lookup for smart case matching
+  // Structure: { varName: [{ index: 0, isAtSentenceStart: true }, ...] }
+  const occurrenceLookup = {};
+  if (variables && Array.isArray(variables)) {
+    for (const variable of variables) {
+      if (variable.occurrences && Array.isArray(variable.occurrences)) {
+        occurrenceLookup[variable.name] = variable.occurrences;
+      }
+    }
+  }
+  
+  // Track which occurrence of each variable we're currently processing
+  // This is a shared object that persists across recursive calls
+  const occurrenceCounters = {};
+  
+  return substituteVariablesInAdfInternal(adfNode, variableValues, occurrenceLookup, occurrenceCounters);
+};
+
+/**
+ * Internal recursive function for variable substitution with smart case matching
+ */
+const substituteVariablesInAdfInternal = (adfNode, variableValues, occurrenceLookup, occurrenceCounters) => {
   if (!adfNode) return adfNode;
 
   // If it's a text node, perform substitution
@@ -310,7 +342,27 @@ export const substituteVariablesInAdf = (adfNode, variableValues) => {
       }
 
       const varName = match[1].trim();
-      const value = variableValues?.[varName];
+      let value = variableValues?.[varName];
+      
+      // Smart case matching: check if this occurrence should be upgraded to sentence case
+      if (value && occurrenceLookup[varName]) {
+        // Get current occurrence index for this variable
+        if (!(varName in occurrenceCounters)) {
+          occurrenceCounters[varName] = 0;
+        }
+        const currentIndex = occurrenceCounters[varName];
+        
+        // Look up the occurrence's isAtSentenceStart flag
+        const occurrences = occurrenceLookup[varName];
+        const occurrence = occurrences.find(occ => occ.index === currentIndex);
+        const isAtSentenceStart = occurrence?.isAtSentenceStart || false;
+        
+        // Apply case upgrade if needed (only upgrades, never downgrades)
+        value = maybeUpgradeCase(value, isAtSentenceStart);
+        
+        // Increment counter for next occurrence of this variable
+        occurrenceCounters[varName]++;
+      }
 
       if (value) {
         // Variable has a value - substitute it
@@ -342,6 +394,14 @@ export const substituteVariablesInAdf = (adfNode, variableValues) => {
             : [{ type: 'code' }];
         }
         parts.push(part);
+        
+        // Still increment counter for unset variables to maintain correct occurrence tracking
+        if (occurrenceLookup[varName]) {
+          if (!(varName in occurrenceCounters)) {
+            occurrenceCounters[varName] = 0;
+          }
+          occurrenceCounters[varName]++;
+        }
       }
 
       lastIndex = regex.lastIndex;
@@ -375,7 +435,7 @@ export const substituteVariablesInAdf = (adfNode, variableValues) => {
   if (adfNode.content && Array.isArray(adfNode.content)) {
     const newContent = [];
     adfNode.content.forEach(child => {
-      const processed = substituteVariablesInAdf(child, variableValues);
+      const processed = substituteVariablesInAdfInternal(child, variableValues, occurrenceLookup, occurrenceCounters);
       if (processed._parts) {
         // Expand parts into multiple text nodes
         newContent.push(...processed._parts);
@@ -723,13 +783,14 @@ export const extractParagraphsFromAdf = (adfNode) => {
  * @param {Object} adfContent - ADF content to render
  * @param {Object} variableValues - Variable values for substitution
  * @param {Object} toggleStates - Toggle states (enabled/disabled)
+ * @param {Array} variables - Optional variable definitions with occurrences for smart case matching
  * @returns {Object} Rendered ADF with all content visible, disabled toggles marked
  */
-export function renderContentWithGhostToggles(adfContent, variableValues, toggleStates) {
+export function renderContentWithGhostToggles(adfContent, variableValues, toggleStates, variables = null) {
   if (!adfContent) return adfContent;
 
-  // Step 1: Apply variable substitutions
-  let rendered = substituteVariablesInAdf(adfContent, variableValues);
+  // Step 1: Apply variable substitutions (with smart case matching if variables provided)
+  let rendered = substituteVariablesInAdf(adfContent, variableValues, variables);
 
   // Step 2: Mark disabled toggle blocks (DON'T remove them)
   rendered = markDisabledToggleBlocks(rendered, toggleStates);

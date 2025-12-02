@@ -10,7 +10,7 @@
 import { storage, startsWith } from '@forge/api';
 import api, { route } from '@forge/api';
 import { generateUUID } from '../utils.js';
-import { detectVariables, detectToggles } from '../utils/detection-utils.js';
+import { detectVariables, detectToggles, detectVariableOccurrences, mergeOccurrencesIntoVariables } from '../utils/detection-utils.js';
 import { updateExcerptIndex } from '../utils/storage-utils.js';
 import { calculateContentHash } from '../utils/hash-utils.js';
 import { logFunction, logPhase, logSuccess, logFailure, logWarning } from '../utils/forge-logger.js';
@@ -122,7 +122,7 @@ export async function saveExcerpt(req) {
   const detectedVariables = detectVariables(contentToProcess);
 
   // Merge detected variables with provided metadata
-  const variables = detectedVariables.map(v => {
+  let variables = detectedVariables.map(v => {
     const metadata = variableMetadata?.find(m => m.name === v.name);
     return {
       name: v.name,
@@ -131,6 +131,10 @@ export async function saveExcerpt(req) {
       required: metadata?.required || false
     };
   });
+
+  // Detect variable occurrences with sentence-start context (for smart case matching)
+  const variableOccurrences = detectVariableOccurrences(contentToProcess);
+  variables = mergeOccurrencesIntoVariables(variables, variableOccurrences);
 
   // Detect toggles in content
   const detectedToggles = detectToggles(contentToProcess);
@@ -279,15 +283,21 @@ export async function updateExcerptContent(req) {
     const detectedToggles = detectToggles(content);
 
     // Preserve existing variable metadata, but update the list
-    const variables = detectedVariables.map(v => {
+    let variables = detectedVariables.map(v => {
       const existing = excerpt.variables?.find(ev => ev.name === v.name);
-      return existing || {
+      // Preserve existing metadata but don't preserve old occurrences (will be re-computed)
+      const { occurrences, ...existingMetadata } = existing || {};
+      return existingMetadata?.name ? existingMetadata : {
         name: v.name,
         description: '',
         example: '',
         multiline: false
       };
     });
+
+    // Re-detect variable occurrences with sentence-start context (for smart case matching)
+    const variableOccurrences = detectVariableOccurrences(content);
+    variables = mergeOccurrencesIntoVariables(variables, variableOccurrences);
 
     // Preserve existing toggle metadata, but update the list
     const toggles = detectedToggles.map(t => {

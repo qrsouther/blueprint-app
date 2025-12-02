@@ -24,6 +24,7 @@ import api, { route } from '@forge/api';
 import { updateProgress, calculatePhaseProgress } from './helpers/progress-tracker.js';
 import { extractVariablesFromAdf } from '../utils/adf-utils.js';
 import { validateExcerptData } from '../utils/storage-validator.js';
+import { detectVariableOccurrences, mergeOccurrencesIntoVariables } from '../utils/detection-utils.js';
 import { logFunction, logPhase, logSuccess, logFailure, logWarning } from '../utils/forge-logger.js';
 
 /**
@@ -66,6 +67,7 @@ export async function handler(event) {
     const excerptsByPage = new Map(); // pageId -> [excerpts]
     const skippedExcerpts = [];
     let bespokeBackfillCount = 0;
+    let smartCaseBackfillCount = 0;
 
     for (const excerptSummary of excerptIndex.excerpts) {
       const excerpt = await storage.get(`excerpt:${excerptSummary.id}`);
@@ -83,6 +85,42 @@ export async function handler(event) {
         });
       }
 
+      // BACKFILL: Add smart case matching occurrences to variables
+      // This enables automatic capitalization of lowercase variable values at sentence starts
+      // Check if any variable is missing the occurrences property (indicates pre-smart-case-matching data)
+      const needsSmartCaseBackfill = excerpt.variables && 
+        Array.isArray(excerpt.variables) && 
+        excerpt.variables.length > 0 &&
+        excerpt.variables.some(v => !v.occurrences) &&
+        excerpt.content && 
+        typeof excerpt.content === 'object';
+      
+      if (needsSmartCaseBackfill) {
+        try {
+          // Detect variable occurrences with sentence-start context
+          const occurrences = detectVariableOccurrences(excerpt.content);
+          
+          // Merge occurrences into existing variable definitions
+          excerpt.variables = mergeOccurrencesIntoVariables(excerpt.variables, occurrences);
+          
+          await storage.set(`excerpt:${excerptSummary.id}`, excerpt);
+          smartCaseBackfillCount++;
+          logPhase('checkSourcesWorker', 'Backfilled smart case matching occurrences', { 
+            excerptId: excerptSummary.id, 
+            excerptName: excerpt.name,
+            variablesCount: excerpt.variables.length,
+            occurrencesCount: occurrences.length
+          });
+        } catch (backfillError) {
+          // Log warning but don't fail the entire operation
+          logWarning('checkSourcesWorker', 'Failed to backfill smart case matching', {
+            excerptId: excerptSummary.id,
+            excerptName: excerpt.name,
+            error: backfillError.message
+          });
+        }
+      }
+
       // Skip if this excerpt doesn't have page info
       if (!excerpt.sourcePageId || !excerpt.sourceLocalId) {
         skippedExcerpts.push(excerpt.name);
@@ -98,7 +136,8 @@ export async function handler(event) {
     logPhase('checkSourcesWorker', 'Grouped excerpts by page', {
       totalPages: excerptsByPage.size,
       skippedCount: skippedExcerpts.length,
-      bespokeBackfillCount
+      bespokeBackfillCount,
+      smartCaseBackfillCount
     });
 
     await updateProgress(progressId, {
@@ -407,6 +446,9 @@ export async function handler(event) {
     if (bespokeBackfillCount > 0) {
       statusMessage += `, ${bespokeBackfillCount} backfilled with bespoke:false`;
     }
+    if (smartCaseBackfillCount > 0) {
+      statusMessage += `, ${smartCaseBackfillCount} backfilled with smart case data`;
+    }
 
     const finalResults = {
       orphanedSources,
@@ -415,6 +457,7 @@ export async function handler(event) {
       staleEntriesRemoved: 0, // Not running cleanup
       contentConversionsCount,
       bespokeBackfillCount,
+      smartCaseBackfillCount,
       completedAt: new Date().toISOString()
     };
 
@@ -429,6 +472,7 @@ export async function handler(event) {
       orphanedCount: orphanedSources.length,
       contentConversionsCount,
       bespokeBackfillCount,
+      smartCaseBackfillCount,
       results: finalResults
     });
 
@@ -438,7 +482,8 @@ export async function handler(event) {
       activeCount: checkedSources.length,
       orphanedCount: orphanedSources.length,
       conversionsCount: contentConversionsCount,
-      bespokeBackfillCount
+      bespokeBackfillCount,
+      smartCaseBackfillCount
     });
 
     return {
@@ -449,7 +494,8 @@ export async function handler(event) {
         activeCount: checkedSources.length,
         orphanedCount: orphanedSources.length,
         contentConversionsCount,
-        bespokeBackfillCount
+        bespokeBackfillCount,
+        smartCaseBackfillCount
       }
     };
 

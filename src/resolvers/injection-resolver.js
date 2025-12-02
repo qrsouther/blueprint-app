@@ -376,7 +376,8 @@ export async function publishChapter(req) {
         });
         
         // Apply transformations in correct order
-        renderedAdf = substituteVariablesInAdf(renderedAdf, variableValues);
+        // Pass excerpt.variables for smart case matching (auto-capitalize at sentence starts)
+        renderedAdf = substituteVariablesInAdf(renderedAdf, variableValues, excerpt.variables);
         renderedAdf = insertCustomParagraphsInAdf(renderedAdf, customInsertions);
         // Pass customInsertions to insertInternalNotesInAdf so it can adjust positions
         // (internal note positions are based on original content, but custom paragraphs are already inserted)

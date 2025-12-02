@@ -887,7 +887,8 @@ export async function bulkPublishChapters(req) {
         let renderedAdf = excerpt.content;
 
         if (renderedAdf && typeof renderedAdf === 'object' && renderedAdf.type === 'doc') {
-          renderedAdf = substituteVariablesInAdf(renderedAdf, variableValues);
+          // Pass excerpt.variables for smart case matching (auto-capitalize at sentence starts)
+          renderedAdf = substituteVariablesInAdf(renderedAdf, variableValues, excerpt.variables);
           renderedAdf = insertCustomParagraphsInAdf(renderedAdf, customInsertions);
           // Pass customInsertions to adjust internal note positions
           renderedAdf = insertInternalNotesInAdf(renderedAdf, internalNotes, customInsertions);
