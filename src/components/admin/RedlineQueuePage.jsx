@@ -18,7 +18,7 @@
  * - Phase 6: Complete queue view with grouping (next)
  */
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { Box, Stack, Heading, Text, Spinner, Inline, Button, xcss } from '@forge/react';
 import { useQueryClient } from '@tanstack/react-query';
 import { RedlineStatsBar } from './RedlineStatsBar';
@@ -27,10 +27,13 @@ import { useRedlineQueueQuery } from '../../hooks/redline-hooks';
 import { useCurrentUserQuery } from '../../hooks/admin-hooks';
 import { logger } from '../../utils/logger.js';
 
-// Full-width container style
+// Full-width container style - minWidth ensures it doesn't collapse when content is minimal
 const fullWidthContainerStyle = xcss({
   width: '100%',
-  maxWidth: '100%'
+  minWidth: '100%',
+  maxWidth: '100%',
+  flexGrow: 1,
+  display: 'block'
 });
 
 export function RedlineQueuePage({ isActive = true }) {
@@ -62,6 +65,27 @@ export function RedlineQueuePage({ isActive = true }) {
   const { data: currentUserId, isLoading: userLoading } = useCurrentUserQuery();
 
   const isLoading = queueLoading || userLoading;
+
+  // Compute the embeds count display string for the stats bar
+  const embedsCountDisplay = useMemo(() => {
+    if (isLoading || !queueData) return null;
+    
+    let totalCount;
+    if (groupBy && queueData.groups) {
+      totalCount = Object.values(queueData.groups).reduce((sum, embeds) => sum + embeds.length, 0) + transitioningCards.size;
+    } else {
+      // For flat view, include transitioning cards that may have been filtered out
+      const baseCount = queueData.embeds?.length || 0;
+      // Count transitioning cards not already in embeds
+      const additionalTransitioning = Array.from(transitioningCards.keys()).filter(
+        localId => !queueData.embeds?.some(e => e.localId === localId)
+      ).length;
+      totalCount = baseCount + additionalTransitioning;
+    }
+    
+    const visibleCount = Math.min(itemsToShow, totalCount);
+    return `Showing ${visibleCount} of ${totalCount} embeds`;
+  }, [queueData, groupBy, transitioningCards, itemsToShow, isLoading]);
 
   // Reset pagination when filters/sort/group changes
   const resetPagination = () => {
@@ -188,6 +212,7 @@ export function RedlineQueuePage({ isActive = true }) {
           onGroupChange={handleGroupChange}
           onManualRefresh={handleManualRefresh}
           isActive={isActive}
+          embedsCountDisplay={embedsCountDisplay}
         />
 
         {/* Phase 5: Queue display */}
@@ -250,9 +275,6 @@ export function RedlineQueuePage({ isActive = true }) {
                     </Box>
                   ) : (
                     <>
-                      <Text weight="semibold">
-                        Showing {Math.min(itemsToShow, allEmbedsToShow.length)} of {allEmbedsToShow.length} Embed{allEmbedsToShow.length !== 1 ? 's' : ''}
-                      </Text>
                       {allEmbedsToShow.slice(0, itemsToShow).map(embed => {
                         const isTransitioning = transitioningCards.has(embed.localId);
                         const transitionInfo = transitioningCards.get(embed.localId);
@@ -384,10 +406,6 @@ export function RedlineQueuePage({ isActive = true }) {
             </>
           );
         })()}
-
-        <Text size="small" color="color.text.subtlest">
-          Phase 5 of 8 - Queue cards and actions complete. Advanced features coming in Phase 6.
-        </Text>
       </Stack>
     </Box>
   );

@@ -2199,7 +2199,7 @@ const App = () => {
           </Box>
         </TabPanel>
 
-        <TabPanel>
+        <TabPanel xcss={xcss({ display: 'block' })}>
           <Box xcss={tabPanelContentStyles}>
             <RedlineQueuePage isActive={selectedTab === 1} />
           </Box>

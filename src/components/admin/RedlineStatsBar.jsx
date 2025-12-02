@@ -21,15 +21,17 @@
  * @param {string|null} groupBy - Current group field
  * @param {Function} onGroupChange - Callback to update group field
  * @param {boolean} isActive - Whether the tab is active (default: true)
+ * @param {string|null} embedsCountDisplay - Display string showing embed counts (e.g., "Showing 5 of 10 embeds")
  */
 
 import React, { useCallback } from 'react';
 import { Box, Inline, Stack, Lozenge, Text, Spinner, Select, Button, Textfield, xcss } from '@forge/react';
 import { useRedlineStatsQuery } from '../../hooks/redline-hooks';
 
-// Full-width style
+// Full-width style - minWidth ensures it doesn't collapse when content is minimal
 const fullWidthStyle = xcss({
-  width: '100%'
+  width: '100%',
+  minWidth: '100%'
 });
 
 // Select dropdown style
@@ -95,7 +97,8 @@ function RedlineStatsBarComponent({
   groupBy,
   onGroupChange,
   onManualRefresh,
-  isActive = true
+  isActive = true,
+  embedsCountDisplay
 }) {
   const { data: stats, isLoading, error } = useRedlineStatsQuery(isActive);
   
@@ -243,6 +246,11 @@ function RedlineStatsBarComponent({
                 🔄 Refresh Queue
               </Button>
             )}
+            {embedsCountDisplay && (
+              <Text as="em" align='center'>
+                {embedsCountDisplay}
+              </Text>
+            )}
           </Inline>
 
           {/* Vertical divider */}
@@ -286,6 +294,7 @@ export const RedlineStatsBar = React.memo(RedlineStatsBarComponent, (prevProps, 
     prevProps.onFiltersChange === nextProps.onFiltersChange &&
     prevProps.onSortChange === nextProps.onSortChange &&
     prevProps.onGroupChange === nextProps.onGroupChange &&
-    prevProps.onManualRefresh === nextProps.onManualRefresh
+    prevProps.onManualRefresh === nextProps.onManualRefresh &&
+    prevProps.embedsCountDisplay === nextProps.embedsCountDisplay
   );
 });

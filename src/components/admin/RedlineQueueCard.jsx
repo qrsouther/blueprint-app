@@ -73,7 +73,9 @@ const getCardStyles = (status) => {
     borderWidth: 'border.width',
     borderStyle: 'solid',
     borderColor: 'color.border',
-    width: '100%'
+    width: '100%',
+    marginBottom: 'space.100',
+    marginTop: 'space.100'
   });
 };
 
@@ -88,15 +90,18 @@ const buttonStyles = xcss({
   color: 'color.link'
 });
 
-// Left side container (metadata only) - 25% width
+// Left side container (metadata only) - 17% width
 const leftSideStyles = xcss({
   width: '17%',
+  minWidth: '17%',
   paddingRight: 'space.200'
 });
 
-// Middle container (preview) - 50% width, scrollable
+// Middle container (preview) - 66% width, scrollable
+// minWidth ensures column doesn't collapse when empty
 const middleSideStyles = xcss({
   width: '66%',
+  minWidth: '66%',
   paddingLeft: 'space.200',
   paddingRight: 'space.200',
   borderLeftWidth: 'border.width',
@@ -109,15 +114,15 @@ const middleSideStyles = xcss({
   overflowY: 'scroll'
 });
 
-// Right side container (action buttons) - 25% width
+// Right side container (action buttons) - 17% width
 const rightSideStyles = xcss({
   width: '17%',
+  minWidth: '17%',
   paddingLeft: 'space.200'
 });
 
-// Centered button content style
-const centeredButtonContentStyle = xcss({
-  textAlign: 'center',
+// Card content row - ensures full width
+const cardContentRowStyles = xcss({
   width: '100%'
 });
 
@@ -440,7 +445,7 @@ function RedlineQueueCardComponent({ embedData, currentUserId, onStatusChange })
   return (
     <>
       <Box xcss={cardStyle}>
-        <Inline space="space.0" alignBlock="start" shouldWrap={false}>
+        <Inline space="space.0" alignBlock="start" shouldWrap={false} xcss={cardContentRowStyles}>
           {/* Left side: Metadata only (25%) */}
           <Box xcss={leftSideStyles}>
             <Stack space="space.200">
@@ -525,15 +530,12 @@ function RedlineQueueCardComponent({ embedData, currentUserId, onStatusChange })
               // Show all action buttons when no comment form is active
               <Stack space="space.100" alignBlock="stretch">
                 <Button
-                  appearance="default"
+                  appearance="primary"
+                  iconBefore="check-circle"
                   onClick={() => setActiveCommentAction('approved')}
                   isDisabled={embedData.redlineStatus === 'approved' || setStatusMutation.isPending}
-                  xcss={centeredButtonContentStyle}
                 >
-                  <Inline space="space.100" alignBlock="center">
-                    <Icon glyph="check-circle" label="Approve" color="color.icon.success" />
-                    Approve
-                  </Inline>
+                  Approve
                 </Button>
 
                 <Button
