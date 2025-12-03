@@ -43,15 +43,6 @@ const searchFieldStyle = xcss({
   minWidth: '300px'
 });
 
-// Vertical divider style (matching RedlineQueueCard dividers)
-const verticalDividerStyle = xcss({
-  borderLeftWidth: 'border.width',
-  borderLeftStyle: 'solid',
-  borderLeftColor: 'color.border',
-  height: '100%',
-  alignSelf: 'stretch'
-});
-
 // Isolated Search Textfield component to prevent cursor jumping
 // Uses uncontrolled component pattern with ref to maintain cursor position
 const SearchTextfield = React.memo(({ value, onChange, placeholder }) => {
@@ -214,8 +205,8 @@ function RedlineStatsBarComponent({
           />
         </Box>
 
-        {/* Main row: Controls on left, divider, stats on right */}
-        <Inline space="space.200" alignBlock="center" spread="space-between">
+        {/* Main row: Controls on left, stats on right (wraps when needed) */}
+        <Inline space="space.200" alignBlock="center" spread="space-between" shouldWrap>
           {/* Left side: Controls */}
           <Inline space="space.100" alignBlock="center" spread="space-between">
             <Box xcss={selectStyles}>
@@ -253,9 +244,6 @@ function RedlineStatsBarComponent({
               </Text>
             )}
           </Inline>
-
-          {/* Vertical divider */}
-          <Box xcss={verticalDividerStyle} />
 
           {/* Right side: Stats */}
           <Inline space="space.100" alignBlock="center" spread="space-between">
