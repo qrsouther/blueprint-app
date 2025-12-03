@@ -817,6 +817,44 @@ Backend validation successfully prevents invalid data from being saved, which is
 
 ---
 
+### RedlineQueueCard: Fetch Published Content from Page Storage
+**Status:** 🔴 TODO
+**Priority:** Medium
+**Created:** 2025-12-02
+
+**Context:**
+The RedlineQueueCard currently re-renders content from the Source ADF and applies Embed config (variables, toggles, etc.). This approach has limitations:
+1. Smart case matching won't work (no access to Source's `variables` array with occurrence data)
+2. Content may not exactly match what was actually published to the page
+3. Adds processing overhead when the published content already exists on the page
+
+**Proposed Solution:**
+Instead of re-rendering from Source, fetch the actual injected content blob that exists between the Blueprint markers on the published page:
+
+```html
+<!-- BLUEPRINT-APP-START-{localId} -->
+  ... actual published content ...
+<!-- BLUEPRINT-APP-END-{localId} -->
+```
+
+**Benefits:**
+- Shows exactly what users will see (WYSIWYG)
+- Includes smart case matching (already applied at publish time)
+- Reduces processing overhead
+- Eliminates discrepancies between preview and published content
+
+**Implementation Notes:**
+- RedlineQueueCard already has access to `embedData.pageId` and `embedData.localId`
+- Need to fetch page storage format and extract content between markers
+- Content between markers is storage format HTML, may need conversion for preview
+- Fallback to current re-rendering approach if markers not found
+
+**Related Files:**
+- `src/components/admin/RedlineQueueCard.jsx` - Current implementation at lines 368-408
+- `src/resolvers/injection-resolver.js` - Marker format reference (lines 188-190)
+
+---
+
 ### Redlining System (Status Management & Review Workflow)
 **Status:** Requirements gathering
 **Priority:** TBD

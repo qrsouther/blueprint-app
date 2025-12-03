@@ -99,7 +99,8 @@ export const CustomInsertionsPanel = ({
     // FIX: Extract paragraphs from ORIGINAL content (before toggle filtering) so paragraph indices
     // match the original structure. This allows insertions to be placed inside toggle blocks.
     // Only apply variable substitution for display purposes, but don't filter toggles yet.
-    originalContent = substituteVariablesInAdf(originalContent, variableValues);
+    // Pass excerpt.variables for smart case matching (auto-capitalize at sentence starts)
+    originalContent = substituteVariablesInAdf(originalContent, variableValues, excerpt?.variables);
     // Don't filter toggles here - extract from original structure
   }
 

@@ -280,7 +280,8 @@ export const useCachedContent = (
           // Fix for GitHub issue #2 - Free Write paragraph insertion position with enabled toggles
           // FIX: Insert custom paragraphs BEFORE toggle filtering (same as EmbedContainer.jsx fix above)
           // Insert custom paragraphs and internal notes into original content (before toggle filtering)
-          freshContent = substituteVariablesInAdf(freshContent, loadedVariableValues);
+          // Pass excerpt.variables for smart case matching (auto-capitalize at sentence starts)
+          freshContent = substituteVariablesInAdf(freshContent, loadedVariableValues, excerpt.variables);
           freshContent = insertCustomParagraphsInAdf(freshContent, loadedCustomInsertions);
           // Pass customInsertions to adjust internal note positions
           freshContent = insertInternalNotesInAdf(freshContent, loadedInternalNotes, loadedCustomInsertions);

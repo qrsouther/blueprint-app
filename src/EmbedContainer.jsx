@@ -640,8 +640,9 @@ const App = () => {
       }
 
       // Apply variables (using watched values for live updates)
+      // Pass excerpt.variables for smart case matching (auto-capitalize at sentence starts)
       if (editSession.excerpt.variables) {
-        previewAdf = substituteVariablesInAdf(previewAdf, watchedVariableValues || {});
+        previewAdf = substituteVariablesInAdf(previewAdf, watchedVariableValues || {}, editSession.excerpt.variables);
       }
 
       // Apply custom insertions (using watched values for live updates)

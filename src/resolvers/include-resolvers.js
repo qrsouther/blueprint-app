@@ -352,7 +352,8 @@ export async function saveVariableValues(req) {
           // so it knows where toggle boundaries are. Then toggle filtering will preserve 
           // the insertion if the toggle is enabled.
           try {
-            previewContent = substituteVariablesInAdf(previewContent, variableValues || {});
+            // Pass excerpt.variables for smart case matching (auto-capitalize at sentence starts)
+            previewContent = substituteVariablesInAdf(previewContent, variableValues || {}, excerpt.variables);
             previewContent = insertCustomParagraphsInAdf(previewContent, customInsertions || []);
             // Pass customInsertions to adjust internal note positions
             previewContent = insertInternalNotesInAdf(previewContent, internalNotes || [], customInsertions || []);
