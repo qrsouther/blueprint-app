@@ -93,6 +93,38 @@ import {
   adfContentContainerStyle
 } from '../../styles/embed-styles';
 
+/**
+ * Check if any required variable is missing a value
+ * Used to disable the Publish button until all required variables are filled in.
+ * 
+ * @param {Object} excerpt - The Source excerpt with variables array
+ * @param {Object} variableValues - Object of variable name -> value
+ * @param {boolean} isFreeformMode - Whether in freeform content mode
+ * @param {string} freeformContent - Freeform content text
+ * @returns {boolean} True if any required variable is missing a value
+ */
+const hasEmptyRequiredVariables = (excerpt, variableValues, isFreeformMode, freeformContent) => {
+  // If in freeform mode with content, required variables don't apply
+  // (freeform mode bypasses the Source structure entirely)
+  if (isFreeformMode && freeformContent?.trim()) {
+    return false;
+  }
+
+  // No variables defined = no required variables missing
+  if (!excerpt?.variables || excerpt.variables.length === 0) {
+    return false;
+  }
+
+  const values = variableValues || {};
+
+  // Check if any REQUIRED variable is empty/null
+  return excerpt.variables.some(v => {
+    if (!v.required) return false;
+    const value = values[v.name];
+    return !value || value.trim() === '';
+  });
+};
+
 export function EmbedEditMode({
   excerpt,
   availableExcerpts,
@@ -427,7 +459,7 @@ export function EmbedEditMode({
               <Button
                 appearance="primary"
                 onClick={handlePublishWithHeading}
-                isDisabled={isPublishing || !selectedExcerptId}
+                isDisabled={isPublishing || !selectedExcerptId || hasEmptyRequiredVariables(excerpt, variableValues, isFreeformMode, freeformContent)}
               >
                 {isPublishing ? 'Publishing...' : 'Publish'}
               </Button>

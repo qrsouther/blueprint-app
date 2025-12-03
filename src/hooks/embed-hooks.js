@@ -254,6 +254,8 @@ export const useCachedContent = (
       const loadedToggleStates = finalVarsData.toggleStates || {};
       const loadedCustomInsertions = finalVarsData.customInsertions || [];
       const loadedInternalNotes = finalVarsData.internalNotes || [];
+      // Smart casing defaults to true for backwards compatibility
+      const loadedSmartCasingEnabled = finalVarsData.smartCasingEnabled !== false;
 
       // Update form with loaded values
       if (reset) {
@@ -281,7 +283,13 @@ export const useCachedContent = (
           // FIX: Insert custom paragraphs BEFORE toggle filtering (same as EmbedContainer.jsx fix above)
           // Insert custom paragraphs and internal notes into original content (before toggle filtering)
           // Pass excerpt.variables for smart case matching (auto-capitalize at sentence starts)
-          freshContent = substituteVariablesInAdf(freshContent, loadedVariableValues, excerpt.variables);
+          // Pass disableSmartCase option based on user's Smart Casing toggle preference
+          freshContent = substituteVariablesInAdf(
+            freshContent, 
+            loadedVariableValues, 
+            excerpt.variables,
+            { disableSmartCase: !loadedSmartCasingEnabled }
+          );
           freshContent = insertCustomParagraphsInAdf(freshContent, loadedCustomInsertions);
           // Pass customInsertions to adjust internal note positions
           freshContent = insertInternalNotesInAdf(freshContent, loadedInternalNotes, loadedCustomInsertions);

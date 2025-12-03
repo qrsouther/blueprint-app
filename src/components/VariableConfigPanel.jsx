@@ -29,6 +29,7 @@ import {
   Icon,
   DynamicTable,
   Box,
+  Toggle,
   xcss
 } from '@forge/react';
 import { StableTextfield } from './common/StableTextfield';
@@ -66,6 +67,16 @@ const textfieldWrapperStyle = xcss({
   caretColor: 'color.text'
 });
 
+// Style for the Smart Casing toggle footer row
+const toggleFooterStyle = xcss({
+  paddingBlockStart: 'space.150',
+  paddingBlockEnd: 'space.050',
+  paddingInline: 'space.100',
+  borderTopWidth: 'border.width',
+  borderTopStyle: 'solid',
+  borderTopColor: 'color.border'
+});
+
 /**
  * VariableConfigPanel Component
  *
@@ -73,6 +84,8 @@ const textfieldWrapperStyle = xcss({
  * @param {Object} props.excerpt - The Blueprint Standard/excerpt object containing variables
  * @param {Object} props.control - React Hook Form control from parent form
  * @param {Function} props.setValue - React Hook Form setValue function
+ * @param {Function} props.onBlur - Handler for blur events (draft saving)
+ * @param {number} props.formKey - Key to force re-mount of inputs on reset
  * @returns {JSX.Element}
  */
 export const VariableConfigPanel = ({ excerpt, control, setValue, onBlur, formKey }) => {
@@ -81,6 +94,12 @@ export const VariableConfigPanel = ({ excerpt, control, setValue, onBlur, formKe
     control,
     name: 'variableValues'
   }) || {};
+
+  // Watch smart casing setting
+  const smartCasingEnabled = useWatch({
+    control,
+    name: 'smartCasingEnabled'
+  }) !== false; // Default true for backwards compatibility
 
   // Handle null excerpt (template context where user hasn't selected a source yet)
   if (!excerpt) {
@@ -195,6 +214,29 @@ export const VariableConfigPanel = ({ excerpt, control, setValue, onBlur, formKe
             };
           })}
         />
+      </Box>
+      
+      {/* Smart Casing Toggle - allows users to disable auto-capitalization */}
+      <Box xcss={toggleFooterStyle}>
+        <Inline alignInline="end" alignBlock="center" space="space.100">
+          <Tooltip 
+            content="When enabled, lowercase variable values are automatically capitalized at sentence starts. Disable to use your exact input values."
+            position="top"
+          >
+            <Inline alignBlock="center" space="space.050">
+              <Text size="small" color="color.text.subtle">Smart Casing</Text>
+              <Icon glyph="question-circle" size="small" label="Smart casing info" />
+            </Inline>
+          </Tooltip>
+          <Toggle
+            id="smart-casing-toggle"
+            isChecked={smartCasingEnabled}
+            onChange={() => {
+              setValue('smartCasingEnabled', !smartCasingEnabled, { shouldDirty: true });
+              if (onBlur) onBlur(); // Trigger draft save
+            }}
+          />
+        </Inline>
       </Box>
     </Box>
   );

@@ -54,7 +54,9 @@ jest.mock('../../utils/hash-utils.js', () => ({
 
 jest.mock('../../utils/detection-utils.js', () => ({
   detectVariables: jest.fn(() => []),
-  detectToggles: jest.fn(() => [])
+  detectToggles: jest.fn(() => []),
+  detectVariableOccurrences: jest.fn(() => []),
+  mergeOccurrencesIntoVariables: jest.fn((vars) => vars)
 }));
 
 jest.mock('../../utils.js', () => ({

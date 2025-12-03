@@ -39,7 +39,8 @@ const DEFAULT_FORM_VALUES = {
   customHeading: '', // Empty means use source name as default
   complianceLevel: null, // null means auto-select based on Source's bespoke property
   isFreeformMode: false, // Flag indicating freeform mode is active (for non-standard/tbd/na - bypasses Source structure)
-  freeformContent: '' // Raw text content user writes in freeform mode
+  freeformContent: '', // Raw text content user writes in freeform mode
+  smartCasingEnabled: true // Smart case matching - auto-capitalize at sentence starts (can be toggled off)
 };
 
 /**
@@ -58,7 +59,9 @@ function normalizeFormData(data) {
     customHeading: data.customHeading || '',
     complianceLevel: data.complianceLevel || null,
     isFreeformMode: data.isFreeformMode || false,
-    freeformContent: data.freeformContent || ''
+    freeformContent: data.freeformContent || '',
+    // Default to true if not set (backwards compatibility - existing Embeds get smart casing)
+    smartCasingEnabled: data.smartCasingEnabled !== false
   };
 }
 
@@ -150,6 +153,7 @@ export const useEmbedEditSession = (localId, options = {}) => {
   const complianceLevel = useWatch({ control, name: 'complianceLevel' });
   const isFreeformMode = useWatch({ control, name: 'isFreeformMode' }) || false;
   const freeformContent = useWatch({ control, name: 'freeformContent' }) || '';
+  const smartCasingEnabled = useWatch({ control, name: 'smartCasingEnabled' }) !== false; // Default true
   
   // ============================================================================
   // REACT QUERY - Initial Data Load (One-Time)
@@ -831,7 +835,8 @@ export const useEmbedEditSession = (localId, options = {}) => {
         customHeading: headingValue,
         complianceLevel: values.complianceLevel || null,
         isFreeformMode: values.isFreeformMode || false,
-        freeformContent: values.freeformContent || ''
+        freeformContent: values.freeformContent || '',
+        smartCasingEnabled: values.smartCasingEnabled !== false // Default true for backwards compat
       };
       
       // Save to Forge storage first
@@ -1016,6 +1021,7 @@ export const useEmbedEditSession = (localId, options = {}) => {
     complianceLevel,
     isFreeformMode,
     freeformContent,
+    smartCasingEnabled,
     
     // Excerpt/Source
     excerptId,

@@ -62,10 +62,10 @@ async function renderExcerptContent(excerpt, variableValues = {}) {
     content = String(content || '');
   }
 
-  // Substitute variables
+  // Substitute variables (use empty string for unset variables on published pages)
   if (excerpt.variables && Array.isArray(excerpt.variables)) {
     excerpt.variables.forEach(variable => {
-      const value = variableValues[variable.name] || `{{${variable.name}}}`;
+      const value = variableValues[variable.name] || '';
       const regex = new RegExp(`\\{\\{${escapeRegex(variable.name)}\\}\\}`, 'g');
       content = content.replace(regex, value);
     });
@@ -308,7 +308,9 @@ export async function publishChapter(req) {
     complianceLevel: passedComplianceLevel,
     // Freeform mode values
     isFreeformMode: passedIsFreeformMode,
-    freeformContent: passedFreeformContent
+    freeformContent: passedFreeformContent,
+    // Smart casing preference
+    smartCasingEnabled: passedSmartCasingEnabled
   } = req.payload || {};
 
   logFunction('publishChapter', 'START', { pageId, localId, excerptId });
@@ -340,6 +342,8 @@ export async function publishChapter(req) {
     const complianceLevel = passedComplianceLevel !== undefined ? passedComplianceLevel : embedConfig.complianceLevel || null;
     const isFreeformMode = passedIsFreeformMode !== undefined ? passedIsFreeformMode : embedConfig.isFreeformMode || false;
     const freeformContent = passedFreeformContent !== undefined ? passedFreeformContent : embedConfig.freeformContent || '';
+    // Smart casing defaults to true for backwards compatibility
+    const smartCasingEnabled = passedSmartCasingEnabled !== undefined ? passedSmartCasingEnabled : embedConfig.smartCasingEnabled !== false;
     
     logPhase('publishChapter', 'Using form values', {
       toggleStateKeys: Object.keys(toggleStates),
@@ -377,7 +381,14 @@ export async function publishChapter(req) {
         
         // Apply transformations in correct order
         // Pass excerpt.variables for smart case matching (auto-capitalize at sentence starts)
-        renderedAdf = substituteVariablesInAdf(renderedAdf, variableValues, excerpt.variables);
+        // Pass disableSmartCase option based on user's Smart Casing toggle preference
+        // Pass removeUnset: true to ensure null variables don't show {{varName}} on published pages
+        renderedAdf = substituteVariablesInAdf(
+          renderedAdf, 
+          variableValues, 
+          excerpt.variables,
+          { disableSmartCase: !smartCasingEnabled, removeUnset: true }
+        );
         renderedAdf = insertCustomParagraphsInAdf(renderedAdf, customInsertions);
         // Pass customInsertions to insertInternalNotesInAdf so it can adjust positions
         // (internal note positions are based on original content, but custom paragraphs are already inserted)

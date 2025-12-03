@@ -36,7 +36,7 @@ import { createErrorResponse, ERROR_CODES } from '../utils/error-codes.js';
 export async function saveVariableValues(req) {
   const functionStartTime = Date.now();
   try {
-    const { localId, excerptId, variableValues, toggleStates, customInsertions, internalNotes, customHeading, complianceLevel, isFreeformMode, freeformContent, pageId: explicitPageId } = req.payload;
+    const { localId, excerptId, variableValues, toggleStates, customInsertions, internalNotes, customHeading, complianceLevel, isFreeformMode, freeformContent, smartCasingEnabled, pageId: explicitPageId } = req.payload;
     
     // Input validation
     if (!localId || typeof localId !== 'string' || localId.trim() === '') {
@@ -162,6 +162,7 @@ export async function saveVariableValues(req) {
       complianceLevel: complianceLevel || null,  // Compliance level (Standard, Bespoke, etc.)
       isFreeformMode: isFreeformMode || false,  // Freeform content mode (bypasses Source structure)
       freeformContent: freeformContent || '',  // Raw freeform content text
+      smartCasingEnabled: smartCasingEnabled !== false,  // Smart case matching (default true)
       updatedAt: now,
       lastSynced: now,  // Track when this Include instance last synced with Source
       syncedContentHash,  // Store hash of the content at sync time for staleness detection
@@ -353,7 +354,13 @@ export async function saveVariableValues(req) {
           // the insertion if the toggle is enabled.
           try {
             // Pass excerpt.variables for smart case matching (auto-capitalize at sentence starts)
-            previewContent = substituteVariablesInAdf(previewContent, variableValues || {}, excerpt.variables);
+            // Pass disableSmartCase option based on user's Smart Casing toggle preference
+            previewContent = substituteVariablesInAdf(
+              previewContent, 
+              variableValues || {}, 
+              excerpt.variables,
+              { disableSmartCase: smartCasingEnabled === false }
+            );
             previewContent = insertCustomParagraphsInAdf(previewContent, customInsertions || []);
             // Pass customInsertions to adjust internal note positions
             previewContent = insertInternalNotesInAdf(previewContent, internalNotes || [], customInsertions || []);
