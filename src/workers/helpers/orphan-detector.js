@@ -1,13 +1,16 @@
 /**
  * Orphan Detector Module
  *
- * Handles detection and cleanup of orphaned Embed configurations.
- * Orphaned Embeds are those that no longer exist on their pages or reference deleted Sources.
+ * Handles detection and cleanup of orphaned Embed and Source configurations.
+ * 
+ * Orphaned Embeds: Macros that no longer exist on their pages or reference deleted Sources.
+ * Orphaned Sources: Sources in storage that don't exist on any page in the Confluence space.
  *
  * Cleanup Strategy:
- * - Soft delete: Move data to `macro-vars-deleted:*` namespace for 90-day recovery window
+ * - Soft delete: Move data to `*-deleted:*` namespace for 90-day recovery window
  * - Version snapshot: Create version before deletion for additional recovery
  * - Usage tracking: Remove orphaned references from usage data
+ * - Source publication cache: Track orphaned source IDs for UI filtering
  */
 
 import { storage } from '@forge/api';
@@ -257,4 +260,138 @@ export async function handleOrphanedMacro(include) {
   await removeFromUsageTracking(include.localId, include.excerptId);
 
   return orphanedInclude;
+}
+
+// ============================================================================
+// SOURCE ORPHAN HANDLING
+// ============================================================================
+
+/**
+ * Soft Delete: Move orphaned Source to deleted namespace
+ * Allows recovery for 90 days before automatic expiration
+ *
+ * NOTE: For safety, Source deletion is NOT automatic during Check All Sources.
+ * This function must be called explicitly through Emergency Recovery or
+ * explicit cleanup actions. This prevents accidental data loss if a user
+ * accidentally deletes a Source macro and an Admin runs Check All Sources
+ * before they can recover it.
+ *
+ * @param {string} excerptId - Source excerpt ID
+ * @param {string} reason - Reason for deletion (for audit trail)
+ * @param {Object} metadata - Additional metadata to store with deleted item
+ * @param {boolean} dryRun - If true, only log what would be deleted
+ */
+export async function softDeleteOrphanedSource(excerptId, reason, metadata = {}, dryRun = DEFAULT_DRY_RUN_MODE) {
+  // Validate input
+  if (!excerptId || typeof excerptId !== 'string' || excerptId.trim() === '') {
+    logWarning('softDeleteOrphanedSource', 'Invalid excerptId - skipping', { excerptId, reason });
+    return { success: false, error: 'Invalid excerptId' };
+  }
+
+  try {
+    const excerptKey = `excerpt:${excerptId}`;
+    const data = await storage.get(excerptKey);
+
+    if (data) {
+      // Move to deleted namespace with recovery metadata
+      if (!dryRun) {
+        try {
+          await storage.set(`excerpt-deleted:${excerptId}`, {
+            ...data,
+            deletedAt: new Date().toISOString(),
+            deletedBy: 'checkAllSources',
+            deletionReason: reason,
+            canRecover: true,
+            ...metadata
+          });
+          logSuccess('softDeleteOrphanedSource', 'Moved to deleted namespace', { excerptId, reason });
+        } catch (setError) {
+          logWarning('softDeleteOrphanedSource', 'Failed to move to deleted namespace', { error: setError.message, excerptId, reason });
+          return { success: false, error: setError.message };
+        }
+
+        // Remove from active namespace
+        try {
+          await storage.delete(excerptKey);
+          logSuccess('softDeleteOrphanedSource', 'Deleted from active namespace', { excerptId, reason });
+        } catch (deleteError) {
+          logWarning('softDeleteOrphanedSource', 'Failed to delete from active namespace', { error: deleteError.message, excerptId, reason });
+        }
+
+        // Remove from excerpt-index
+        try {
+          const index = await storage.get('excerpt-index') || { excerpts: [] };
+          index.excerpts = index.excerpts.filter(e => e.id !== excerptId);
+          await storage.set('excerpt-index', index);
+          logSuccess('softDeleteOrphanedSource', 'Removed from excerpt-index', { excerptId });
+        } catch (indexError) {
+          logWarning('softDeleteOrphanedSource', 'Failed to update excerpt-index', { error: indexError.message, excerptId });
+        }
+
+        return { success: true, excerptId };
+      } else {
+        logPhase('softDeleteOrphanedSource', 'DRY-RUN: Would delete orphaned Source', { excerptId, reason });
+        return { success: true, dryRun: true, excerptId };
+      }
+    } else {
+      logWarning('softDeleteOrphanedSource', 'Source not found in storage', { excerptId, reason });
+      return { success: false, error: 'Source not found' };
+    }
+  } catch (error) {
+    logWarning('softDeleteOrphanedSource', 'Error during soft delete operation', { error: error.message, excerptId, reason });
+    return { success: false, error: error.message };
+  }
+}
+
+/**
+ * Restore a soft-deleted Source from the deleted namespace
+ *
+ * @param {string} excerptId - Source excerpt ID to restore
+ * @returns {Promise<Object>} Result object with success status
+ */
+export async function restoreDeletedSource(excerptId) {
+  // Validate input
+  if (!excerptId || typeof excerptId !== 'string' || excerptId.trim() === '') {
+    logWarning('restoreDeletedSource', 'Invalid excerptId - skipping', { excerptId });
+    return { success: false, error: 'Invalid excerptId' };
+  }
+
+  try {
+    const deletedKey = `excerpt-deleted:${excerptId}`;
+    const data = await storage.get(deletedKey);
+
+    if (!data) {
+      logWarning('restoreDeletedSource', 'Deleted Source not found', { excerptId });
+      return { success: false, error: 'Deleted Source not found' };
+    }
+
+    // Remove deletion metadata
+    const { deletedAt, deletedBy, deletionReason, canRecover, ...restoredData } = data;
+
+    // Restore to active namespace
+    await storage.set(`excerpt:${excerptId}`, {
+      ...restoredData,
+      restoredAt: new Date().toISOString()
+    });
+
+    // Add back to excerpt-index
+    const index = await storage.get('excerpt-index') || { excerpts: [] };
+    if (!index.excerpts.some(e => e.id === excerptId)) {
+      index.excerpts.push({
+        id: excerptId,
+        name: restoredData.name,
+        category: restoredData.category
+      });
+      await storage.set('excerpt-index', index);
+    }
+
+    // Remove from deleted namespace
+    await storage.delete(deletedKey);
+
+    logSuccess('restoreDeletedSource', 'Source restored successfully', { excerptId });
+    return { success: true, excerptId };
+  } catch (error) {
+    logWarning('restoreDeletedSource', 'Error restoring Source', { error: error.message, excerptId });
+    return { success: false, error: error.message };
+  }
 }

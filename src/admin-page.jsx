@@ -139,6 +139,12 @@ const SHOW_MIGRATION_TOOLS = false; // TEMPORARILY DISABLED FOR ONE-TIME BULK IM
 
 const App = () => {
   // ============================================================================
+  // TAB STATE (must be before query hooks to control enabled state)
+  // ============================================================================
+  const [selectedTab, setSelectedTab] = useState(0);
+  const isSourcesTabActive = selectedTab === 0;
+
+  // ============================================================================
   // REACT QUERY HOOKS
   // ============================================================================
 
@@ -160,13 +166,13 @@ const App = () => {
     });
   };
 
-  // Fetch excerpts and orphaned data
+  // Fetch excerpts and orphaned data (only when Sources tab is active to avoid rate limiting)
   const {
     data: excerptsQueryData,
     isLoading,
     isFetching: isRefetchingExcerpts,
     error: excerptsError
-  } = useExcerptsQuery();
+  } = useExcerptsQuery(isSourcesTabActive);
 
   const excerpts = excerptsQueryData?.excerpts || [];
   const orphanedUsage = excerptsQueryData?.orphanedUsage || [];
@@ -185,8 +191,8 @@ const App = () => {
   const pushToAllMutation = usePushUpdatesToAllMutation();
   const createTestPageMutation = useCreateTestPageMutation();
 
-  // Fetch all usage counts (for sorting)
-  const { data: usageCounts = {} } = useAllUsageCountsQuery();
+  // Fetch all usage counts for sorting (only when Sources tab is active to avoid rate limiting)
+  const { data: usageCounts = {} } = useAllUsageCountsQuery(isSourcesTabActive);
 
   // ============================================================================
   // STORE ADMIN URL ON FIRST LOAD
@@ -217,8 +223,8 @@ const App = () => {
   // ============================================================================
   // LOCAL UI STATE (not data fetching)
   // ============================================================================
+  // Note: selectedTab is declared earlier (before query hooks) to control enabled state
 
-  const [selectedTab, setSelectedTab] = useState(0);
   const [searchTerm, setSearchTerm] = useState('');
   const [categoryFilter, setCategoryFilter] = useState('All');
   const [sortBy, setSortBy] = useState('name-asc');
@@ -226,7 +232,6 @@ const App = () => {
   const [showPreviewModal, setShowPreviewModal] = useState(null);
   const [selectedExcerptForDetails, setSelectedExcerptForDetails] = useState(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
-  const [orphanedSources, setOrphanedSources] = useState([]);
   const [showContentPreview, setShowContentPreview] = useState(true);
   const [isExportingCSV, setIsExportingCSV] = useState(false);
 
@@ -682,16 +687,31 @@ const App = () => {
               }
 
               const results = finalProgressResult.data.progress.results;
-              setOrphanedSources(Array.isArray(results.orphanedSources) ? results.orphanedSources : []);
+
+              // Invalidate the excerpts query to refresh the sidebar
+              // Note: With v2 Source tracking, orphaned sources are immediately soft-deleted
+              // by pageSyncWorker, so they won't appear in the results anymore.
+              queryClient.invalidateQueries({ queryKey: ['excerpts', 'list'] });
 
               // Build summary message
               let message = `✅ Check complete:\n`;
-              message += `• ${results.activeCount || 0} active Standard(s)\n`;
-              message += `• ${results.orphanedSources?.length || 0} orphaned Standard(s)`;
+              message += `• ${results.activeCount || 0} active Sources`;
+              
+              if (results.skippedCount > 0) {
+                message += `\n• ${results.skippedCount} skipped (missing page info)`;
+              }
 
               if (results.contentConversionsCount > 0) {
                 message += `\n\n🔄 Format conversion:\n`;
                 message += `• ${results.contentConversionsCount} Standard(s) converted from Storage Format to ADF JSON`;
+              }
+              
+              if (results.bespokeBackfillCount > 0) {
+                message += `\n• ${results.bespokeBackfillCount} backfilled with bespoke property`;
+              }
+              
+              if (results.smartCaseBackfillCount > 0) {
+                message += `\n• ${results.smartCaseBackfillCount} backfilled with smart case data`;
               }
 
               alert(message);
@@ -1506,16 +1526,13 @@ const App = () => {
         </Box>
       )}
 
-      {/* Warning messages */}
-      {(orphanedUsage.length > 0 || orphanedSources.length > 0) && (
+      {/* Warning messages for orphaned Embeds */}
+      {/* Note: Orphaned Sources are automatically soft-deleted by pageSyncWorker */}
+      {/* when they're removed from pages, so they won't appear here. */}
+      {orphanedUsage.length > 0 && (
         <Box xcss={sectionMarginStyles}>
           <SectionMessage appearance="warning">
-            {orphanedSources.length > 0 && (
-              <Text><Strong>⚠ {orphanedSources.length} Orphaned Source(s)</Strong></Text>
-            )}
-            {orphanedUsage.length > 0 && (
-              <Text><Strong>⚠ {orphanedUsage.length} Orphaned Embed(s)</Strong></Text>
-            )}
+            <Text><Strong>⚠ {orphanedUsage.length} Orphaned Embed(s)</Strong></Text>
             <Text>Scroll down to see orphaned items and remediation options.</Text>
           </SectionMessage>
         </Box>
@@ -2227,10 +2244,12 @@ const App = () => {
         </Box>
       </Box>
 
-      {/* Orphaned items sections */}
-      {sortedExcerpts.length > 0 && (
+      {/* Orphaned items sections (Embeds only) */}
+      {/* Note: Orphaned Sources are automatically soft-deleted by pageSyncWorker */}
+      {/* when they're removed from pages, so we only show orphaned Embeds here. */}
+      {sortedExcerpts.length > 0 && orphanedUsage.length > 0 && (
         <OrphanedItemsSection
-          orphanedSources={orphanedSources}
+          orphanedSources={[]}
           orphanedUsage={orphanedUsage}
           onSelectOrphanedItem={(item) => {
             setSelectedExcerpt(item);

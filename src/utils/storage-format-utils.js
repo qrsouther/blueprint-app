@@ -167,6 +167,34 @@ function buildStatusMacro(complianceLevel, isBespoke = false) {
 }
 
 /**
+ * Build documentation links panel for injected content
+ *
+ * Creates a gray panel macro containing documentation links from the Source.
+ * Links are displayed in a stacked/block layout (one per line).
+ *
+ * Only used for Standard, Bespoke, and Semi-Standard Embeds.
+ * Freeform chapters do not include documentation links.
+ *
+ * @param {Array} documentationLinks - Array of {anchor, url} objects
+ * @returns {string} Panel macro HTML or empty string if no links
+ */
+function buildDocumentationLinksPanel(documentationLinks) {
+  if (!documentationLinks || documentationLinks.length === 0) return '';
+  
+  // Each link on its own line (block-level stacked display)
+  const links = documentationLinks.map(link => 
+    `<p><a href="${escapeHtml(link.url)}">${escapeHtml(link.anchor)}</a></p>`
+  ).join('\n');
+  
+  return `<ac:structured-macro ac:name="panel" ac:schema-version="1">
+<ac:parameter ac:name="bgColor">#F4F5F7</ac:parameter>
+<ac:rich-text-body>
+${links}
+</ac:rich-text-body>
+</ac:structured-macro>`;
+}
+
+/**
  * Build complete chapter HTML structure using hidden Content Properties boundary markers
  *
  * Creates the full chapter structure:
@@ -193,15 +221,17 @@ function buildStatusMacro(complianceLevel, isBespoke = false) {
  * @param {string} options.bodyContent - Rendered body content (storage format)
  * @param {string} options.complianceLevel - Compliance level (standard, bespoke, semi-standard, non-standard, tbd, na)
  * @param {boolean} options.isBespoke - Fallback for when complianceLevel is null
+ * @param {Array} options.documentationLinks - Array of {anchor, url} objects for documentation links panel
  * @returns {string} Complete chapter HTML with boundary markers
  */
-export function buildChapterStructure({ chapterId, localId, heading, bodyContent, complianceLevel = null, isBespoke = false }) {
+export function buildChapterStructure({ chapterId, localId, heading, bodyContent, complianceLevel = null, isBespoke = false, documentationLinks = [] }) {
   if (!chapterId || !localId) {
     throw new Error('buildChapterStructure requires chapterId and localId');
   }
 
   const escapedHeading = escapeHtml(heading || 'Untitled Chapter');
   const statusMacro = buildStatusMacro(complianceLevel, isBespoke);
+  const docsPanel = buildDocumentationLinksPanel(documentationLinks);
 
   // Build chapter with hidden Content Properties boundary markers
   const startMarker = buildBoundaryMarker(localId, 'START');
@@ -209,7 +239,7 @@ export function buildChapterStructure({ chapterId, localId, heading, bodyContent
 
   return `${startMarker}
 <h2>${statusMacro} ${escapedHeading}</h2>
-${bodyContent || ''}
+${docsPanel}${bodyContent || ''}
 ${endMarker}`;
 }
 

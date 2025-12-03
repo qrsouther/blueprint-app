@@ -12,6 +12,8 @@ import {
   detectVariablesFromContent as detectVariablesResolver,
   detectTogglesFromContent as detectTogglesResolver,
   getExcerpts as getExcerptsResolver,
+  getSourcesLastModified as getSourcesLastModifiedResolver,
+  getSourcesPublicationCache as getSourcesPublicationCacheResolver,
   getExcerpt as getExcerptResolver,
   debugExcerpt as debugExcerptResolver,
   getPageTitle as getPageTitleResolver,
@@ -209,6 +211,12 @@ resolver.define('saveExcerpt', saveExcerptResolver);
 
 // Get all excerpts
 resolver.define('getExcerpts', getExcerptsResolver);
+
+// Get Sources last-modified timestamp (for UI cache invalidation)
+resolver.define('getSourcesLastModified', getSourcesLastModifiedResolver);
+
+// Get Sources publication cache (DEPRECATED - kept for backwards compatibility)
+resolver.define('getSourcesPublicationCache', getSourcesPublicationCacheResolver);
 
 // Get specific excerpt
 resolver.define('getExcerpt', getExcerptResolver);

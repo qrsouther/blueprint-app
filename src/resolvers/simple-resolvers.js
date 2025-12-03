@@ -198,6 +198,82 @@ export async function getExcerpts() {
 }
 
 /**
+ * Get the Sources last-modified timestamp
+ * 
+ * Returns the timestamp when the Sources list was last modified.
+ * Used by Admin UI to detect when to refresh the sidebar.
+ * 
+ * This timestamp is updated by pageSyncWorker when:
+ * - Sources are added to a page (new Source detected)
+ * - Sources are removed from a page (Source soft-deleted)
+ * 
+ * Standard return format:
+ * - Success: { success: true, data: { timestamp: number } }
+ * - Error: { success: false, error: "error message" }
+ */
+export async function getSourcesLastModified() {
+  const SOURCES_LAST_MODIFIED_KEY = 'sources-last-modified';
+  
+  try {
+    const timestamp = await storage.get(SOURCES_LAST_MODIFIED_KEY) || 0;
+    return {
+      success: true,
+      data: {
+        timestamp
+      }
+    };
+  } catch (error) {
+    logFailure('getSourcesLastModified', 'Error getting Sources last-modified timestamp', error);
+    return createErrorResponse(
+      ERROR_CODES.INTERNAL_ERROR,
+      error.message
+    );
+  }
+}
+
+/**
+ * Get the Source publication cache (DEPRECATED - kept for backwards compatibility)
+ * 
+ * Note: The v2 Source existence tracking uses sources-on-page:{pageId} keys
+ * instead of a central cache. This function is kept for backwards compatibility
+ * but will be removed in a future version.
+ * 
+ * Standard return format:
+ * - Success: { success: true, data: { cache: {...} } }
+ * - Error: { success: false, error: "error message" }
+ */
+export async function getSourcesPublicationCache() {
+  const SOURCE_PUBLICATION_CACHE_KEY = 'published-sources-cache';
+  
+  try {
+    const cache = await storage.get(SOURCE_PUBLICATION_CACHE_KEY) || {
+      timestamp: null,
+      bySourceId: {},
+      byPageId: {},
+      orphanedSourceIds: []
+    };
+    
+    return {
+      success: true,
+      data: {
+        cache,
+        orphanedSourceIds: cache.orphanedSourceIds || [],
+        totalSources: Object.keys(cache.bySourceId || {}).length,
+        totalPages: Object.keys(cache.byPageId || {}).length,
+        lastUpdated: cache.timestamp ? new Date(cache.timestamp).toISOString() : null,
+        lastFullScanAt: cache.lastFullScanAt || null
+      }
+    };
+  } catch (error) {
+    logFailure('getSourcesPublicationCache', 'Error getting Sources publication cache', error);
+    return createErrorResponse(
+      ERROR_CODES.INTERNAL_ERROR,
+      error.message
+    );
+  }
+}
+
+/**
  * Get specific excerpt by ID
  * 
  * Standard return format:

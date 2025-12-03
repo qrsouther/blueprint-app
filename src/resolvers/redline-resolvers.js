@@ -135,10 +135,24 @@ export async function getRedlineQueue(req) {
 
     logPhase('getRedlineQueue', 'Fetched Embed configs', { count: allKeys.length });
 
-    // First pass: Check for soft-deleted embeds, fetch excerpt data, and lookup page titles from usage tracking
-    // Usage tracking stores pageTitle, which is much faster than API calls
+    // CRITICAL OPTIMIZATION: Filter to ONLY published embeds BEFORE expensive metadata lookups
+    // The Redline Queue only shows published embeds, so we skip all unpublished ones immediately
+    // This reduces storage.get() calls from ~1,371 (457×3) to ~6-30 (only published embeds)
+    const publishedKeys = allKeys.filter(item => {
+      const config = item.value;
+      // Must have publishedAt (has been published) and pageId (we know which page)
+      return config && config.publishedAt && config.pageId;
+    });
+
+    logPhase('getRedlineQueue', 'Filtered to published embeds only (before metadata fetch)', { 
+      total: allKeys.length, 
+      published: publishedKeys.length,
+      skipped: allKeys.length - publishedKeys.length
+    });
+
+    // Now fetch metadata ONLY for published embeds (much faster!)
     const embedConfigsWithMetadata = await Promise.all(
-      allKeys.map(async (item) => {
+      publishedKeys.map(async (item) => {
         const localId = item.key.replace('macro-vars:', '');
         const config = item.value;
 
@@ -149,7 +163,6 @@ export async function getRedlineQueue(req) {
         }
 
         // SANITY CHECK: Verify the config actually has required fields
-        // This helps catch cases where production data was imported but is invalid in dev
         if (!config || typeof config !== 'object') {
           logWarning('getRedlineQueue', 'Invalid config data found, skipping', { localId, configType: typeof config });
           return null; // Will be filtered out
@@ -165,7 +178,6 @@ export async function getRedlineQueue(req) {
         // OPTIMIZATION: Prioritize pageTitle from embed config (most reliable, always up-to-date)
         // Fallback to usage tracking for older embeds that don't have pageTitle in config yet
         let pageTitleFromUsage = null;
-        let pageIdFromUsage = null;
         
         // First, check if pageTitle is already in config (preferred source)
         const pageTitleFromConfig = config.pageTitle;
@@ -176,18 +188,7 @@ export async function getRedlineQueue(req) {
             const usageKey = `usage:${config.excerptId}`;
             const usageData = await storage.get(usageKey);
             if (usageData?.references) {
-              // Try to find by localId and pageId (if pageId exists in config)
-              let ref = null;
-        if (config.pageId) {
-                ref = usageData.references.find(r => r.localId === localId && r.pageId === config.pageId);
-              } else {
-                // If pageId is missing from config, try to find by localId only (take first match)
-                ref = usageData.references.find(r => r.localId === localId);
-                if (ref?.pageId) {
-                  pageIdFromUsage = ref.pageId;
-                  logPhase('getRedlineQueue', 'Found pageId from usage tracking (missing from config)', { localId, pageId: pageIdFromUsage });
-                }
-              }
+              const ref = usageData.references.find(r => r.localId === localId && r.pageId === config.pageId);
               if (ref?.pageTitle) {
                 pageTitleFromUsage = ref.pageTitle;
               }
@@ -196,11 +197,8 @@ export async function getRedlineQueue(req) {
             // Silently fail - we'll fall back to API or fallback title
           }
         }
-        
-        // Use pageId from usage tracking if missing from config
-        const effectivePageId = config.pageId || pageIdFromUsage;
 
-        return { localId, config, excerptData, pageTitleFromConfig, pageTitleFromUsage, effectivePageId };
+        return { localId, config, excerptData, pageTitleFromConfig, pageTitleFromUsage, effectivePageId: config.pageId };
       })
     );
 

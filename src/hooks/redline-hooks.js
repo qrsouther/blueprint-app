@@ -54,7 +54,7 @@ const QUEUE_INVALIDATION_DELAY_MS = 60000; // 1 minute
 export const useRedlineQueueQuery = (filters = {}, sortBy = 'status', groupBy = null, enabled = true) => {
   // Fetch ALL embeds once (unfiltered, unsorted) - this is cached and reused
   // Only fetch when enabled (tab is active) to avoid unnecessary API calls
-  const { data: allData, isLoading, error } = useQuery({
+  const { data: allData, isLoading, isFetching, error } = useQuery({
     queryKey: ['redlineQueue', 'all'], // Single query key for all embeds
     enabled: enabled, // Only fetch when tab is active
     queryFn: async () => {
@@ -189,6 +189,7 @@ export const useRedlineQueueQuery = (filters = {}, sortBy = 'status', groupBy = 
   return {
     data: processedData,
     isLoading,
+    isFetching, // True during background refetches (e.g., Refresh Queue button)
     error
   };
 };

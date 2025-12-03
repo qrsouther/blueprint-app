@@ -1036,6 +1036,7 @@ export const useEmbedEditSession = (localId, options = {}) => {
     isLoading,
     isLoadingExcerpt,
     isLoadingExcerpts,
+    isLoadingStoredData,
     isSaving,
     isPublishing,
     publishProgress, // 0-1 for progress bar
@@ -1046,6 +1047,9 @@ export const useEmbedEditSession = (localId, options = {}) => {
     publishStatus,
     setPublishStatus,
     needsRepublish,
+    
+    // Redline status (from stored data)
+    redlineStatus: storedData?.redlineStatus || null,
     
     // Draft recovery
     hasDraftRecovery,

@@ -469,13 +469,15 @@ export async function publishChapter(req) {
       const cleanedBodyContent = stripLeadingHeading(storageContent);
       
       // Use standard chapter builder with rendered Source content
+      // Include documentation links (only for standard/bespoke/semi-standard, not freeform)
       chapterHtml = buildChapterStructure({
         chapterId,
         localId,
         heading: heading,
         bodyContent: cleanedBodyContent,
         complianceLevel,
-        isBespoke: excerpt.bespoke || false
+        isBespoke: excerpt.bespoke || false,
+        documentationLinks: excerpt.documentationLinks || []
       });
     }
 
@@ -546,6 +548,29 @@ export async function publishChapter(req) {
       internalNotes
     });
 
+    // Auto-transition to "reviewable" on ANY republish
+    // Publishing new content always requires re-review, regardless of previous status
+    const previousStatus = embedConfig.redlineStatus || 'reviewable';
+    const newRedlineStatus = 'reviewable';
+    let statusHistory = embedConfig.statusHistory || [];
+    let lastChangedBy = embedConfig.lastChangedBy;
+    let lastChangedAt = embedConfig.lastChangedAt;
+
+    // Only log transition if status is actually changing
+    if (previousStatus !== 'reviewable') {
+      statusHistory = [...statusHistory, {
+        status: 'reviewable',
+        previousStatus,
+        changedBy: 'system',
+        changedAt: new Date().toISOString(),
+        reason: 'Embed republished (auto-transition)'
+      }];
+      lastChangedBy = 'system';
+      lastChangedAt = new Date().toISOString();
+      
+      logPhase('publishChapter', `AUTO-TRANSITION: ${previousStatus} → reviewable`, { localId });
+    }
+
     // Save the ACTUAL values used for publishing (not the old embedConfig values)
     // This ensures the form state is persisted correctly
     await storage.set(`macro-vars:${localId}`, {
@@ -570,7 +595,12 @@ export async function publishChapter(req) {
       // Clear cached incomplete status (no longer incomplete once published)
       cachedIncomplete: false,
       // Update sync timestamp
-      lastSynced: new Date().toISOString()
+      lastSynced: new Date().toISOString(),
+      // Redline status (may be auto-transitioned from needs-revision to reviewable)
+      redlineStatus: newRedlineStatus,
+      statusHistory,
+      lastChangedBy,
+      lastChangedAt
     });
 
     logSuccess('publishChapter', 'Successfully published', {

@@ -136,6 +136,8 @@ export async function startCheckAllSources(_req) {
     });
 
     // Create queue and push event
+    // Note: Orphan detection is now handled in real-time by pageSyncWorker
+    // This worker focuses on backfill operations (bespoke, smart case, ADF conversion)
     const queue = new Queue({ key: 'check-sources-queue' });
     const { jobId } = await queue.push({
       body: { progressId }
@@ -781,8 +783,25 @@ export async function getStorageUsage(req) {
       metadata: breakdown.metadata / (1024 * 1024)
     };
 
-    // Count Sources (excerpts)
-    const sourcesCount = excerpts.length;
+    // Count Sources (excerpts) - excluding orphaned sources
+    // Orphaned sources are those detected by Check All Sources as not existing on any page
+    let sourcesCount = excerpts.length;
+    let orphanedSourcesCount = 0;
+    try {
+      const sourcesCache = await storage.get('published-sources-cache');
+      if (sourcesCache && Array.isArray(sourcesCache.orphanedSourceIds)) {
+        orphanedSourcesCount = sourcesCache.orphanedSourceIds.length;
+        sourcesCount = Math.max(0, excerpts.length - orphanedSourcesCount);
+        logPhase('getStorageUsage', 'Excluded orphaned Sources from count', {
+          total: excerpts.length,
+          orphaned: orphanedSourcesCount,
+          active: sourcesCount
+        });
+      }
+    } catch (sourceCacheError) {
+      logWarning('getStorageUsage', 'Error reading Sources publication cache', { error: sourceCacheError.message });
+      // Continue with raw count if cache read fails
+    }
     
     // Get published embeds count from publication cache
     // This only counts embeds that are actually published on pages
@@ -837,7 +856,9 @@ export async function getStorageUsage(req) {
       percentUsed: parseFloat(percentUsed.toFixed(1)),
       exceedsWarningThreshold,
       keyCount: allKeys.length,
-      sourcesCount,
+      sourcesCount,           // Active (non-orphaned) sources
+      orphanedSourcesCount,   // Sources marked as orphaned
+      totalSourcesInStorage: excerpts.length, // Total including orphaned
       embedsCount,
       breakdown: {
         bytes: breakdown,

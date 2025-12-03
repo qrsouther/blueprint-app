@@ -61,16 +61,73 @@ export const useCurrentUserQuery = () => {
 };
 
 /**
- * Hook for fetching all excerpts with orphaned data
+ * Hook for polling Sources last-modified timestamp
+ *
+ * Polls the sources-last-modified timestamp every 30 seconds.
+ * When this timestamp changes (because pageSyncWorker detected Source changes),
+ * the excerpts query will be invalidated to refresh the sidebar.
+ *
+ * This enables real-time Source existence tracking:
+ * 1. User deletes a Source from a page and publishes
+ * 2. pageSyncWorker detects the removal and soft-deletes the Source
+ * 3. pageSyncWorker updates sources-last-modified timestamp
+ * 4. This hook detects the timestamp change
+ * 5. useExcerptsQuery is invalidated, sidebar refreshes, Source disappears
+ *
+ * @returns {Object} React Query result with timestamp
+ */
+export const useSourcesLastModified = () => {
+  return useQuery({
+    queryKey: ['sources', 'lastModified'],
+    queryFn: async () => {
+      const result = await invoke('getSourcesLastModified');
+      if (result && result.success && result.data) {
+        return result.data.timestamp || 0;
+      }
+      return 0;
+    },
+    refetchInterval: 30000, // Poll every 30 seconds
+    staleTime: 10000, // Consider stale after 10 seconds
+    gcTime: 1000 * 60 * 5, // 5 minutes
+  });
+};
+
+/**
+ * Hook for fetching all excerpts with automatic refresh on Source changes
  *
  * Fetches all Blueprint Standards and orphaned usage data, with sanitization
  * of variables and toggles to ensure data integrity.
+ * 
+ * This hook is automatically invalidated when:
+ * - The sources-last-modified timestamp changes (via useSourcesLastModified polling)
+ * - This happens when pageSyncWorker soft-deletes Sources removed from pages
  *
+ * @param {boolean} enabled - Whether the query should run (default: true)
  * @returns {Object} React Query result with { excerpts, orphanedUsage }
  */
-export const useExcerptsQuery = () => {
+export const useExcerptsQuery = (enabled = true) => {
+  const queryClient = useQueryClient();
+  const { data: lastModified } = useSourcesLastModified();
+  const lastModifiedRef = useRef(lastModified);
+
+  // Invalidate excerpts cache when lastModified changes
+  // This ensures the sidebar refreshes when Sources are added/removed
+  useEffect(() => {
+    // Skip if this is the initial mount (no previous value) or if query is disabled
+    if (!enabled) return;
+    if (lastModifiedRef.current !== undefined && lastModified !== lastModifiedRef.current) {
+      logger.queries('Sources last-modified changed, invalidating excerpts cache', {
+        previous: lastModifiedRef.current,
+        current: lastModified
+      });
+      queryClient.invalidateQueries({ queryKey: ['excerpts', 'list'] });
+    }
+    lastModifiedRef.current = lastModified;
+  }, [lastModified, queryClient, enabled]);
+
   return useQuery({
     queryKey: ['excerpts', 'list'],
+    enabled: enabled,
     queryFn: async () => {
       const result = await invoke('getAllExcerpts');
 
@@ -96,7 +153,7 @@ export const useExcerptsQuery = () => {
         };
       });
 
-      // Load orphaned usage data
+      // Load orphaned usage data (for Embeds)
       let orphanedUsage = [];
       try {
         const orphanedResult = await invoke('getOrphanedUsage');
@@ -107,7 +164,18 @@ export const useExcerptsQuery = () => {
         logger.errors('Failed to load orphaned usage:', err);
       }
 
-      return { excerpts: sanitized, orphanedUsage };
+      // Note: Sources are now soft-deleted immediately by pageSyncWorker
+      // when they're removed from pages, so they won't appear in getAllExcerpts.
+      // No need to filter by orphaned status - the source of truth is storage.
+
+      logger.queries('Loaded excerpts', {
+        total: sanitized.length
+      });
+
+      return { 
+        excerpts: sanitized, 
+        orphanedUsage
+      };
     },
     staleTime: 1000 * 60 * 5, // 5 minutes
     gcTime: 1000 * 60 * 30, // 30 minutes
@@ -459,11 +527,13 @@ export const usePushUpdatesToAllMutation = () => {
  * Fetches lightweight usage count data (just counts, not full details)
  * for sorting excerpts by popularity.
  *
+ * @param {boolean} enabled - Whether the query should run (default: true)
  * @returns {Object} React Query result with usageCounts object
  */
-export const useAllUsageCountsQuery = () => {
+export const useAllUsageCountsQuery = (enabled = true) => {
   return useQuery({
     queryKey: ['usageCounts', 'all'],
+    enabled: enabled,
     queryFn: async () => {
       const result = await invoke('getAllUsageCounts');
       if (result && result.success && result.data) {

@@ -986,6 +986,8 @@ const App = () => {
           needsRepublish={needsRepublish}
           originalExcerptId={editSession.originalExcerptId}
           canReset={editSession.canReset}
+          // Redline status for status indicator
+          redlineStatus={editSession.redlineStatus}
           // Close handler for Locked Page Model
           onClose={isEditingEmbed ? handleExit : null}
           // Blur handler for localStorage draft saves

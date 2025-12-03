@@ -9,21 +9,36 @@
  * 2. Forge trigger fires and pushes pageId to page-sync-queue
  * 3. This worker picks up the event and processes the page
  * 4. Worker extracts Blueprint Embed macros and their injectedContent
- * 5. Publication cache is updated for affected Sources
+ * 5. Worker extracts Blueprint Source macros and compares BEFORE vs AFTER
+ * 6. Sources removed from the page are immediately soft-deleted
+ * 7. Admin UI is notified via sources-last-modified timestamp change
  *
  * The publication cache enables:
  * - Accurate "published embeds" count in Storage Footer
  * - Usage Details showing only actually-published embeds
  * - Real-time sync without manual "Check All" operations
+ *
+ * Source Existence Tracking (v2):
+ * - Tracks Sources per page in sources-on-page:{pageId}
+ * - Compares BEFORE (cached) vs AFTER (parsed) on each publish
+ * - Immediately soft-deletes Sources removed from pages
+ * - Updates sources-last-modified timestamp for UI refresh
  */
 
 import { storage } from '@forge/api';
 import { fetchPageContent } from './helpers/page-scanner.js';
 import { extractChapterBodyFromAdf } from '../utils/storage-format-utils.js';
 import { logFunction, logPhase, logSuccess, logFailure, logWarning } from '../utils/forge-logger.js';
+import { softDeleteOrphanedSource } from './helpers/orphan-detector.js';
 
-// Cache key for publication status
+// Cache key for Embed publication status
 const PUBLICATION_CACHE_KEY = 'published-embeds-cache';
+
+// Storage key pattern for tracking Sources per page
+const SOURCES_ON_PAGE_PREFIX = 'sources-on-page:';
+
+// Timestamp for when Sources list was last modified (for UI cache invalidation)
+const SOURCES_LAST_MODIFIED_KEY = 'sources-last-modified';
 
 /**
  * Process a page update event
@@ -58,9 +73,10 @@ export async function handler(event) {
         errorType: pageResult.errorType
       });
       
-      // If page was deleted, remove its embeds from publication cache
+      // If page was deleted, remove its embeds from cache and soft-delete Sources
       if (pageResult.errorType === 'page_deleted') {
         await removePageFromCache(pageId);
+        await handlePageDeleted(pageId);  // Soft-delete all Sources on this page
       }
       return;
     }
@@ -72,11 +88,26 @@ export async function handler(event) {
     logPhase('pageSyncWorker', 'Scanning for Blueprint Embeds', { pageId, pageTitle });
     const embedsOnPage = findBlueprintEmbedsInAdf(adfContent);
 
+    // Step 2b: Find all Blueprint Source macros on this page (do this early to avoid early return)
+    logPhase('pageSyncWorker', 'Scanning for Blueprint Sources', { pageId, pageTitle });
+    const sourcesOnPage = findBlueprintSourcesInAdf(adfContent);
+
+    // If no Blueprint macros at all, clean up caches and handle Source removal
+    if (embedsOnPage.length === 0 && sourcesOnPage.length === 0) {
+      logPhase('pageSyncWorker', 'No Blueprint macros found on page', { pageId });
+      // Remove any cached embeds for this page
+      await removePageFromCache(pageId);
+      // Sync Sources (empty AFTER state will soft-delete any previously cached Sources)
+      await syncSourcesOnPage(pageId, pageTitle, []);
+      return;
+    }
+
+    // Handle case: page has Sources but no Embeds
     if (embedsOnPage.length === 0) {
-      logPhase('pageSyncWorker', 'No Blueprint Embeds found on page', { pageId });
+      logPhase('pageSyncWorker', 'No Blueprint Embeds found on page (but has Sources)', { pageId });
       // Remove any cached embeds for this page (they may have been deleted)
       await removePageFromCache(pageId);
-      return;
+      // Continue to process Sources below...
     }
 
     logPhase('pageSyncWorker', 'Found Blueprint Embeds', { 
@@ -118,8 +149,17 @@ export async function handler(event) {
       published: publishedEmbeds.length
     });
 
-    // Step 4: Update the publication cache
+    // Step 4: Update the Embed publication cache
     await updatePublicationCache(pageId, publishedEmbeds);
+
+    // Step 5: Sync Sources using BEFORE vs AFTER comparison (v2)
+    logPhase('pageSyncWorker', 'Found Blueprint Sources', {
+      pageId,
+      sourceCount: sourcesOnPage.length,
+      excerptIds: sourcesOnPage.map(s => s.excerptId)
+    });
+
+    const sourceResult = await syncSourcesOnPage(pageId, pageTitle, sourcesOnPage);
 
     const duration = Date.now() - functionStartTime;
     logSuccess('pageSyncWorker', 'Page sync complete', {
@@ -127,6 +167,9 @@ export async function handler(event) {
       pageTitle,
       embedsFound: embedsOnPage.length,
       publishedEmbeds: publishedEmbeds.length,
+      sourcesFound: sourcesOnPage.length,
+      sourcesRemoved: sourceResult.removed,
+      sourcesSoftDeleted: sourceResult.softDeleted,
       durationMs: duration
     });
 
@@ -317,6 +360,219 @@ async function removePageFromCache(pageId) {
     pageId,
     removedCount: localIdsToRemove.length,
     totalPublished: cache.totalPublished
+  });
+}
+
+// ============================================================================
+// SOURCE EXISTENCE TRACKING (v2)
+// ============================================================================
+
+/**
+ * Find all Blueprint Source macros in ADF content
+ * 
+ * @param {Object} adfContent - ADF document
+ * @returns {Array<{localId: string, excerptId: string}>} Array of source info
+ */
+function findBlueprintSourcesInAdf(adfContent) {
+  const sources = [];
+  
+  if (!adfContent || !adfContent.content) {
+    return sources;
+  }
+
+  // Recursive function to search through ADF nodes
+  function searchNodes(nodes) {
+    if (!Array.isArray(nodes)) return;
+
+    for (const node of nodes) {
+      // Check if this is a Blueprint Source extension (bodiedExtension for Source macros)
+      if (node.type === 'bodiedExtension') {
+        const extensionKey = node.attrs?.extensionKey || '';
+        
+        // Check if it's a Blueprint Source macro
+        if (extensionKey.includes('blueprint-standard-source')) {
+          const localId = node.attrs?.localId;
+          // For Sources, excerptId is stored in parameters.guestParams.excerptId or parameters.excerptId
+          const excerptId = node.attrs?.parameters?.guestParams?.excerptId ||
+                           node.attrs?.parameters?.excerptId;
+          
+          if (localId && excerptId) {
+            sources.push({ localId, excerptId });
+          } else if (localId) {
+            // Source exists but might not have excerptId set yet (uninitialized Source)
+            logWarning('pageSyncWorker', 'Found Source without excerptId', { localId });
+          }
+        }
+      }
+
+      // Recursively search child nodes
+      if (node.content) {
+        searchNodes(node.content);
+      }
+    }
+  }
+
+  searchNodes(adfContent.content);
+  return sources;
+}
+
+/**
+ * Sync Sources on a page using BEFORE vs AFTER comparison
+ * 
+ * This is the core of Source Existence Tracking v2:
+ * 1. Parse page content for Source excerptIds (AFTER state)
+ * 2. Load cached state (BEFORE state) from sources-on-page:{pageId}
+ * 3. Calculate diff: removed = BEFORE - AFTER, added = AFTER - BEFORE
+ * 4. Soft-delete removed Sources immediately
+ * 5. Update cache with new state
+ * 6. Update sources-last-modified timestamp if anything changed
+ * 
+ * @param {string} pageId - Confluence page ID
+ * @param {string} pageTitle - Page title for logging
+ * @param {Array} sourcesOnPage - Array of source data { localId, excerptId }
+ * @returns {Object} { removed: number, added: number, softDeleted: number }
+ */
+async function syncSourcesOnPage(pageId, pageTitle, sourcesOnPage) {
+  logPhase('pageSyncWorker', 'Syncing Sources on page (v2)', { 
+    pageId, 
+    sourceCount: sourcesOnPage.length 
+  });
+
+  // 1. Extract excerptIds from parsed content (AFTER state)
+  const sourcesAfter = sourcesOnPage
+    .map(s => s.excerptId)
+    .filter(Boolean);
+  
+  // 2. Load cached state (BEFORE state)
+  const cacheKey = `${SOURCES_ON_PAGE_PREFIX}${pageId}`;
+  const sourcesBefore = await storage.get(cacheKey) || [];
+  
+  // 3. Calculate diff
+  const removed = sourcesBefore.filter(id => !sourcesAfter.includes(id));
+  const added = sourcesAfter.filter(id => !sourcesBefore.includes(id));
+  
+  logPhase('pageSyncWorker', 'Source diff calculated', {
+    pageId,
+    beforeCount: sourcesBefore.length,
+    afterCount: sourcesAfter.length,
+    removedCount: removed.length,
+    addedCount: added.length,
+    removedIds: removed,
+    addedIds: added
+  });
+
+  // 4. Soft-delete removed Sources (dryRun = false for actual deletion)
+  let softDeletedCount = 0;
+  for (const excerptId of removed) {
+    logPhase('pageSyncWorker', 'Soft-deleting removed Source', { excerptId, pageId });
+    const result = await softDeleteOrphanedSource(
+      excerptId, 
+      `Source removed from page ${pageId}`,
+      { pageId, pageTitle },
+      false // dryRun = false - actually delete
+    );
+    if (result.success) {
+      softDeletedCount++;
+      logSuccess('pageSyncWorker', 'Source soft-deleted', { excerptId, pageId });
+    } else {
+      logWarning('pageSyncWorker', 'Failed to soft-delete Source', { 
+        excerptId, 
+        pageId, 
+        error: result.error 
+      });
+    }
+  }
+  
+  // 5. Update cache with new state
+  if (sourcesAfter.length > 0) {
+    await storage.set(cacheKey, sourcesAfter);
+  } else {
+    // No Sources on this page anymore, delete the cache entry
+    await storage.delete(cacheKey);
+  }
+  
+  // 6. If anything changed, update last-modified timestamp for UI refresh
+  if (removed.length > 0 || added.length > 0) {
+    await storage.set(SOURCES_LAST_MODIFIED_KEY, Date.now());
+    logPhase('pageSyncWorker', 'Updated sources-last-modified timestamp', {
+      removedCount: removed.length,
+      addedCount: added.length
+    });
+  }
+
+  logSuccess('pageSyncWorker', 'Source sync complete (v2)', {
+    pageId,
+    pageTitle,
+    removed: removed.length,
+    added: added.length,
+    softDeleted: softDeletedCount,
+    totalOnPage: sourcesAfter.length
+  });
+  
+  return { 
+    removed: removed.length, 
+    added: added.length, 
+    softDeleted: softDeletedCount 
+  };
+}
+
+/**
+ * Handle page deletion - soft-delete all Sources that were on this page
+ * 
+ * When a page is deleted:
+ * 1. Load cached Sources for this page
+ * 2. Soft-delete all of them (they no longer exist anywhere)
+ * 3. Clear the cache entry
+ * 4. Update sources-last-modified timestamp
+ * 
+ * @param {string} pageId - Confluence page ID that was deleted
+ */
+async function handlePageDeleted(pageId) {
+  logPhase('pageSyncWorker', 'Handling page deletion for Sources', { pageId });
+
+  const cacheKey = `${SOURCES_ON_PAGE_PREFIX}${pageId}`;
+  const sourcesBefore = await storage.get(cacheKey) || [];
+  
+  if (sourcesBefore.length === 0) {
+    logPhase('pageSyncWorker', 'No Sources cached for deleted page', { pageId });
+    return;
+  }
+
+  logPhase('pageSyncWorker', 'Soft-deleting Sources from deleted page', {
+    pageId,
+    sourceCount: sourcesBefore.length
+  });
+
+  // Soft-delete all Sources that were on this page
+  let softDeletedCount = 0;
+  for (const excerptId of sourcesBefore) {
+    const result = await softDeleteOrphanedSource(
+      excerptId,
+      'Source page deleted',
+      { pageId },
+      false // dryRun = false
+    );
+    if (result.success) {
+      softDeletedCount++;
+    } else {
+      logWarning('pageSyncWorker', 'Failed to soft-delete Source from deleted page', {
+        excerptId,
+        pageId,
+        error: result.error
+      });
+    }
+  }
+
+  // Clear the cache entry
+  await storage.delete(cacheKey);
+  
+  // Update last-modified timestamp for UI refresh
+  await storage.set(SOURCES_LAST_MODIFIED_KEY, Date.now());
+
+  logSuccess('pageSyncWorker', 'Page deletion handled for Sources', {
+    pageId,
+    sourcesOnPage: sourcesBefore.length,
+    softDeleted: softDeletedCount
   });
 }
 

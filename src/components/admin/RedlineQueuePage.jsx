@@ -56,7 +56,7 @@ export function RedlineQueuePage({ isActive = true }) {
 
   // Phase 5: Fetch queue data and current user
   // Only fetch when tab is active to avoid unnecessary API calls
-  const { data: queueData, isLoading: queueLoading, error: queueError } = useRedlineQueueQuery(
+  const { data: queueData, isLoading: queueLoading, isFetching: queueFetching, error: queueError } = useRedlineQueueQuery(
     filters,
     sortBy,
     groupBy,
@@ -65,6 +65,7 @@ export function RedlineQueuePage({ isActive = true }) {
   const { data: currentUserId, isLoading: userLoading } = useCurrentUserQuery();
 
   const isLoading = queueLoading || userLoading;
+  const isRefreshing = queueFetching && !queueLoading; // True during background refetch (not initial load)
 
   // Compute the embeds count display string for the stats bar
   const embedsCountDisplay = useMemo(() => {
@@ -211,6 +212,7 @@ export function RedlineQueuePage({ isActive = true }) {
           groupBy={groupBy}
           onGroupChange={handleGroupChange}
           onManualRefresh={handleManualRefresh}
+          isRefreshing={isRefreshing}
           isActive={isActive}
           embedsCountDisplay={embedsCountDisplay}
           stats={queueData?.stats}

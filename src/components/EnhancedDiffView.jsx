@@ -194,10 +194,15 @@ export function EnhancedDiffView({
   // For line-based diff: apply variables and mark toggles, then extract text
   const renderForLineDiff = (content) => {
     if (!content) return '';
-    // Apply variable substitutions
-    let rendered = substituteVariablesInAdf(content, variableValues);
-    // Extract text with toggle markers (shows ALL toggles including disabled)
-    return extractTextWithToggleMarkers(rendered, toggleStates);
+    try {
+      // Apply variable substitutions
+      let rendered = substituteVariablesInAdf(content, variableValues);
+      // Extract text with toggle markers (shows ALL toggles including disabled)
+      return extractTextWithToggleMarkers(rendered, toggleStates);
+    } catch (error) {
+      console.error('[EnhancedDiffView] Error processing content:', error);
+      return '[Error: Unable to process content for diff]';
+    }
   };
 
   const oldText = renderForLineDiff(oldSourceContent);

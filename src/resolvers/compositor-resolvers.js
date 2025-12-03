@@ -912,6 +912,7 @@ export async function bulkPublishChapters(req) {
         }
 
         // Build the chapter HTML
+        // Include documentation links (only for standard/bespoke/semi-standard chapters)
         const chapterId = `chapter-${localId}`;
         const chapterHtml = buildChapterStructure({
           chapterId,
@@ -919,7 +920,8 @@ export async function bulkPublishChapters(req) {
           heading: chapter.name || excerpt.name,
           bodyContent: storageContent,
           complianceLevel,
-          isBespoke: excerpt.bespoke || false
+          isBespoke: excerpt.bespoke || false,
+          documentationLinks: excerpt.documentationLinks || []
         });
 
         // Check if chapter already exists in page (search by localId for new Content Properties boundaries)

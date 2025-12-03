@@ -351,6 +351,23 @@ const substituteVariablesInAdfInternal = (adfNode, variableValues, occurrenceLoo
       }
 
       const varName = match[1].trim();
+      
+      // Skip toggle markers - they should be preserved for filterContentByToggles
+      // Toggle markers: {{toggle:name}} and {{/toggle:name}}
+      if (varName.startsWith('toggle:') || varName.startsWith('/toggle:')) {
+        // This is a toggle marker, not a variable - preserve it as-is
+        const part = {
+          type: 'text',
+          text: match[0]
+        };
+        if (adfNode.marks && adfNode.marks.length > 0) {
+          part.marks = [...adfNode.marks];
+        }
+        parts.push(part);
+        lastIndex = regex.lastIndex;
+        continue;
+      }
+      
       let value = variableValues?.[varName];
       
       // Smart case matching: check if this occurrence should be upgraded to sentence case

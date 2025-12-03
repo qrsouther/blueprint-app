@@ -170,7 +170,9 @@ export function EmbedEditMode({
   onBlur,  // Handler for localStorage draft saves on blur
   onReset,  // Handler for resetting to original state
   // Confluence edit mode flag - when true, show restricted UI with guidance message
-  isConfluenceEditMode = false
+  isConfluenceEditMode = false,
+  // Redline status for approval workflow indicator
+  redlineStatus = null
 }) {
   const [copySuccess, setCopySuccess] = useState(false);
   const [isCompositorModalOpen, setIsCompositorModalOpen] = useState(false);
@@ -416,6 +418,23 @@ export function EmbedEditMode({
             </Fragment>
           )}
 
+          {/* Redline status indicator - shows approval workflow status */}
+          {redlineStatus && (
+            <Lozenge 
+              appearance={
+                redlineStatus === 'reviewable' ? 'new' :
+                redlineStatus === 'pre-approved' ? 'inprogress' :
+                redlineStatus === 'needs-revision' ? 'removed' :
+                redlineStatus === 'approved' ? 'success' : 'default'
+              }
+            >
+              {redlineStatus === 'reviewable' ? 'Reviewable' :
+               redlineStatus === 'pre-approved' ? 'Pre-Approved' :
+               redlineStatus === 'needs-revision' ? 'Needs Revision' :
+               redlineStatus === 'approved' ? 'Approved' : redlineStatus}
+            </Lozenge>
+          )}
+
           {/* ButtonGroup: GUID copy, Exit, Reset, Publish (some hidden in Confluence edit mode) */}
           <ButtonGroup>
             {/* GUID copy button - always available */}
@@ -426,7 +445,7 @@ export function EmbedEditMode({
                 iconBefore="angle-brackets"
                 alignBlock="center"
               >
-                {copySuccess ? 'Copied!' : 'CopyGUID'}
+                {copySuccess ? 'Copied!' : 'Copy GUID'}
               </Button>
             )}
             {/* Exit button (renamed from Done) - only in View Mode editing */}
@@ -445,7 +464,7 @@ export function EmbedEditMode({
                 Reset
               </Button>
             )}
-            {/* Blueprint Settings button - hidden in Confluence edit mode */}
+            {/* Blueprint Settings button - hidden in Confluence edit mode
             {pageId && !isConfluenceEditMode && (
               <Button
                 appearance="subtle"
@@ -454,6 +473,7 @@ export function EmbedEditMode({
                 Blueprint Settings
               </Button>
             )}
+            */}
             {/* Publish button - hidden in Confluence edit mode */}
             {excerpt && onPublish && !isConfluenceEditMode && (
               <Button

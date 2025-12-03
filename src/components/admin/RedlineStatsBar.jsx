@@ -87,6 +87,7 @@ function RedlineStatsBarComponent({
   groupBy,
   onGroupChange,
   onManualRefresh,
+  isRefreshing = false,
   isActive = true,
   embedsCountDisplay,
   stats,
@@ -234,8 +235,12 @@ function RedlineStatsBarComponent({
               Clear Filters
             </Button>
             {onManualRefresh && (
-              <Button appearance="default" onClick={onManualRefresh}>
-                🔄 Refresh Queue
+              <Button 
+                appearance="default" 
+                onClick={onManualRefresh}
+                isDisabled={isRefreshing}
+              >
+                {isRefreshing ? 'Refreshing...' : '🔄 Refresh Queue'}
               </Button>
             )}
             {embedsCountDisplay && (
@@ -284,6 +289,7 @@ export const RedlineStatsBar = React.memo(RedlineStatsBarComponent, (prevProps, 
     prevProps.onSortChange === nextProps.onSortChange &&
     prevProps.onGroupChange === nextProps.onGroupChange &&
     prevProps.onManualRefresh === nextProps.onManualRefresh &&
+    prevProps.isRefreshing === nextProps.isRefreshing &&
     prevProps.embedsCountDisplay === nextProps.embedsCountDisplay
   );
 });

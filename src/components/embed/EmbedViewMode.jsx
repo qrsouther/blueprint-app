@@ -99,7 +99,7 @@ export function EmbedViewMode({
             <Button 
               appearance="default" 
               onClick={onEditClick}
-              shouldFitContainer={true}
+              shouldFitContainer={false}
               iconAfter="chevron-down"
               spacing="compact"
             >
@@ -141,7 +141,7 @@ export function EmbedViewMode({
             <Button 
               appearance="default" 
               onClick={onEditClick}
-              shouldFitContainer={true}
+              shouldFitContainer={false}
               iconAfter="chevron-down"
               spacing="compact"
               isDisabled={isCheckingStaleness}
@@ -232,7 +232,7 @@ export function EmbedViewMode({
             <Button 
               appearance="default" 
               onClick={onEditClick}
-              shouldFitContainer={true}
+              shouldFitContainer={false}
               iconAfter="chevron-down"
               spacing="compact"
               isDisabled={isCheckingStaleness}

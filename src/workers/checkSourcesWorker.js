@@ -12,14 +12,23 @@
  * 4. Frontend polls getCheckProgress for real-time updates
  *
  * Progress Flow:
- * - 0%: Job queued
- * - 10%: Loading excerpts index
- * - 20%: Grouping excerpts by page
- * - 20-90%: Checking pages (incremental progress)
+ * - 0-10%: Loading excerpts from storage
+ * - 10-20%: Grouping excerpts by page
+ * - 20-90%: Checking pages and running backfills
  * - 90-100%: Finalizing results
+ *
+ * Primary Functions:
+ * 1. Bespoke property backfill - ensures all Sources have bespoke:false
+ * 2. Smart case matching backfill - adds sentence-start occurrence data
+ * 3. Storage Format to ADF conversion - converts old XML content to ADF JSON
+ * 4. excerpt-index repair - rebuilds index if out of sync
+ *
+ * Note: Orphan detection and soft-deletion is now handled in real-time by
+ * pageSyncWorker using the BEFORE/AFTER comparison approach. This worker
+ * focuses on maintenance/backfill operations.
  */
 
-import { storage } from '@forge/api';
+import { storage, startsWith } from '@forge/api';
 import api, { route } from '@forge/api';
 import { updateProgress, calculatePhaseProgress } from './helpers/progress-tracker.js';
 import { extractVariablesFromAdf } from '../utils/adf-utils.js';
@@ -30,8 +39,18 @@ import { logFunction, logPhase, logSuccess, logFailure, logWarning } from '../ut
 /**
  * Process Check All Sources operation asynchronously
  * This is the consumer function that processes queued events
+ * 
  * @param {AsyncEvent} event - The async event from the queue (v2: payload is in event.body)
+ * @param {Object} event.body.progressId - Progress tracking ID
  * @param {Object} context - The context object with jobId, etc.
+ * 
+ * Primary Functions:
+ * 1. Bespoke property backfill - ensures all Sources have bespoke:false
+ * 2. Smart case matching backfill - adds sentence-start occurrence data
+ * 3. Storage Format to ADF conversion - converts old XML content to ADF JSON
+ * 4. excerpt-index repair - rebuilds index if out of sync
+ * 
+ * Note: Orphan detection is now handled by pageSyncWorker in real-time.
  */
 export async function handler(event) {
   // In @forge/events v2, payload is in event.body, not event.payload
@@ -46,20 +65,89 @@ export async function handler(event) {
     await updateProgress(progressId, {
       phase: 'initializing',
       percent: 0,
-      status: 'Loading excerpts...',
+      status: 'Loading excerpts from storage...',
       total: 0,
       processed: 0
     });
 
-    // Get all excerpts from the index
-    const excerptIndex = await storage.get('excerpt-index') || { excerpts: [] };
-    logPhase('checkSourcesWorker', 'Total excerpts to check', { count: excerptIndex.excerpts.length });
+    // Query all excerpts directly from storage (not via index, which may be stale/missing)
+    // This matches how getAllExcerpts works, ensuring consistency
+    const allExcerpts = [];
+    let cursor = await storage.query().where('key', startsWith('excerpt:')).getMany();
+    let pageCount = 1;
+    const maxPages = 20; // Safety limit to prevent timeouts
+
+    // Add first page
+    if (cursor.results && cursor.results.length > 0) {
+      const excerpts = cursor.results
+        .map(item => ({ ...item.value, id: item.key.replace('excerpt:', '') }))
+        .filter(value => value !== null && value !== undefined);
+      allExcerpts.push(...excerpts);
+    }
+
+    // Paginate through remaining pages
+    while (cursor.nextCursor && pageCount < maxPages) {
+      cursor = await storage.query()
+        .where('key', startsWith('excerpt:'))
+        .cursor(cursor.nextCursor)
+        .getMany();
+      
+      if (cursor.results && cursor.results.length > 0) {
+        const excerpts = cursor.results
+          .map(item => ({ ...item.value, id: item.key.replace('excerpt:', '') }))
+          .filter(value => value !== null && value !== undefined);
+        allExcerpts.push(...excerpts);
+      }
+      pageCount++;
+    }
+
+    if (cursor.nextCursor && pageCount >= maxPages) {
+      logWarning('checkSourcesWorker', `Hit page limit (${maxPages}) for excerpt query. Results may be incomplete.`);
+    }
+
+    logPhase('checkSourcesWorker', 'Loaded excerpts directly from storage', { 
+      count: allExcerpts.length,
+      pages: pageCount 
+    });
+
+    // Check and auto-repair the excerpt-index if missing or out of sync
+    const excerptIndex = await storage.get('excerpt-index');
+    const indexCount = excerptIndex?.excerpts?.length || 0;
+    const needsRepair = !excerptIndex || indexCount !== allExcerpts.length;
+
+    if (needsRepair) {
+      logWarning('checkSourcesWorker', 'excerpt-index needs repair', {
+        indexExists: !!excerptIndex,
+        indexCount,
+        storageCount: allExcerpts.length,
+        action: 'AUTO-REBUILDING'
+      });
+
+      // Rebuild the index from the actual storage data
+      const rebuiltIndex = {
+        excerpts: allExcerpts.map(excerpt => ({
+          id: excerpt.id,
+          name: excerpt.name || 'Unknown',
+          category: excerpt.category || 'General'
+        }))
+      };
+
+      await storage.set('excerpt-index', rebuiltIndex);
+      logSuccess('checkSourcesWorker', 'excerpt-index REBUILT successfully', {
+        newCount: rebuiltIndex.excerpts.length
+      });
+    } else {
+      logPhase('checkSourcesWorker', 'excerpt-index is in sync', { 
+        indexCount,
+        storageCount: allExcerpts.length
+      });
+    }
 
     await updateProgress(progressId, {
       phase: 'loading',
       percent: 10,
       status: 'Grouping excerpts by page...',
-      total: excerptIndex.excerpts.length,
+      total: allExcerpts.length,
       processed: 0
     });
 
@@ -69,18 +157,17 @@ export async function handler(event) {
     let bespokeBackfillCount = 0;
     let smartCaseBackfillCount = 0;
 
-    for (const excerptSummary of excerptIndex.excerpts) {
-      const excerpt = await storage.get(`excerpt:${excerptSummary.id}`);
+    for (const excerpt of allExcerpts) {
       if (!excerpt) continue;
 
       // BACKFILL: Set bespoke to false if undefined or null
       // This ensures all Sources have an explicit bespoke property
       if (excerpt.bespoke === undefined || excerpt.bespoke === null) {
         excerpt.bespoke = false;
-        await storage.set(`excerpt:${excerptSummary.id}`, excerpt);
+        await storage.set(`excerpt:${excerpt.id}`, excerpt);
         bespokeBackfillCount++;
         logPhase('checkSourcesWorker', 'Backfilled bespoke property', { 
-          excerptId: excerptSummary.id, 
+          excerptId: excerpt.id, 
           excerptName: excerpt.name 
         });
       }
@@ -103,10 +190,10 @@ export async function handler(event) {
           // Merge occurrences into existing variable definitions
           excerpt.variables = mergeOccurrencesIntoVariables(excerpt.variables, occurrences);
           
-          await storage.set(`excerpt:${excerptSummary.id}`, excerpt);
+          await storage.set(`excerpt:${excerpt.id}`, excerpt);
           smartCaseBackfillCount++;
           logPhase('checkSourcesWorker', 'Backfilled smart case matching occurrences', { 
-            excerptId: excerptSummary.id, 
+            excerptId: excerpt.id, 
             excerptName: excerpt.name,
             variablesCount: excerpt.variables.length,
             occurrencesCount: occurrences.length
@@ -114,7 +201,7 @@ export async function handler(event) {
         } catch (backfillError) {
           // Log warning but don't fail the entire operation
           logWarning('checkSourcesWorker', 'Failed to backfill smart case matching', {
-            excerptId: excerptSummary.id,
+            excerptId: excerpt.id,
             excerptName: excerpt.name,
             error: backfillError.message
           });
@@ -123,6 +210,14 @@ export async function handler(event) {
 
       // Skip if this excerpt doesn't have page info
       if (!excerpt.sourcePageId || !excerpt.sourceLocalId) {
+        logWarning('checkSourcesWorker', 'Skipping excerpt - missing page info', {
+          excerptId: excerpt.id,
+          excerptName: excerpt.name,
+          hasSourcePageId: !!excerpt.sourcePageId,
+          hasSourceLocalId: !!excerpt.sourceLocalId,
+          sourcePageId: excerpt.sourcePageId || 'MISSING',
+          sourceLocalId: excerpt.sourceLocalId || 'MISSING'
+        });
         skippedExcerpts.push(excerpt.name);
         continue;
       }
@@ -144,14 +239,13 @@ export async function handler(event) {
       phase: 'checking',
       percent: 20,
       status: `Checking ${excerptsByPage.size} pages...`,
-      total: excerptIndex.excerpts.length,
+      total: allExcerpts.length,
       processed: 0,
       totalPages: excerptsByPage.size,
       currentPage: 0
     });
 
-    // Phase 2: Check each page (20-90%)
-    const orphanedSources = [];
+    // Phase 2: Check each page for backfill and conversion (20-90%)
     const checkedSources = [];
     let contentConversionsCount = 0;
 
@@ -212,7 +306,7 @@ export async function handler(event) {
             phase: 'checking',
             status: `Checked page ${pageNumber} of ${excerptsByPage.size}...`,
             percent: percentComplete,
-            total: excerptIndex.excerpts.length,
+            total: allExcerpts.length,
             processed: checkedSources.length + orphanedSources.length,
             totalPages: excerptsByPage.size,
             currentPage: pageNumber
@@ -243,7 +337,7 @@ export async function handler(event) {
             phase: 'checking',
             status: `Checked page ${pageNumber} of ${excerptsByPage.size}...`,
             percent: percentComplete,
-            total: excerptIndex.excerpts.length,
+            total: allExcerpts.length,
             processed: checkedSources.length + orphanedSources.length,
             totalPages: excerptsByPage.size,
             currentPage: pageNumber
@@ -254,13 +348,36 @@ export async function handler(event) {
         // STEP 2: Check which Sources exist on the page (string matching - works for all Sources)
         const sourcesToConvert = []; // Track Sources that need conversion
 
+        logPhase('checkSourcesWorker', 'Checking page for Sources', {
+          pageId,
+          excerptCount: pageExcerpts.length,
+          storageBodyLength: storageBody.length,
+          excerptNames: pageExcerpts.map(e => e.name),
+          sourceLocalIds: pageExcerpts.map(e => e.sourceLocalId)
+        });
+
         for (const excerpt of pageExcerpts) {
           const macroExists = storageBody.includes(excerpt.sourceLocalId);
 
+          logPhase('checkSourcesWorker', 'Source existence check', {
+            excerptId: excerpt.id,
+            excerptName: excerpt.name,
+            sourceLocalId: excerpt.sourceLocalId,
+            macroExists,
+            // Log a snippet around where localId might be (if found)
+            foundAt: macroExists ? storageBody.indexOf(excerpt.sourceLocalId) : -1
+          });
+
           if (!macroExists) {
-            orphanedSources.push({
-              ...excerpt,
-              orphanedReason: 'Macro deleted from source page'
+            // Note: With v2 Source tracking, orphan detection is handled by pageSyncWorker
+            // If a Source is missing from its expected page but exists in storage, it means
+            // the page hasn't been published since the Source was removed.
+            // Log for diagnostics but don't take action - pageSyncWorker handles this.
+            logWarning('checkSourcesWorker', 'Source not found on page - will be handled by pageSyncWorker on next publish', {
+              excerptId: excerpt.id,
+              excerptName: excerpt.name,
+              sourceLocalId: excerpt.sourceLocalId,
+              sourcePageId: excerpt.sourcePageId
             });
             continue;
           }
@@ -421,8 +538,8 @@ export async function handler(event) {
         phase: 'checking',
         status: `Checked page ${pageNumber} of ${excerptsByPage.size}...`,
         percent: percentComplete,
-        total: excerptIndex.excerpts.length,
-        processed: checkedSources.length + orphanedSources.length,
+        total: allExcerpts.length,
+        processed: checkedSources.length,
         totalPages: excerptsByPage.size,
         currentPage: pageNumber
       });
@@ -432,14 +549,17 @@ export async function handler(event) {
     // Phase 3: Finalize results (90-100%)
     await updateProgress(progressId, {
       phase: 'finalizing',
-      percent: 90,
+      percent: 95,
       status: 'Finalizing results...',
-      total: excerptIndex.excerpts.length,
-      processed: checkedSources.length + orphanedSources.length
+      total: allExcerpts.length,
+      processed: checkedSources.length
     });
 
     // Build completion status message
-    let statusMessage = `Complete! ${checkedSources.length} active, ${orphanedSources.length} orphaned`;
+    let statusMessage = `Complete! ${checkedSources.length} active Sources checked`;
+    if (skippedExcerpts.length > 0) {
+      statusMessage += `, ${skippedExcerpts.length} skipped (no page info)`;
+    }
     if (contentConversionsCount > 0) {
       statusMessage += `, ${contentConversionsCount} converted to ADF`;
     }
@@ -451,10 +571,10 @@ export async function handler(event) {
     }
 
     const finalResults = {
-      orphanedSources,
-      checkedCount: checkedSources.length + orphanedSources.length,
+      skippedSources: skippedExcerpts, // Sources without sourcePageId/sourceLocalId
+      checkedCount: checkedSources.length,
       activeCount: checkedSources.length,
-      staleEntriesRemoved: 0, // Not running cleanup
+      skippedCount: skippedExcerpts.length,
       contentConversionsCount,
       bespokeBackfillCount,
       smartCaseBackfillCount,
@@ -466,10 +586,9 @@ export async function handler(event) {
       phase: 'complete',
       status: statusMessage,
       percent: 100,
-      total: excerptIndex.excerpts.length,
-      processed: checkedSources.length + orphanedSources.length,
+      total: allExcerpts.length,
+      processed: checkedSources.length,
       activeCount: checkedSources.length,
-      orphanedCount: orphanedSources.length,
       contentConversionsCount,
       bespokeBackfillCount,
       smartCaseBackfillCount,
@@ -479,8 +598,9 @@ export async function handler(event) {
     logSuccess('checkSourcesWorker', 'Check All Sources complete', {
       progressId,
       duration: `${Date.now() - functionStartTime}ms`,
+      totalInStorage: allExcerpts.length,
       activeCount: checkedSources.length,
-      orphanedCount: orphanedSources.length,
+      skippedCount: skippedExcerpts.length,
       conversionsCount: contentConversionsCount,
       bespokeBackfillCount,
       smartCaseBackfillCount
@@ -490,9 +610,10 @@ export async function handler(event) {
       success: true,
       progressId,
       summary: {
-        checkedCount: checkedSources.length + orphanedSources.length,
+        totalInStorage: allExcerpts.length,
+        checkedCount: checkedSources.length,
         activeCount: checkedSources.length,
-        orphanedCount: orphanedSources.length,
+        skippedCount: skippedExcerpts.length,
         contentConversionsCount,
         bespokeBackfillCount,
         smartCaseBackfillCount
@@ -518,4 +639,5 @@ export async function handler(event) {
     };
   }
 }
+
 
