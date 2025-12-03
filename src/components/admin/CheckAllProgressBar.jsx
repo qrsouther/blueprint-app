@@ -40,18 +40,10 @@ export function CheckAllProgressBar({
 }) {
   if (!includesProgress) return null;
 
-  // For auto-verification: hide results if all clear (no orphaned, broken, or stale embeds)
-  if (includesProgress.phase === 'complete' && includesProgress.isAutoVerification) {
-    const summary = includesProgress.results?.summary;
-    if (summary) {
-      const hasIssues = (summary.orphanedCount > 0) || 
-                        (summary.brokenReferenceCount > 0) || 
-                        (summary.staleCount > 0);
-      if (!hasIssues) {
-        // All clear - don't show results for auto-verification
-        return null;
-      }
-    }
+  // For auto-verification: run completely silent (no UI at all)
+  // This includes both in-progress and completion states
+  if (includesProgress.isAutoVerification) {
+    return null;
   }
 
   return (

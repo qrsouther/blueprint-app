@@ -833,8 +833,8 @@ const App = () => {
 
     try {
       // Call async trigger - returns immediately with jobId + progressId
-      // Always start in dry-run mode (preview) first
-      const triggerResult = await invoke('checkAllIncludes', { dryRun: true });
+      // Auto-verification runs in live mode (dryRun: false), manual runs in dry-run mode (preview)
+      const triggerResult = await invoke('checkAllIncludes', { dryRun: !isAutoVerification });
 
       if (!triggerResult.success || !triggerResult.data) {
         throw new Error(triggerResult.error || 'Failed to start check');
@@ -895,8 +895,8 @@ const App = () => {
       // Results will be displayed in the progress UI component
       // No alert needed - keep progress state with complete phase
 
-      // Offer to download CSV
-      if (results.activeIncludes && results.activeIncludes.length > 0) {
+      // Offer to download CSV (only for manual runs, not auto-verification)
+      if (!isAutoVerification && results.activeIncludes && results.activeIncludes.length > 0) {
         if (confirm(`\nWould you like to download a CSV report of all ${summary.activeCount} Embed instances?`)) {
           const csv = generateIncludesCSV(results.activeIncludes);
           const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
@@ -920,9 +920,12 @@ const App = () => {
       const nextScheduledTime = calculateNextScheduledTime();
       await invoke('setNextScheduledCheckTime', { timestamp: nextScheduledTime });
 
-      // Keep progress visible in dry-run mode so user can see results and clean up button
-      // Only clear in live mode after a delay
-      if (!finalProgressResult.data?.progress?.dryRun) {
+      // For auto-verification: clear progress immediately (silent mode)
+      // For manual runs in dry-run mode: keep progress visible so user can see results
+      // For manual runs in live mode: clear after brief delay
+      if (isAutoVerification) {
+        setIncludesProgress(null);
+      } else if (!finalProgressResult.data?.progress?.dryRun) {
         await new Promise(resolve => setTimeout(resolve, 2000));
         setIncludesProgress(null);
       }
