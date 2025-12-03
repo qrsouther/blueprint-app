@@ -203,7 +203,17 @@ The **📦 Sources** tab is for looking up, managing, and viewing the usage deta
 
 It contains a left-side nav to quickly find specific Sources using a keyword search by Name, filtering by Category (or a combination of the two). The resulting list of Sources can be sorted alphabetically, grouped by category, or sorted by usage rates (highest or lowest).
 
-The main and most important portion of the **Sources** tab is the **Usage table**. Click on any Source within the left-side nav to view detailed usage information. Shows all pages containing Embeds of the Source, those pages' toggle states, variable values, and staleness information. Heading anchors provide direct navigation to the nearest place within the page for the selected Embed.
+The main and most important portion of the **Sources** tab is the **Usage table**. Click on any Source within the left-side nav to view detailed usage information. Shows all pages containing **published** Embeds of the Source, those pages' toggle states, variable values, and staleness information. Heading anchors provide direct navigation to the nearest place within the page for the selected Embed.
+
+**Important:** Usage Details shows only Embeds that are actually **published/injected** on Confluence pages—not drafts or orphaned Embeds in storage. This data is kept accurate through a three-layer synchronization system:
+
+| Sync Layer | Trigger | Purpose |
+|------------|---------|---------|
+| **Event-driven** | Page publish/update | Real-time sync via Confluence trigger |
+| **On-demand** | Click on Source | Background refresh if data >5 min old |
+| **Daily job** | 10 AM UTC scheduled | Safety net to catch any missed events |
+
+When you open Usage Details, cached data displays instantly. If the cache is stale, you'll see a brief "Refreshing usage data..." spinner while fresh data is fetched in the background—the UI updates seamlessly when ready.
 
 The Status column for each Embed in the Usage table will show _Up to date_ or _Update Available_ with timestamps. A stale Embed can be force-updated from within the Usage table.
 
