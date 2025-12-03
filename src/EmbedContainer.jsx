@@ -213,7 +213,8 @@ const App = () => {
           internalNotes: values.internalNotes || [],
           complianceLevel: values.complianceLevel || null,
           isFreeformMode: values.isFreeformMode || false,
-          freeformContent: values.freeformContent || ''
+          freeformContent: values.freeformContent || '',
+          smartCasingEnabled: values.smartCasingEnabled !== false
         });
 
         if (result.success) {
@@ -271,6 +272,10 @@ const App = () => {
     control: editSession.control, 
     name: 'freeformContent'
   }) || '';
+  const watchedSmartCasingEnabled = useWatch({ 
+    control: editSession.control, 
+    name: 'smartCasingEnabled'
+  }) !== false; // Default true
   
   // Set initial tab index based on whether excerpt has toggles
   // Only set once when excerpt first loads
@@ -468,7 +473,8 @@ const App = () => {
           variableValues: varsResult.data.variableValues || {},
           toggleStates: varsResult.data.toggleStates || {},
           customInsertions: varsResult.data.customInsertions || [],
-          internalNotes: varsResult.data.internalNotes || []
+          internalNotes: varsResult.data.internalNotes || [],
+          smartCasingEnabled: varsResult.data.smartCasingEnabled !== false
         });
 
         if (result.success) {
@@ -641,8 +647,14 @@ const App = () => {
 
       // Apply variables (using watched values for live updates)
       // Pass excerpt.variables for smart case matching (auto-capitalize at sentence starts)
+      // Pass disableSmartCase option based on user's Smart Casing toggle preference
       if (editSession.excerpt.variables) {
-        previewAdf = substituteVariablesInAdf(previewAdf, watchedVariableValues || {}, editSession.excerpt.variables);
+        previewAdf = substituteVariablesInAdf(
+          previewAdf, 
+          watchedVariableValues || {}, 
+          editSession.excerpt.variables,
+          { disableSmartCase: !watchedSmartCasingEnabled }
+        );
       }
 
       // Apply custom insertions (using watched values for live updates)

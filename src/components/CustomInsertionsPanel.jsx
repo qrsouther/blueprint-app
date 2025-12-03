@@ -76,6 +76,7 @@ export const CustomInsertionsPanel = ({
   // Watch form values from parent form
   const variableValues = useWatch({ control, name: 'variableValues' }) || {};
   const toggleStates = useWatch({ control, name: 'toggleStates' }) || {};
+  const smartCasingEnabled = useWatch({ control, name: 'smartCasingEnabled' }) !== false;
   
   // Use useFieldArray for customInsertions and internalNotes
   const { fields: customInsertionFields, append: appendCustomInsertion, remove: removeCustomInsertion } = useFieldArray({
@@ -100,7 +101,13 @@ export const CustomInsertionsPanel = ({
     // match the original structure. This allows insertions to be placed inside toggle blocks.
     // Only apply variable substitution for display purposes, but don't filter toggles yet.
     // Pass excerpt.variables for smart case matching (auto-capitalize at sentence starts)
-    originalContent = substituteVariablesInAdf(originalContent, variableValues, excerpt?.variables);
+    // Pass disableSmartCase option based on user's Smart Casing toggle preference
+    originalContent = substituteVariablesInAdf(
+      originalContent, 
+      variableValues, 
+      excerpt?.variables,
+      { disableSmartCase: !smartCasingEnabled }
+    );
     // Don't filter toggles here - extract from original structure
   }
 

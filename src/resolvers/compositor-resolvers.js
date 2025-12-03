@@ -882,13 +882,22 @@ export async function bulkPublishChapters(req) {
         const customInsertions = embedConfig.customInsertions || [];
         const internalNotes = embedConfig.internalNotes || [];
         const complianceLevel = embedConfig.complianceLevel || null;
+        // Smart casing defaults to true for backwards compatibility
+        const smartCasingEnabled = embedConfig.smartCasingEnabled !== false;
 
         // Render content with settings
         let renderedAdf = excerpt.content;
 
         if (renderedAdf && typeof renderedAdf === 'object' && renderedAdf.type === 'doc') {
           // Pass excerpt.variables for smart case matching (auto-capitalize at sentence starts)
-          renderedAdf = substituteVariablesInAdf(renderedAdf, variableValues, excerpt.variables);
+          // Pass disableSmartCase option based on user's Smart Casing toggle preference
+          // Pass removeUnset: true to ensure null variables don't show {{varName}} on published pages
+          renderedAdf = substituteVariablesInAdf(
+            renderedAdf, 
+            variableValues, 
+            excerpt.variables,
+            { disableSmartCase: !smartCasingEnabled, removeUnset: true }
+          );
           renderedAdf = insertCustomParagraphsInAdf(renderedAdf, customInsertions);
           // Pass customInsertions to adjust internal note positions
           renderedAdf = insertInternalNotesInAdf(renderedAdf, internalNotes, customInsertions);

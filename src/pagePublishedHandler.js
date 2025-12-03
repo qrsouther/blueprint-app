@@ -42,10 +42,10 @@ function parseMacroParameters(macroXml) {
 function renderExcerptContent(excerpt, variableValues = {}) {
   let content = excerpt.content || '';
 
-  // Substitute variables
+  // Substitute variables (use empty string for unset variables on published pages)
   if (excerpt.variables && Array.isArray(excerpt.variables)) {
     excerpt.variables.forEach(variable => {
-      const value = variableValues[variable.name] || `{{${variable.name}}}`;
+      const value = variableValues[variable.name] || '';
       const regex = new RegExp(`\\{\\{${escapeRegex(variable.name)}\\}\\}`, 'g');
       content = content.replace(regex, value);
     });

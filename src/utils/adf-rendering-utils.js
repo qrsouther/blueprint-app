@@ -281,24 +281,32 @@ export const stripToggleMarkers = (adfNode) => {
  * Perform variable substitution in ADF content
  *
  * Replaces {{variableName}} placeholders with actual values.
- * Unset variables (empty values) are wrapped in code marks for visual distinction.
+ * Unset variables (empty values) are wrapped in code marks for visual distinction,
+ * unless removeUnset option is true (for published pages).
  * 
  * Smart Case Matching:
  * When variable definitions with occurrences are provided, automatically upgrades
  * lowercase variable values to sentence case when they appear at sentence starts.
  * Only upgrades case (never downgrades) - if user types "Season Ticket", it stays as-is.
+ * Can be disabled via options.disableSmartCase for users who want exact input values.
  *
  * @param {Object} adfNode - ADF node to process
  * @param {Object} variableValues - Map of variable names to values
  * @param {Array} variables - Optional array of variable definitions with occurrences
  *                            (from Source.variables, includes isAtSentenceStart flags)
+ * @param {Object} options - Optional configuration
+ * @param {boolean} options.disableSmartCase - When true, skip smart case matching (use raw values)
+ * @param {boolean} options.removeUnset - When true, remove unset variable placeholders entirely
+ *                                        (use for published pages to never show {{varName}})
  * @returns {Object} ADF node with variables substituted
  */
-export const substituteVariablesInAdf = (adfNode, variableValues, variables = null) => {
-  // Build occurrence lookup for smart case matching
+export const substituteVariablesInAdf = (adfNode, variableValues, variables = null, options = {}) => {
+  const { disableSmartCase = false, removeUnset = false } = options;
+  
+  // Build occurrence lookup for smart case matching (skip if disabled)
   // Structure: { varName: [{ index: 0, isAtSentenceStart: true }, ...] }
   const occurrenceLookup = {};
-  if (variables && Array.isArray(variables)) {
+  if (!disableSmartCase && variables && Array.isArray(variables)) {
     for (const variable of variables) {
       if (variable.occurrences && Array.isArray(variable.occurrences)) {
         occurrenceLookup[variable.name] = variable.occurrences;
@@ -310,13 +318,14 @@ export const substituteVariablesInAdf = (adfNode, variableValues, variables = nu
   // This is a shared object that persists across recursive calls
   const occurrenceCounters = {};
   
-  return substituteVariablesInAdfInternal(adfNode, variableValues, occurrenceLookup, occurrenceCounters);
+  return substituteVariablesInAdfInternal(adfNode, variableValues, occurrenceLookup, occurrenceCounters, removeUnset);
 };
 
 /**
  * Internal recursive function for variable substitution with smart case matching
+ * @param {boolean} removeUnset - When true, remove unset variable placeholders entirely
  */
-const substituteVariablesInAdfInternal = (adfNode, variableValues, occurrenceLookup, occurrenceCounters) => {
+const substituteVariablesInAdfInternal = (adfNode, variableValues, occurrenceLookup, occurrenceCounters, removeUnset = false) => {
   if (!adfNode) return adfNode;
 
   // If it's a text node, perform substitution
@@ -375,6 +384,16 @@ const substituteVariablesInAdfInternal = (adfNode, variableValues, occurrenceLoo
           part.marks = [...adfNode.marks];
         }
         parts.push(part);
+      } else if (removeUnset) {
+        // Variable is unset and removeUnset is true - output nothing (skip the placeholder)
+        // Still increment counter for unset variables to maintain correct occurrence tracking
+        if (occurrenceLookup[varName]) {
+          if (!(varName in occurrenceCounters)) {
+            occurrenceCounters[varName] = 0;
+          }
+          occurrenceCounters[varName]++;
+        }
+        // Don't add any part - the placeholder is removed entirely
       } else {
         // Variable is unset - keep as code/monospace, merged with original marks
         // CRITICAL: Check if code mark already exists to avoid duplicates
@@ -435,7 +454,7 @@ const substituteVariablesInAdfInternal = (adfNode, variableValues, occurrenceLoo
   if (adfNode.content && Array.isArray(adfNode.content)) {
     const newContent = [];
     adfNode.content.forEach(child => {
-      const processed = substituteVariablesInAdfInternal(child, variableValues, occurrenceLookup, occurrenceCounters);
+      const processed = substituteVariablesInAdfInternal(child, variableValues, occurrenceLookup, occurrenceCounters, removeUnset);
       if (processed._parts) {
         // Expand parts into multiple text nodes
         newContent.push(...processed._parts);

@@ -336,6 +336,7 @@ export async function getVariableValues(req) {
         complianceLevel: data.complianceLevel || null,  // Compliance level (Standard, Bespoke, Semi-Standard, etc.)
         isFreeformMode: data.isFreeformMode || false,  // Freeform content mode (bypasses Source structure)
         freeformContent: data.freeformContent || '',  // Raw freeform content text
+        smartCasingEnabled: data.smartCasingEnabled !== false,  // Smart case matching (default true for backwards compat)
         lastSynced: data.lastSynced,
         excerptId: data.excerptId,
         syncedContentHash: data.syncedContentHash,  // Hash for staleness detection (non-published)
