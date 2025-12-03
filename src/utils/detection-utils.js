@@ -87,13 +87,39 @@ function getSentenceBoundaries(text) {
 
 /**
  * Known words that should always be capitalized but may not be detected
- * by NLP due to ambiguity (e.g., "march" can be a verb, "may" is a modal)
+ * by NLP due to ambiguity (e.g., "march" can be a verb, "may" is a modal).
+ * 
+ * Maps lowercase input → correct casing output.
+ * This allows for brand-specific styling like "SeatGeek" instead of "Seatgeek".
  */
-const ALWAYS_CAPITALIZE_WORDS = new Set([
-  // Months that are ambiguous
-  'march', 'may',
+const PROPER_NOUN_CASING = new Map([
+  // Months that are ambiguous (simple first-letter capitalization)
+  ['march', 'March'],
+  ['may', 'May'],
+  // Brand names with specific casing
+  ['seatgeek', 'SeatGeek'],
   // Add other known proper nouns that NLP might miss here
 ]);
+
+/**
+ * Get the correct casing for a proper noun if it's in our known list
+ * 
+ * @param {string} value - The variable value to check
+ * @returns {string|null} The correctly cased value, or null if not a known proper noun
+ */
+export function getProperNounCasing(value) {
+  if (!value || typeof value !== 'string' || value.length === 0) {
+    return null;
+  }
+  
+  // Check our known proper nouns map first
+  const knownCasing = PROPER_NOUN_CASING.get(value.toLowerCase());
+  if (knownCasing) {
+    return knownCasing;
+  }
+  
+  return null;
+}
 
 /**
  * Check if a value should be capitalized as a proper noun using NLP
@@ -113,8 +139,8 @@ export function shouldCapitalizeAsProperNoun(value) {
     return false;
   }
   
-  // Check fallback list first (handles ambiguous words like "march", "may")
-  if (ALWAYS_CAPITALIZE_WORDS.has(value.toLowerCase())) {
+  // Check fallback list first (handles ambiguous words like "march", "may", brand names)
+  if (PROPER_NOUN_CASING.has(value.toLowerCase())) {
     return true;
   }
   
@@ -250,6 +276,12 @@ export function maybeUpgradeCase(value, shouldUpgrade) {
   if (!isLowercase) {
     // Already capitalized or not a letter - return as-is
     return value;
+  }
+  
+  // Check for known proper nouns with specific casing (e.g., "SeatGeek")
+  const knownCasing = getProperNounCasing(value);
+  if (knownCasing) {
+    return knownCasing;
   }
   
   // Upgrade case if:

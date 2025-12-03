@@ -14,6 +14,7 @@ import {
   isAtSentenceStartNlp,
   maybeUpgradeCase,
   shouldCapitalizeAsProperNoun,
+  getProperNounCasing,
   detectVariableOccurrences,
   mergeOccurrencesIntoVariables
 } from '../detection-utils.js';
@@ -543,6 +544,37 @@ describe('Proper noun detection', () => {
     test('should not double-capitalize already capitalized values', () => {
       expect(maybeUpgradeCase('January', false)).toBe('January');
       expect(maybeUpgradeCase('Monday', true)).toBe('Monday');
+    });
+
+    test('should apply brand-specific casing for known brands', () => {
+      // SeatGeek has specific camelCase styling
+      expect(maybeUpgradeCase('seatgeek', false)).toBe('SeatGeek');
+      expect(maybeUpgradeCase('seatgeek', true)).toBe('SeatGeek');
+    });
+  });
+
+  describe('getProperNounCasing', () => {
+    test('should return correct casing for known proper nouns', () => {
+      expect(getProperNounCasing('march')).toBe('March');
+      expect(getProperNounCasing('may')).toBe('May');
+      expect(getProperNounCasing('seatgeek')).toBe('SeatGeek');
+    });
+
+    test('should be case-insensitive on input', () => {
+      expect(getProperNounCasing('SEATGEEK')).toBe('SeatGeek');
+      expect(getProperNounCasing('SeatGeek')).toBe('SeatGeek');
+      expect(getProperNounCasing('MARCH')).toBe('March');
+    });
+
+    test('should return null for unknown words', () => {
+      expect(getProperNounCasing('subscriber')).toBe(null);
+      expect(getProperNounCasing('microsoft')).toBe(null);
+    });
+
+    test('should handle empty/null values', () => {
+      expect(getProperNounCasing('')).toBe(null);
+      expect(getProperNounCasing(null)).toBe(null);
+      expect(getProperNounCasing(undefined)).toBe(null);
     });
   });
 });
