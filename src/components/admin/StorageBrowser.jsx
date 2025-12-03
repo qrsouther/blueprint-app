@@ -7,6 +7,7 @@
  * Features:
  * - View Mode: Query single storage key by UUID
  * - Edit Mode: Query multiple keys by prefix, filter by field values, edit JSON directly
+ * - Check All Sources/Embeds: Verification buttons relocated from main toolbar
  *
  * Usage:
  * View Mode:
@@ -26,6 +27,14 @@
  * - excerpt:{id} - Source/Blueprint Standard definition
  * - usage:{excerptId} - Usage tracking data
  * - excerpt-index - Master index of all excerpts
+ *
+ * @param {Object} props
+ * @param {Function} props.onCheckAllSources - Handler for Check All Sources button
+ * @param {boolean} props.isCheckingAllSources - Whether Check All Sources is running
+ * @param {Function} props.onCheckAllIncludes - Handler for Check All Embeds button
+ * @param {boolean} props.isCheckingIncludes - Whether Check All Embeds is running
+ * @param {string|null} props.lastVerificationTime - ISO timestamp of last verification
+ * @param {Function} props.formatTimestamp - Function to format timestamp for display
  */
 
 import React, { useState, useCallback, useRef, useEffect } from 'react';
@@ -39,6 +48,7 @@ import {
   Button,
   Select,
   TextArea,
+  Tooltip,
   xcss,
   Strong,
   SectionMessage,
@@ -322,9 +332,28 @@ const warningBannerStyles = xcss({
   borderRadius: 'border.radius'
 });
 
-export function StorageBrowser() {
+// Button styling for check buttons (matching AdminToolbar style)
+const checkButtonStyles = xcss({
+  minWidth: '140px',
+  borderWidth: 'border.width.outline',
+  borderColor: 'color.border.bold'
+});
+
+export function StorageBrowser({
+  onCheckAllSources,
+  isCheckingAllSources,
+  onCheckAllIncludes,
+  isCheckingIncludes,
+  lastVerificationTime,
+  formatTimestamp
+}) {
   // Get query client for cache invalidation
   const queryClient = useQueryClient();
+  
+  // Build verification tooltip
+  const verificationTooltip = lastVerificationTime && formatTimestamp
+    ? `Last verified: ${formatTimestamp(lastVerificationTime)}`
+    : 'Not yet verified';
 
   // View Mode state
   const [keyType, setKeyType] = useState({ label: 'Embed Config', value: 'macro-vars' });
@@ -1227,19 +1256,46 @@ export function StorageBrowser() {
       <Stack space="space.200">
         <Inline space="space.100" alignBlock="center" spread="space-between">
           <Heading size="medium">Storage Browser</Heading>
-          <Button
-            appearance={editMode ? "default" : "primary"}
-            onClick={() => {
-              setEditMode(!editMode);
-              setResult(null);
-              setMultipleResults(null);
-              setEditedJson('');
-              setJsonValidationError(null);
-              setSaveResult(null);
-            }}
-          >
-            {editMode ? 'Switch to View Mode' : 'Switch to Edit Mode'}
-          </Button>
+          <Inline space="space.100" alignBlock="center">
+            {/* Check All Sources/Embeds buttons relocated from main toolbar */}
+            <Tooltip content={verificationTooltip}>
+              <Button
+                appearance="default"
+                iconBefore='data-flow'
+                onClick={onCheckAllSources}
+                isDisabled={isCheckingAllSources}
+                xcss={checkButtonStyles}
+              >
+                {isCheckingAllSources ? 'Checking...' : 'Check Sources'}
+              </Button>
+            </Tooltip>
+
+            <Tooltip content={`${verificationTooltip}\n\nVerifies all Embed macros: checks if they exist on their pages, references valid standards, and have up-to-date content. Automatically cleans up orphaned entries and generates a complete CSV-exportable report with usage data, variable values, and rendered content.`}>
+              <Button
+                appearance="default"
+                iconBefore='eye-open'
+                onClick={onCheckAllIncludes}
+                isDisabled={isCheckingIncludes}
+                xcss={checkButtonStyles}
+              >
+                {isCheckingIncludes ? 'Checking...' : 'Check Embeds'}
+              </Button>
+            </Tooltip>
+
+            <Button
+              appearance={editMode ? "default" : "primary"}
+              onClick={() => {
+                setEditMode(!editMode);
+                setResult(null);
+                setMultipleResults(null);
+                setEditedJson('');
+                setJsonValidationError(null);
+                setSaveResult(null);
+              }}
+            >
+              {editMode ? 'Switch to View Mode' : 'Switch to Edit Mode'}
+            </Button>
+          </Inline>
         </Inline>
 
         {editMode ? (

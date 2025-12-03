@@ -88,7 +88,7 @@ import { RedlineQueuePage } from './components/admin/RedlineQueuePage';
 import { StorageBrowser } from './components/admin/StorageBrowser';
 import { StorageExportModal } from './components/admin/StorageExportModal';
 import { StorageImportModal } from './components/admin/StorageImportModal';
-import { ArchetypesPage } from './components/admin/ArchetypesPage';
+// import { ArchetypesPage } from './components/admin/ArchetypesPage';
 
 // Import admin styles
 import {
@@ -1547,12 +1547,12 @@ const App = () => {
                         <Heading size='small'>Redlines</Heading>
                       </Inline>
                     </Tab>
-                    <Tab>
+                    {/* <Tab>
                       <Inline space="space.025" alignBlock="center">
                         <Icon glyph="teams" label="Archetypes" />
                         <Heading size='small'>Archetypes</Heading>
                       </Inline>
-                    </Tab>
+                    </Tab> */}
                     <Tab>
                       <Inline space="space.025" alignBlock="center">
                         <Icon glyph="database" label="Storage" />
@@ -1564,17 +1564,8 @@ const App = () => {
                     onOpenMigrationModal={() => setIsMigrationModalOpen(true)}
                     showMigrationTools={SHOW_MIGRATION_TOOLS}
                     onOpenCategoryModal={() => setIsCategoryModalOpen(true)}
-                    onCheckAllSources={handleCheckAllSources}
-                    isCheckingAllSources={sourcesProgress !== null && sourcesProgress.phase !== 'complete'}
-                    onCheckAllIncludes={handleCheckAllIncludes}
-                    isCheckingIncludes={includesProgress !== null}
-                    lastVerificationTime={lastVerificationTime}
-                    formatTimestamp={formatTimestamp}
                     onOpenStorageExport={() => setIsStorageExportOpen(true)}
                     onOpenStorageImport={() => setIsStorageImportOpen(true)}
-                    onCreateTestPage={handleCreateTestPage}
-                    isCreatingTestPage={createTestPageMutation.isPending}
-                    onCreateSource={() => {}}
                   />
               </Inline>
             </Box>
@@ -2215,12 +2206,19 @@ const App = () => {
           <RedlineQueuePage isActive={selectedTab === 1} />
         </TabPanel>
 
-        <TabPanel>
+        {/* <TabPanel>
           <ArchetypesPage />
-        </TabPanel>
+        </TabPanel> */}
 
         <TabPanel>
-          <StorageBrowser />
+          <StorageBrowser
+            onCheckAllSources={handleCheckAllSources}
+            isCheckingAllSources={sourcesProgress !== null && sourcesProgress.phase !== 'complete'}
+            onCheckAllIncludes={handleCheckAllIncludes}
+            isCheckingIncludes={includesProgress !== null}
+            lastVerificationTime={lastVerificationTime}
+            formatTimestamp={formatTimestamp}
+          />
         </TabPanel>
           </Tabs>
         </Box>
