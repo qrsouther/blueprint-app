@@ -26,7 +26,6 @@
 
 import React, { useCallback } from 'react';
 import { Box, Inline, Stack, Lozenge, Text, Spinner, Select, Button, Textfield, xcss } from '@forge/react';
-import { useRedlineStatsQuery } from '../../hooks/redline-hooks';
 
 // Full-width style - minWidth ensures it doesn't collapse when content is minimal
 const fullWidthStyle = xcss({
@@ -98,9 +97,11 @@ function RedlineStatsBarComponent({
   onGroupChange,
   onManualRefresh,
   isActive = true,
-  embedsCountDisplay
+  embedsCountDisplay,
+  stats,
+  isLoading,
+  error
 }) {
-  const { data: stats, isLoading, error } = useRedlineStatsQuery(isActive);
   
   // Use ref to access current filters without causing callback recreation
   const filtersRef = React.useRef(filters);
@@ -178,7 +179,7 @@ function RedlineStatsBarComponent({
 
   if (isLoading) {
     return (
-      <Box backgroundColor="color.background.neutral" padding="space.200" xcss={fullWidthStyle}>
+      <Box backgroundColor="color.background.neutral" padding="space.400" xcss={fullWidthStyle}>
         <Inline space="space.100" alignBlock="center">
           <Spinner size="small" />
           <Text>Loading queue statistics...</Text>

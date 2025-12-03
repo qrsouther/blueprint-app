@@ -38,6 +38,43 @@ import { createErrorResponse, ERROR_CODES } from '../utils/error-codes.js';
 import { extractChapterBodyFromAdf } from '../utils/storage-format-utils.js';
 
 /**
+ * Calculate status stats from an array of embeds
+ * @param {Array} embeds - Array of embed objects with redlineStatus
+ * @returns {Object} Stats object with counts per status
+ */
+function calculateStatsFromEmbeds(embeds) {
+  const stats = {
+    reviewable: 0,
+    preApproved: 0,
+    needsRevision: 0,
+    approved: 0,
+    total: 0
+  };
+
+  for (const embed of embeds) {
+    const status = embed.redlineStatus || 'reviewable';
+    stats.total++;
+
+    switch (status) {
+      case 'reviewable':
+        stats.reviewable++;
+        break;
+      case 'pre-approved':
+        stats.preApproved++;
+        break;
+      case 'needs-revision':
+        stats.needsRevision++;
+        break;
+      case 'approved':
+        stats.approved++;
+        break;
+    }
+  }
+
+  return stats;
+}
+
+/**
  * Get redline queue with filtering, sorting, and grouping
  *
  * @param {Object} req.payload
@@ -447,8 +484,28 @@ export async function getRedlineQueue(req) {
       });
     }
 
+    // CRITICAL: Only include embeds that are ACTUALLY published on the page
+    // Filter out embeds that don't have injectedContent (meaning they're not on the page)
+    const publishedEmbeds = embedConfigs.filter(embed => {
+      if (!embed.injectedContent) {
+        logPhase('getRedlineQueue', 'Excluding unpublished embed', {
+          localId: embed.localId,
+          pageId: embed.pageId,
+          reason: 'No injected content found on page'
+        });
+        return false;
+      }
+      return true;
+    });
+    
+    logPhase('getRedlineQueue', 'Filtered to published embeds only', {
+      before: embedConfigs.length,
+      after: publishedEmbeds.length,
+      removed: embedConfigs.length - publishedEmbeds.length
+    });
+
     // Apply filters that require API data
-    let filteredEmbeds = embedConfigs;
+    let filteredEmbeds = publishedEmbeds;
 
     if (filters.status && filters.status.length > 0 && filters.status[0] !== 'all') {
       filteredEmbeds = filteredEmbeds.filter(embed =>
@@ -542,20 +599,28 @@ export async function getRedlineQueue(req) {
         groups[groupKey].push(embed);
       });
 
+      // Calculate stats from published embeds only (before filters applied)
+      const stats = calculateStatsFromEmbeds(publishedEmbeds);
+
       return {
         success: true,
         data: {
           embeds: filteredEmbeds,
-          groups
+          groups,
+          stats // Include stats based on published embeds only
         }
       };
     }
+
+    // Calculate stats from published embeds only (before filters applied)
+    const stats = calculateStatsFromEmbeds(publishedEmbeds);
 
     return {
       success: true,
       data: {
         embeds: filteredEmbeds,
-        groups: null
+        groups: null,
+        stats // Include stats based on published embeds only
       }
     };
 

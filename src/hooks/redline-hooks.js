@@ -54,7 +54,7 @@ const QUEUE_INVALIDATION_DELAY_MS = 60000; // 1 minute
 export const useRedlineQueueQuery = (filters = {}, sortBy = 'status', groupBy = null, enabled = true) => {
   // Fetch ALL embeds once (unfiltered, unsorted) - this is cached and reused
   // Only fetch when enabled (tab is active) to avoid unnecessary API calls
-  const { data: allEmbedsData, isLoading, error } = useQuery({
+  const { data: allData, isLoading, error } = useQuery({
     queryKey: ['redlineQueue', 'all'], // Single query key for all embeds
     enabled: enabled, // Only fetch when tab is active
     queryFn: async () => {
@@ -72,19 +72,24 @@ export const useRedlineQueueQuery = (filters = {}, sortBy = 'status', groupBy = 
       }
 
       logger.queries('Loaded all redline queue embeds:', {
-        embedCount: result.data.embeds.length
+        embedCount: result.data.embeds.length,
+        stats: result.data.stats
       });
 
-      return result.data.embeds; // Return just the embeds array
+      // Return embeds and stats (stats are based on published embeds only)
+      return { embeds: result.data.embeds, stats: result.data.stats };
     },
     staleTime: 1000 * 30, // 30 seconds - queue data is fairly dynamic
     gcTime: 1000 * 60 * 5, // 5 minutes
   });
 
+  // Extract embeds from allData for processing
+  const allEmbedsData = allData?.embeds;
+
   // Client-side filtering, sorting, and grouping
   const processedData = useMemo(() => {
     if (!allEmbedsData) {
-      return { embeds: [], groups: null };
+      return { embeds: [], groups: null, stats: null };
     }
 
     let processed = [...allEmbedsData];
@@ -175,11 +180,11 @@ export const useRedlineQueueQuery = (filters = {}, sortBy = 'status', groupBy = 
         groups[groupKey].push(embed);
       });
 
-      return { embeds: processed, groups };
+      return { embeds: processed, groups, stats: allData?.stats };
     }
 
-    return { embeds: processed, groups: null };
-  }, [allEmbedsData, filters, sortBy, groupBy]);
+    return { embeds: processed, groups: null, stats: allData?.stats };
+  }, [allEmbedsData, allData?.stats, filters, sortBy, groupBy]);
 
   return {
     data: processedData,
@@ -221,11 +226,12 @@ export const useSetRedlineStatusMutation = () => {
       // ready for when the transitioning state is removed
       queryClient.setQueriesData(
         { queryKey: ['redlineQueue', 'all'] },
-        (oldEmbeds) => {
-          if (!oldEmbeds || !Array.isArray(oldEmbeds)) return oldEmbeds;
+        (oldData) => {
+          // Handle new structure: { embeds: [], stats: {} }
+          if (!oldData || !oldData.embeds || !Array.isArray(oldData.embeds)) return oldData;
 
           // Update the specific embed in the embeds array
-          return oldEmbeds.map(embed => {
+          const updatedEmbeds = oldData.embeds.map(embed => {
             if (embed.localId === localId) {
               return {
                 ...embed,
@@ -238,6 +244,8 @@ export const useSetRedlineStatusMutation = () => {
             }
             return embed;
           });
+
+          return { ...oldData, embeds: updatedEmbeds };
         }
       );
 

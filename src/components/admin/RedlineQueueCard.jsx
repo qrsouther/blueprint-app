@@ -68,7 +68,6 @@ const getCardStyles = (status) => {
     borderColor: 'color.border',
     width: '100%',
     display: 'block',
-    marginBottom: 'space.100',
     marginTop: 'space.100'
   });
 };
@@ -412,7 +411,7 @@ function RedlineQueueCardComponent({ embedData, currentUserId, onStatusChange })
         <Inline space="space.0" alignBlock="start" shouldWrap={false} xcss={cardContentRowStyles}>
           {/* Left side: Metadata only (25%) */}
           <Box xcss={leftSideStyles}>
-            <Stack space="space.200">
+            <Stack space="space.100">
               <Stack space="space.100">
                 {/* Status Badge */}
                 <Box>

@@ -116,7 +116,7 @@ export function RedlineQueuePage({ isActive = true }) {
   const handleStatusChange = (localId, newStatus) => {
     // Get the current embed data from the query cache (unfiltered)
     const queryData = queryClient.getQueryData(['redlineQueue', 'all']);
-    const embedData = queryData?.find(e => e.localId === localId);
+    const embedData = queryData?.embeds?.find(e => e.localId === localId);
     
     if (embedData) {
       // Store full embed data with updated status
@@ -142,7 +142,7 @@ export function RedlineQueuePage({ isActive = true }) {
       const timeoutId = setTimeout(() => {
         // Verify the cache has the new status before removing from transitioning state
         const currentCache = queryClient.getQueryData(['redlineQueue', 'all']);
-        const cachedEmbed = currentCache?.find(e => e.localId === localId);
+        const cachedEmbed = currentCache?.embeds?.find(e => e.localId === localId);
         
         // Only remove from transitioning state if cache has been updated with new status
         // Otherwise, check again in 100ms
@@ -157,7 +157,7 @@ export function RedlineQueuePage({ isActive = true }) {
           // Cache not updated yet, check again in 100ms (up to 2 seconds total)
           const retryTimeoutId = setTimeout(() => {
             const retryCache = queryClient.getQueryData(['redlineQueue', 'all']);
-            const retryEmbed = retryCache?.find(e => e.localId === localId);
+            const retryEmbed = retryCache?.embeds?.find(e => e.localId === localId);
             
             if (retryEmbed && retryEmbed.redlineStatus === newStatus) {
               setTransitioningCards(prev => {
@@ -213,13 +213,16 @@ export function RedlineQueuePage({ isActive = true }) {
           onManualRefresh={handleManualRefresh}
           isActive={isActive}
           embedsCountDisplay={embedsCountDisplay}
+          stats={queueData?.stats}
+          isLoading={isLoading}
+          error={queueError}
         />
 
         {/* Phase 5: Queue display */}
         {isLoading && (
           <Box backgroundColor="color.background.neutral" padding="space.400">
             <Inline space="space.100" alignBlock="center">
-              <Spinner size="medium" />
+              <Spinner size="small" />
               <Text>Loading redline queue...</Text>
             </Inline>
           </Box>
