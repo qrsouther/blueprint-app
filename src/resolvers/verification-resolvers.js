@@ -781,16 +781,34 @@ export async function getStorageUsage(req) {
       metadata: breakdown.metadata / (1024 * 1024)
     };
 
-    // Count Sources (excerpts) and Embeds (usage references)
+    // Count Sources (excerpts)
     const sourcesCount = excerpts.length;
+    
+    // Get published embeds count from publication cache
+    // This only counts embeds that are actually published on pages
+    // (not drafts or orphaned embeds in storage)
     let embedsCount = 0;
-
-    // Count total embeds by summing all usage references
-    // Usage data structure: { excerptId, references: [...] }
-    for (const usageItem of usage) {
-      if (usageItem.value && usageItem.value.references && Array.isArray(usageItem.value.references)) {
-        embedsCount += usageItem.value.references.length;
+    try {
+      const publicationCache = await storage.get('published-embeds-cache');
+      if (publicationCache && typeof publicationCache.totalPublished === 'number') {
+        embedsCount = publicationCache.totalPublished;
+      } else {
+        // Fallback: count from usage references if cache not yet populated
+        for (const usageItem of usage) {
+          if (usageItem.value && usageItem.value.references && Array.isArray(usageItem.value.references)) {
+            embedsCount += usageItem.value.references.length;
+          }
+        }
+        logWarning('getStorageUsage', 'Publication cache not available, using storage count fallback');
       }
+    } catch (cacheError) {
+      // Fallback on error
+      for (const usageItem of usage) {
+        if (usageItem.value && usageItem.value.references && Array.isArray(usageItem.value.references)) {
+          embedsCount += usageItem.value.references.length;
+        }
+      }
+      logWarning('getStorageUsage', 'Error reading publication cache, using storage count fallback', { error: cacheError.message });
     }
 
     if (exceedsWarningThreshold) {

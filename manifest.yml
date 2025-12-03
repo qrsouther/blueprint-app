@@ -41,6 +41,13 @@ modules:
       resolver:
         function: resolver
 
+  # Event trigger for real-time sync when pages are published/updated
+  trigger:
+    - key: page-updated-trigger
+      function: page-sync-trigger
+      events:
+        - avi:confluence:updated:page
+
   consumer:
     - key: check-includes-consumer
       queue: check-includes-queue
@@ -58,9 +65,16 @@ modules:
       queue: prune-versions-queue
       function: prune-versions-worker
 
+    - key: page-sync-consumer
+      queue: page-sync-queue
+      function: page-sync-worker
+
   function:
     - key: resolver
       handler: index.handler
+
+    - key: page-sync-trigger
+      handler: index.pageSyncTrigger
 
     - key: check-includes-worker
       handler: workers/checkIncludesWorker.handler
@@ -76,6 +90,10 @@ modules:
 
     - key: prune-versions-worker
       handler: workers/pruneVersionsWorker.handler
+      timeoutSeconds: 900
+
+    - key: page-sync-worker
+      handler: workers/pageSyncWorker.handler
       timeoutSeconds: 900
 
 resources:
@@ -105,6 +123,7 @@ app:
 permissions:
   scopes:
     - read:confluence-content.all
+    - read:confluence-content.summary
     - read:confluence-space.summary
     - read:space:confluence
     - read:page:confluence

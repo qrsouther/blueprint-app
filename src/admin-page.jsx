@@ -231,7 +231,14 @@ const App = () => {
   const [isExportingCSV, setIsExportingCSV] = useState(false);
 
   // Lazy load full usage data using React Query when excerpt selected
-  const { data: selectedExcerptUsage, isLoading: isLoadingUsage, error: usageError } = useExcerptUsageQuery(
+  // Uses stale-while-revalidate pattern: shows cached data immediately, refreshes in background if stale
+  const { 
+    data: selectedExcerptUsage, 
+    isLoading: isLoadingUsage, 
+    error: usageError,
+    isRefreshing: isRefreshingUsage,
+    warning: usageWarning
+  } = useExcerptUsageQuery(
     selectedExcerptForDetails?.id,
     !!selectedExcerptForDetails
   );
@@ -1788,8 +1795,13 @@ const App = () => {
                           <Inline space="space.100" alignBlock="center">
                             <Heading size="medium">{selectedExcerptForDetails.name}</Heading>
                             {isRefetchingExcerpts && (
-                              <Tooltip content="Updating...">
+                              <Tooltip content="Updating source data...">
                                 <Spinner size="small" label="Updating source data" />
+                              </Tooltip>
+                            )}
+                            {isRefreshingUsage && (
+                              <Tooltip content="Refreshing usage data...">
+                                <Spinner size="small" label="Refreshing usage data" />
                               </Tooltip>
                             )}
                           </Inline>

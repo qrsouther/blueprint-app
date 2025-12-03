@@ -17,6 +17,7 @@
  * - useAllUsageCountsQuery: Fetch usage counts for sorting
  */
 
+import { useState, useEffect, useRef } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { invoke } from '@forge/bridge';
 import { logger } from '../utils/logger.js';
@@ -190,27 +191,97 @@ export const useSaveCategoriesMutation = () => {
 /**
  * Hook for lazy-loading usage data for a specific excerpt
  *
- * Fetches detailed usage data (which pages use this excerpt) for a single excerpt.
- * Only runs when enabled and excerptId is provided.
+ * Implements stale-while-revalidate pattern:
+ * 1. Returns cached published embeds data immediately from publication cache
+ * 2. If data is stale, triggers background refresh via refreshExcerptUsage
+ * 3. Exposes isRefreshing flag for UI to show "Updating..." indicator
+ *
+ * The publication cache is maintained by:
+ * - pageSyncWorker (real-time, triggered by page publish events)
+ * - Daily scheduled job (safety net at 10 AM UTC)
+ * - This hook's background refresh (on-demand when stale)
  *
  * @param {string} excerptId - The ID of the excerpt to fetch usage for
  * @param {boolean} enabled - Whether the query should run
- * @returns {Object} React Query result with usage array
+ * @returns {Object} React Query result with usage array + isRefreshing flag
  */
 export const useExcerptUsageQuery = (excerptId, enabled = true) => {
-  return useQuery({
+  const queryClient = useQueryClient();
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  const refreshInProgressRef = useRef(false);
+
+  const query = useQuery({
     queryKey: ['excerpt', excerptId, 'usage'],
     queryFn: async () => {
       const result = await invoke('getExcerptUsage', { excerptId });
       if (result && result.success && result.data) {
-        return result.data.usage || [];
+        return {
+          usage: result.data.usage || [],
+          isStale: result.data.isStale || false,
+          cacheAge: result.data.cacheAge,
+          source: result.data.source,
+          warning: result.data.warning
+        };
       }
       throw createErrorWithCode('Failed to load usage data', result);
     },
     enabled: enabled && !!excerptId,
-    staleTime: 1000 * 60 * 2, // 2 minutes for usage data
+    staleTime: 0, // Always consider stale to check isStale flag
     gcTime: 1000 * 60 * 10, // 10 minutes
   });
+
+  // Trigger background refresh if data is stale
+  useEffect(() => {
+    const data = query.data;
+    
+    // Only refresh if:
+    // - Query succeeded
+    // - Data is marked as stale
+    // - Not already refreshing
+    // - Not currently fetching
+    if (data?.isStale && !refreshInProgressRef.current && !query.isFetching && excerptId) {
+      refreshInProgressRef.current = true;
+      setIsRefreshing(true);
+      
+      logger.queries('Starting background refresh for excerpt usage', { excerptId, source: data.source });
+      
+      invoke('refreshExcerptUsage', { excerptId })
+        .then(freshResult => {
+          if (freshResult?.success && freshResult.data) {
+            // Update the cache with fresh data
+            queryClient.setQueryData(['excerpt', excerptId, 'usage'], {
+              usage: freshResult.data.usage || [],
+              isStale: false,
+              cacheAge: freshResult.data.refreshedAt,
+              source: freshResult.data.source
+            });
+            logger.queries('Background refresh complete', { 
+              excerptId, 
+              embedCount: freshResult.data.usage?.length || 0 
+            });
+          }
+        })
+        .catch(error => {
+          logger.errors('Background refresh failed', { excerptId, error: error.message });
+        })
+        .finally(() => {
+          refreshInProgressRef.current = false;
+          setIsRefreshing(false);
+        });
+    }
+  }, [query.data, query.isFetching, excerptId, queryClient]);
+
+  return {
+    ...query,
+    // Expose just the usage array for backwards compatibility
+    data: query.data?.usage,
+    // Additional metadata
+    isRefreshing,
+    isStale: query.data?.isStale || false,
+    cacheAge: query.data?.cacheAge,
+    dataSource: query.data?.source,
+    warning: query.data?.warning
+  };
 };
 
 /**

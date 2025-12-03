@@ -69,6 +69,7 @@ import {
   trackExcerptUsage as trackExcerptUsageResolver,
   removeExcerptUsage as removeExcerptUsageResolver,
   getExcerptUsage as getExcerptUsageResolver,
+  refreshExcerptUsage as refreshExcerptUsageResolver,
   getExcerptUsageForCSV as getExcerptUsageForCSVResolver,
   getAllUsageCounts as getAllUsageCountsResolver,
   pushUpdatesToAll as pushUpdatesToAllResolver,
@@ -277,7 +278,12 @@ resolver.define('trackExcerptUsage', trackExcerptUsageResolver);
 resolver.define('removeExcerptUsage', removeExcerptUsageResolver);
 
 // Get excerpt usage (which Embed macros reference this excerpt)
+// Returns cached published embeds data with isStale flag for stale-while-revalidate
 resolver.define('getExcerptUsage', getExcerptUsageResolver);
+
+// Refresh excerpt usage for a single Source (on-demand background refresh)
+// Fetches fresh data from pages and updates publication cache
+resolver.define('refreshExcerptUsage', refreshExcerptUsageResolver);
 
 // Get excerpt usage with full CSV export data
 resolver.define('getExcerptUsageForCSV', getExcerptUsageForCSVResolver);
@@ -1115,3 +1121,52 @@ resolver.define('scanPageForMacros', scanPageForMacrosResolver);
 resolver.define('deployArchetype', deployArchetypeResolver);
 
 export const handler = resolver.getDefinitions();
+
+// ============================================================================
+// PAGE SYNC TRIGGER (Event-Driven Sync)
+// ============================================================================
+// Lightweight handler that receives Confluence page update events and
+// queues them for processing by the page-sync-worker.
+// This keeps the trigger invocation fast (<100ms) while workers do the heavy lifting.
+
+/**
+ * Handle Confluence page update events
+ * 
+ * Called automatically when a page is published/updated in Confluence.
+ * Immediately pushes the pageId to the page-sync queue for async processing.
+ * 
+ * @param {Object} event - Confluence event payload
+ * @param {Object} event.page - Page data including id
+ * @param {Object} context - Forge context
+ */
+export async function pageSyncTrigger(event, context) {
+  // Confluence event structure: pageId is at event.content.id (not event.page.id)
+  const pageId = event?.content?.id || event?.page?.id;
+  
+  if (!pageId) {
+    logFailure('pageSyncTrigger', 'No pageId in event', new Error('Missing pageId'), { 
+      hasContent: !!event?.content,
+      hasPage: !!event?.page,
+      eventKeys: event ? Object.keys(event) : []
+    });
+    return;
+  }
+  
+  logFunction('pageSyncTrigger', 'Page update event received', { pageId });
+  
+  try {
+    // Push to queue for async processing by page-sync-worker
+    const queue = new Queue({ key: 'page-sync-queue' });
+    await queue.push({
+      body: {
+        pageId,
+        timestamp: Date.now(),
+        eventType: 'page_updated'
+      }
+    });
+    
+    logSuccess('pageSyncTrigger', 'Queued page for sync', { pageId });
+  } catch (error) {
+    logFailure('pageSyncTrigger', 'Failed to queue page sync', error, { pageId });
+  }
+}

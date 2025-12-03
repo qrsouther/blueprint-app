@@ -27,6 +27,7 @@ import { handleOrphanedMacro, softDeleteMacroVars } from './helpers/orphan-detec
 import { attemptReferenceRepair, checkExcerptExists, buildRepairedRecord, buildBrokenRecord } from './helpers/reference-repairer.js';
 import { createBackupSnapshot } from './helpers/backup-manager.js';
 import { collectAllEmbedInstances, buildActiveIncludeRecord } from './helpers/usage-collector.js';
+import { extractChapterBodyFromAdf } from '../utils/storage-format-utils.js';
 import { logFunction, logPhase, logSuccess, logFailure, logWarning } from '../utils/forge-logger.js';
 
 // SAFETY: Dry-run mode configuration
@@ -410,6 +411,39 @@ export async function handler(event) {
       logPhase('checkIncludesWorker', 'Backup available for recovery', { backupId });
     }
 
+    // Phase: Refresh publication cache as safety net
+    // This ensures the publication cache is up-to-date after the check
+    await updateProgress(progressId, {
+      phase: 'refreshing_publication_cache',
+      percent: 98,
+      status: '📊 Refreshing publication cache...',
+      total: 0,
+      processed: 0,
+      dryRun: dryRun
+    });
+
+    try {
+      await refreshAllPublicationStatus(activeIncludes);
+      logSuccess('checkIncludesWorker', 'Publication cache refreshed');
+    } catch (cacheError) {
+      // Don't fail the whole operation if cache refresh fails
+      logWarning('checkIncludesWorker', 'Publication cache refresh failed', { error: cacheError.message });
+    }
+
+    await updateProgress(progressId, {
+      phase: 'complete',
+      percent: 100,
+      status: dryRun
+        ? `✅ DRY-RUN complete - ${summary.pagesChecked} pages checked`
+        : `✅ Complete - ${summary.pagesChecked} pages checked`,
+      total: summary.pagesChecked,
+      processed: summary.pagesChecked,
+      summary,
+      backupId,
+      dryRun: dryRun,
+      results: finalResults
+    });
+
     return {
       success: true,
       progressId,
@@ -499,4 +533,122 @@ async function processActiveEmbed(
   if (activeRecord.isStale) {
     staleIncludes.push(activeRecord);
   }
+}
+
+// Publication cache key - shared with pageSyncWorker
+const PUBLICATION_CACHE_KEY = 'published-embeds-cache';
+
+/**
+ * Refresh the publication cache for all active embeds
+ * Called at the end of Check All Includes as a safety net
+ * 
+ * This builds the publication cache from scratch using the active embeds
+ * that were verified during the check operation.
+ * 
+ * @param {Array} activeIncludes - Array of active embed records from the check
+ */
+async function refreshAllPublicationStatus(activeIncludes) {
+  logPhase('refreshAllPublicationStatus', 'Starting full publication cache refresh', { 
+    activeCount: activeIncludes.length 
+  });
+
+  // Group active includes by pageId
+  const includesByPage = {};
+  for (const include of activeIncludes) {
+    if (include.pageId) {
+      if (!includesByPage[include.pageId]) {
+        includesByPage[include.pageId] = [];
+      }
+      includesByPage[include.pageId].push(include);
+    }
+  }
+
+  const pageIds = Object.keys(includesByPage);
+  const publishedEmbeds = [];
+  const byExcerptId = {};
+  const byPageId = {};
+
+  // Fetch pages in batches and extract injected content
+  const PAGE_BATCH_SIZE = 20;
+  
+  for (let i = 0; i < pageIds.length; i += PAGE_BATCH_SIZE) {
+    const batchPageIds = pageIds.slice(i, i + PAGE_BATCH_SIZE);
+    
+    const pageResults = await Promise.all(
+      batchPageIds.map(async (pageId) => {
+        try {
+          const result = await fetchPageContent(pageId);
+          return { pageId, result };
+        } catch (error) {
+          logWarning('refreshAllPublicationStatus', 'Failed to fetch page', { pageId, error: error.message });
+          return { pageId, result: { success: false } };
+        }
+      })
+    );
+
+    for (const { pageId, result } of pageResults) {
+      if (!result.success || !result.adfContent) continue;
+      
+      const { adfContent, pageData } = result;
+      const pageTitle = pageData?.title || `Page ${pageId}`;
+      const includesOnPage = includesByPage[pageId];
+      const localIdsOnPage = [];
+
+      for (const include of includesOnPage) {
+        const localId = include.localId;
+        const excerptId = include.excerptId;
+        
+        // Extract injected content for this embed
+        const injectedContent = extractChapterBodyFromAdf(adfContent, localId);
+        
+        if (injectedContent) {
+          localIdsOnPage.push(localId);
+          
+          const publishedEmbed = {
+            localId,
+            excerptId,
+            pageId,
+            pageTitle,
+            variableValues: include.variableValues || {},
+            toggleStates: include.toggleStates || {},
+            lastSynced: include.lastSynced || null,
+            publishedAt: include.publishedAt || new Date().toISOString(),
+            hasInjectedContent: true
+          };
+          
+          publishedEmbeds.push(publishedEmbed);
+          
+          // Build byExcerptId index
+          if (!byExcerptId[excerptId]) {
+            byExcerptId[excerptId] = {
+              refreshedAt: Date.now(),
+              embeds: []
+            };
+          }
+          byExcerptId[excerptId].embeds.push(publishedEmbed);
+        }
+      }
+
+      // Build byPageId index
+      if (localIdsOnPage.length > 0) {
+        byPageId[pageId] = localIdsOnPage;
+      }
+    }
+  }
+
+  // Build and save the publication cache
+  const cache = {
+    timestamp: Date.now(),
+    totalPublished: publishedEmbeds.length,
+    byExcerptId,
+    byPageId
+  };
+
+  await storage.set(PUBLICATION_CACHE_KEY, cache);
+
+  logSuccess('refreshAllPublicationStatus', 'Publication cache refreshed', {
+    totalPublished: publishedEmbeds.length,
+    sourcesWithEmbeds: Object.keys(byExcerptId).length,
+    pagesWithEmbeds: Object.keys(byPageId).length
+  });
 }

@@ -203,8 +203,22 @@ export async function removeExcerptUsage(req) {
   }
 }
 
+// Publication cache key - shared with pageSyncWorker
+const PUBLICATION_CACHE_KEY = 'published-embeds-cache';
+
+// Cache staleness threshold (5 minutes)
+const CACHE_STALE_THRESHOLD_MS = 5 * 60 * 1000;
+
 /**
  * Get excerpt usage - which Embed macros reference this excerpt
+ * 
+ * Returns ONLY published embeds from the publication cache.
+ * Includes `isStale` flag so frontend can trigger background refresh if needed.
+ * 
+ * The publication cache is maintained by:
+ * - pageSyncWorker (real-time, triggered by page publish events)
+ * - Daily scheduled job (safety net at 10 AM UTC)
+ * - refreshExcerptUsage (on-demand per-Source refresh)
  */
 export async function getExcerptUsage(req) {
   const { excerptId } = req.payload || {};
@@ -221,6 +235,29 @@ export async function getExcerptUsage(req) {
       };
     }
 
+    // Try to get data from publication cache first
+    const cache = await storage.get(PUBLICATION_CACHE_KEY);
+    const sourceCache = cache?.byExcerptId?.[excerptId];
+    
+    // Check if cache exists and has data for this Source
+    if (sourceCache && sourceCache.embeds && sourceCache.embeds.length > 0) {
+      const cacheAge = Date.now() - (sourceCache.refreshedAt || 0);
+      const isStale = cacheAge > CACHE_STALE_THRESHOLD_MS;
+      
+      return {
+        success: true,
+        data: {
+          usage: sourceCache.embeds,
+          cacheAge: sourceCache.refreshedAt,
+          isStale,
+          source: 'publication_cache'
+        }
+      };
+    }
+
+    // No cache data - fall back to storage (but mark as needing refresh)
+    // This provides backwards compatibility and handles the initial state
+    // before the publication cache is populated
     const usageKey = `usage:${excerptId}`;
     const usageData = await storage.get(usageKey) || { references: [] };
 
@@ -238,7 +275,11 @@ export async function getExcerptUsage(req) {
     return {
       success: true,
       data: {
-        usage: enrichedReferences
+        usage: enrichedReferences,
+        cacheAge: null,
+        isStale: true, // Always stale when falling back to storage
+        source: 'storage_fallback',
+        warning: 'Publication cache not yet populated. Data may include unpublished embeds.'
       }
     };
   } catch (error) {
@@ -248,6 +289,190 @@ export async function getExcerptUsage(req) {
       error: error.message
     };
   }
+}
+
+/**
+ * Refresh excerpt usage - fetch fresh data for a single Source
+ * 
+ * Called by frontend when the publication cache is stale for a specific Source.
+ * Fetches all pages with embeds for this Source, extracts injectedContent,
+ * and updates the publication cache.
+ * 
+ * This is the on-demand per-Source refresh that provides fresh data
+ * while the user is viewing Usage Details.
+ */
+export async function refreshExcerptUsage(req) {
+  const { excerptId } = req.payload || {};
+  
+  try {
+    // Input validation
+    if (!excerptId || typeof excerptId !== 'string' || excerptId.trim() === '') {
+      logFailure('refreshExcerptUsage', 'Validation failed: excerptId is required', new Error('Invalid excerptId'));
+      return {
+        success: false,
+        error: 'excerptId is required and must be a non-empty string'
+      };
+    }
+
+    // Import required functions
+    const { fetchPageContent } = await import('../workers/helpers/page-scanner.js');
+    const { extractChapterBodyFromAdf } = await import('../utils/storage-format-utils.js');
+
+    // Get all usage references for this Source from storage
+    const usageKey = `usage:${excerptId}`;
+    const usageData = await storage.get(usageKey) || { references: [] };
+    
+    if (usageData.references.length === 0) {
+      // No references - update cache to reflect this
+      await updateSourceInCache(excerptId, []);
+      return {
+        success: true,
+        data: {
+          usage: [],
+          refreshedAt: Date.now()
+        }
+      };
+    }
+
+    // Group references by pageId to minimize API calls
+    const referencesByPage = {};
+    for (const ref of usageData.references) {
+      if (ref.pageId) {
+        if (!referencesByPage[ref.pageId]) {
+          referencesByPage[ref.pageId] = [];
+        }
+        referencesByPage[ref.pageId].push(ref);
+      }
+    }
+
+    const pageIds = Object.keys(referencesByPage);
+    const publishedEmbeds = [];
+
+    // Fetch pages in batches
+    const PAGE_BATCH_SIZE = 10;
+    for (let i = 0; i < pageIds.length; i += PAGE_BATCH_SIZE) {
+      const batchPageIds = pageIds.slice(i, i + PAGE_BATCH_SIZE);
+      
+      const pageResults = await Promise.all(
+        batchPageIds.map(async (pageId) => {
+          try {
+            const result = await fetchPageContent(pageId);
+            return { pageId, result };
+          } catch (error) {
+            logWarning('refreshExcerptUsage', 'Failed to fetch page', { pageId, error: error.message });
+            return { pageId, result: { success: false, error: error.message } };
+          }
+        })
+      );
+
+      // Process each page
+      for (const { pageId, result } of pageResults) {
+        if (!result.success || !result.adfContent) continue;
+        
+        const { adfContent, pageData } = result;
+        const pageTitle = pageData?.title || `Page ${pageId}`;
+        const refs = referencesByPage[pageId];
+
+        for (const ref of refs) {
+          // Extract injected content for this embed
+          const injectedContent = extractChapterBodyFromAdf(adfContent, ref.localId);
+          
+          if (injectedContent) {
+            // This embed is published on the page
+            const macroVars = await storage.get(`macro-vars:${ref.localId}`);
+            
+            publishedEmbeds.push({
+              localId: ref.localId,
+              excerptId,
+              pageId,
+              pageTitle,
+              variableValues: macroVars?.variableValues || ref.variableValues || {},
+              toggleStates: macroVars?.toggleStates || ref.toggleStates || {},
+              lastSynced: macroVars?.lastSynced || null,
+              publishedAt: macroVars?.publishedAt || null,
+              hasInjectedContent: true
+            });
+          }
+        }
+      }
+    }
+
+    // Update the publication cache for this Source
+    await updateSourceInCache(excerptId, publishedEmbeds);
+
+    return {
+      success: true,
+      data: {
+        usage: publishedEmbeds,
+        refreshedAt: Date.now(),
+        source: 'fresh_fetch'
+      }
+    };
+
+  } catch (error) {
+    logFailure('refreshExcerptUsage', 'Error refreshing excerpt usage', error, { excerptId });
+    return {
+      success: false,
+      error: error.message
+    };
+  }
+}
+
+/**
+ * Update the publication cache for a single Source
+ * Helper function for refreshExcerptUsage
+ */
+async function updateSourceInCache(excerptId, publishedEmbeds) {
+  let cache = await storage.get(PUBLICATION_CACHE_KEY) || {
+    timestamp: Date.now(),
+    totalPublished: 0,
+    byExcerptId: {},
+    byPageId: {}
+  };
+
+  // Get previous localIds for this Source to update byPageId index
+  const previousEmbeds = cache.byExcerptId[excerptId]?.embeds || [];
+  const previousLocalIds = previousEmbeds.map(e => e.localId);
+
+  // Remove old entries from byPageId
+  for (const embed of previousEmbeds) {
+    if (cache.byPageId[embed.pageId]) {
+      cache.byPageId[embed.pageId] = cache.byPageId[embed.pageId].filter(id => id !== embed.localId);
+      if (cache.byPageId[embed.pageId].length === 0) {
+        delete cache.byPageId[embed.pageId];
+      }
+    }
+  }
+
+  // Update byExcerptId
+  if (publishedEmbeds.length > 0) {
+    cache.byExcerptId[excerptId] = {
+      refreshedAt: Date.now(),
+      embeds: publishedEmbeds
+    };
+    
+    // Update byPageId index
+    for (const embed of publishedEmbeds) {
+      if (!cache.byPageId[embed.pageId]) {
+        cache.byPageId[embed.pageId] = [];
+      }
+      if (!cache.byPageId[embed.pageId].includes(embed.localId)) {
+        cache.byPageId[embed.pageId].push(embed.localId);
+      }
+    }
+  } else {
+    delete cache.byExcerptId[excerptId];
+  }
+
+  // Recalculate total
+  cache.totalPublished = Object.values(cache.byExcerptId).reduce(
+    (sum, excerptCache) => sum + (excerptCache.embeds?.length || 0),
+    0
+  );
+  
+  cache.timestamp = Date.now();
+
+  await storage.set(PUBLICATION_CACHE_KEY, cache);
 }
 
 /**
