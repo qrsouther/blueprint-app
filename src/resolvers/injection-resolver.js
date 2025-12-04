@@ -29,6 +29,7 @@ import {
   insertInternalNotesInAdf
 } from '../utils/adf-rendering-utils.js';
 import { calculateContentHash } from '../utils/hash-utils.js';
+import { addEmbedToIndex } from './redline-resolvers.js';
 
 // Helper function to escape regex special characters
 function escapeRegex(string) {
@@ -573,6 +574,9 @@ export async function publishChapter(req) {
 
     // Save the ACTUAL values used for publishing (not the old embedConfig values)
     // This ensures the form state is persisted correctly
+    const publishedAtTimestamp = new Date().toISOString();
+    const lastChangedAtFinal = lastChangedAt || publishedAtTimestamp;
+    
     await storage.set(`macro-vars:${localId}`, {
       // Preserve existing fields from embedConfig that we don't override
       ...embedConfig,
@@ -587,7 +591,9 @@ export async function publishChapter(req) {
       // Publish metadata
       chapterId,
       excerptId,
-      publishedAt: new Date().toISOString(),
+      pageId, // Store pageId for index lookups
+      pageTitle: pageData.title, // Store pageTitle for display
+      publishedAt: publishedAtTimestamp,
       publishedContentHash,
       publishedSourceContentHash, // Source's contentHash at publish time (for staleness detection)
       publishedSourceContent, // Source's ADF content at publish time (for diff view)
@@ -595,13 +601,16 @@ export async function publishChapter(req) {
       // Clear cached incomplete status (no longer incomplete once published)
       cachedIncomplete: false,
       // Update sync timestamp
-      lastSynced: new Date().toISOString(),
+      lastSynced: publishedAtTimestamp,
       // Redline status (may be auto-transitioned from needs-revision to reviewable)
       redlineStatus: newRedlineStatus,
       statusHistory,
       lastChangedBy,
-      lastChangedAt
+      lastChangedAt: lastChangedAtFinal
     });
+
+    // Update the published embeds index for fast Redline Queue loading
+    await addEmbedToIndex(localId, pageId, newRedlineStatus, lastChangedAtFinal, excerptId);
 
     logSuccess('publishChapter', 'Successfully published', {
       pageId,

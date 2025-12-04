@@ -122,7 +122,10 @@ import {
   getRedlineStats as getRedlineStatsResolver,
   postRedlineComment as postRedlineCommentResolver,
   checkEmbedExists as checkEmbedExistsResolver,
-  manuallySoftDeleteEmbed as manuallySoftDeleteEmbedResolver
+  manuallySoftDeleteEmbed as manuallySoftDeleteEmbedResolver,
+  clearRedlineCache as clearRedlineCacheResolver,
+  getSourceNames as getSourceNamesResolver,
+  getRedlineIndexHealth as getRedlineIndexHealthResolver
 } from './resolvers/redline-resolvers.js';
 
 // Import storage export/import resolver functions
@@ -372,6 +375,15 @@ resolver.define('postRedlineComment', postRedlineCommentResolver);
 // Check if Embed still exists on its page (lightweight existence check)
 resolver.define('checkEmbedExists', checkEmbedExistsResolver);
 resolver.define('manuallySoftDeleteEmbed', manuallySoftDeleteEmbedResolver);
+
+// Clear Redline page cache (for Refresh Queue button)
+resolver.define('clearRedlineCache', clearRedlineCacheResolver);
+
+// Get source names for progressive enrichment
+resolver.define('getSourceNames', getSourceNamesResolver);
+
+// Check health/size of the published embeds index (proactive monitoring)
+resolver.define('getRedlineIndexHealth', getRedlineIndexHealthResolver);
 
 // Backfill redline fields for existing Embeds (one-time migration)
 resolver.define('backfillRedlineFields', backfillRedlineFieldsResolver);

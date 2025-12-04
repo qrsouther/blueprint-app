@@ -143,6 +143,26 @@ function formatDate(isoString) {
   }
 }
 
+// Extract chapter heading from ADF content (first h2/h3 heading)
+function extractChapterHeading(adfContent) {
+  if (!adfContent || !adfContent.content) return null;
+  
+  // Look for the first heading in the content
+  for (const node of adfContent.content) {
+    if (node.type === 'heading' && node.content) {
+      // Extract text from heading
+      const text = node.content
+        .filter(child => child.type === 'text')
+        .map(child => child.text)
+        .join('');
+      if (text.trim()) {
+        return text.trim();
+      }
+    }
+  }
+  return null;
+}
+
 // Status badge component
 function RedlineStatusBadge({ status }) {
   const appearances = {
@@ -425,8 +445,22 @@ function RedlineQueueCardComponent({ embedData, currentUserId, onStatusChange })
                   <Link openNewTab={true} href={`/wiki/pages/viewpage.action?pageId=${embedData.pageId}`}>{embedData.pageTitle || 'Unknown Page'}</Link>
                 </Heading>
 
-                {/* Source Name */}
-                <Heading size="small" space="space.100"> {embedData.sourceName || 'Unknown Source'}</Heading>
+                {/* Chapter Heading (from injected content) with optional Source Name */}
+                <Stack space="space.050">
+                  <Heading size="small" space="space.100">
+                    {extractChapterHeading(embedData.injectedContent) || embedData.sourceName || 'Unknown Chapter'}
+                  </Heading>
+                  {embedData.sourceName && (
+                    <Text size="small" color="color.text.subtlest">
+                      Source: {embedData.sourceName}
+                    </Text>
+                  )}
+                  {!embedData.sourceName && embedData.excerptId && (
+                    <Text size="small" color="color.text.disabled">
+                      Loading source...
+                    </Text>
+                  )}
+                </Stack>
 
                 {/* Local ID */}
                 <Code>

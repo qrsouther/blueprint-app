@@ -16,6 +16,7 @@
 import { storage } from '@forge/api';
 import { saveVersion } from '../../utils/version-manager.js';
 import { logPhase, logSuccess, logWarning } from '../../utils/forge-logger.js';
+import { removeEmbedFromIndex, removePageEmbedsFromIndex } from '../../resolvers/redline-resolvers.js';
 
 // SAFETY: Dry-run mode configuration
 // Default is true (preview mode) - must be explicitly set to false for cleanup
@@ -83,6 +84,13 @@ export async function softDeleteMacroVars(localId, reason, metadata = {}, dryRun
         } catch (deleteError) {
           logWarning('softDeleteMacroVars', 'Failed to delete from active namespace', { error: deleteError.message, localId, reason });
           // Log but don't throw - deletion may have partially succeeded
+        }
+        
+        // Remove from published embeds index (for Redline Queue optimization)
+        try {
+          await removeEmbedFromIndex(localId);
+        } catch (indexError) {
+          logWarning('softDeleteMacroVars', 'Failed to remove from published embeds index', { error: indexError.message, localId });
         }
       } else {
         logPhase('softDeleteMacroVars', 'DRY-RUN: Would delete from active namespace', { localId, reason });
@@ -224,6 +232,14 @@ export async function handlePageNotFound(pageIncludes, reason) {
 
     // Remove from usage tracking only (this is safe and helps keep usage data accurate)
     await removeFromUsageTracking(include.localId, include.excerptId);
+
+    // Remove from published embeds index (since embed is no longer on page)
+    // This keeps the Redline Queue accurate without deleting the actual embed data
+    try {
+      await removeEmbedFromIndex(include.localId);
+    } catch (indexError) {
+      logWarning('handlePageNotFound', 'Failed to remove from published embeds index', { error: indexError.message, localId: include.localId });
+    }
   }
 
   return orphanedIncludes;
@@ -258,6 +274,14 @@ export async function handleOrphanedMacro(include) {
 
   // Remove from usage tracking only (this is safe and helps keep usage data accurate)
   await removeFromUsageTracking(include.localId, include.excerptId);
+
+  // Remove from published embeds index (since embed is no longer on page)
+  // This keeps the Redline Queue accurate without deleting the actual embed data
+  try {
+    await removeEmbedFromIndex(include.localId);
+  } catch (indexError) {
+    logWarning('handleOrphanedMacro', 'Failed to remove from published embeds index', { error: indexError.message, localId: include.localId });
+  }
 
   return orphanedInclude;
 }

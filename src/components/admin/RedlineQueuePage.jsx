@@ -23,7 +23,7 @@ import { Box, Stack, Heading, Text, Spinner, Inline, Button, xcss } from '@forge
 import { useQueryClient } from '@tanstack/react-query';
 import { RedlineStatsBar } from './RedlineStatsBar';
 import { RedlineQueueCard } from './RedlineQueueCard';
-import { useRedlineQueueQuery } from '../../hooks/redline-hooks';
+import { useAccumulatedRedlineQueue, useSourceNamesQuery } from '../../hooks/redline-hooks';
 import { useCurrentUserQuery } from '../../hooks/admin-hooks';
 import { logger } from '../../utils/logger.js';
 
@@ -42,9 +42,8 @@ export function RedlineQueuePage({ isActive = true }) {
   const [sortBy, setSortBy] = useState('status');
   const [groupBy, setGroupBy] = useState(null);
 
-  // Phase 5: Pagination state
-  const [itemsToShow, setItemsToShow] = useState(10);
-  const ITEMS_PER_PAGE = 10;
+  // Server-side pagination config
+  const PAGE_SIZE = 20;
 
   // Track transitioning cards (cards that just changed status and are lingering)
   // Format: Map<localId, { newStatus: string, embedData: Object }>
@@ -54,15 +53,37 @@ export function RedlineQueuePage({ isActive = true }) {
   // Query client for manual refresh
   const queryClient = useQueryClient();
 
-  // Phase 5: Fetch queue data and current user
-  // Only fetch when tab is active to avoid unnecessary API calls
-  const { data: queueData, isLoading: queueLoading, isFetching: queueFetching, error: queueError } = useRedlineQueueQuery(
+  // Phase 5: Fetch queue data with server-side pagination
+  // Uses accumulated query hook for "Load More" pattern
+  const { 
+    data: queueData, 
+    isLoading: queueLoading, 
+    isFetching: queueFetching, 
+    error: queueError,
+    loadMore,
+    refresh,
+    hasMore,
+    totalCount,
+    loadedCount
+  } = useAccumulatedRedlineQueue(
     filters,
     sortBy,
     groupBy,
-    isActive // Pass enabled flag
+    isActive, // enabled flag
+    PAGE_SIZE
   );
   const { data: currentUserId, isLoading: userLoading } = useCurrentUserQuery();
+
+  // Progressive source name loading - collect all excerptIds from loaded embeds
+  const excerptIds = useMemo(() => {
+    if (!queueData?.embeds) return [];
+    return queueData.embeds
+      .map(embed => embed.excerptId)
+      .filter(id => id);
+  }, [queueData?.embeds]);
+
+  // Fetch source names progressively (after initial queue load)
+  const { data: sourceNames } = useSourceNamesQuery(excerptIds, isActive && excerptIds.length > 0);
 
   const isLoading = queueLoading || userLoading;
   const isRefreshing = queueFetching && !queueLoading; // True during background refetch (not initial load)
@@ -71,53 +92,35 @@ export function RedlineQueuePage({ isActive = true }) {
   const embedsCountDisplay = useMemo(() => {
     if (isLoading || !queueData) return null;
     
-    let totalCount;
-    if (groupBy && queueData.groups) {
-      totalCount = Object.values(queueData.groups).reduce((sum, embeds) => sum + embeds.length, 0) + transitioningCards.size;
-    } else {
-      // For flat view, include transitioning cards that may have been filtered out
-      const baseCount = queueData.embeds?.length || 0;
-      // Count transitioning cards not already in embeds
-      const additionalTransitioning = Array.from(transitioningCards.keys()).filter(
-        localId => !queueData.embeds?.some(e => e.localId === localId)
-      ).length;
-      totalCount = baseCount + additionalTransitioning;
-    }
+    // Use server-provided total count for accurate display
+    const displayedCount = loadedCount + transitioningCards.size;
+    const serverTotalCount = totalCount || displayedCount;
     
-    const visibleCount = Math.min(itemsToShow, totalCount);
-    return `Showing ${visibleCount} of ${totalCount} embeds`;
-  }, [queueData, groupBy, transitioningCards, itemsToShow, isLoading]);
+    return `Showing ${Math.min(displayedCount, serverTotalCount)} of ${serverTotalCount} embeds`;
+  }, [queueData, totalCount, loadedCount, transitioningCards.size, isLoading]);
 
-  // Reset pagination when filters/sort/group changes
-  const resetPagination = () => {
-    setItemsToShow(10);
-  };
-
-  // Handle filter changes with pagination reset
+  // Handle filter changes (pagination resets automatically in the hook)
   const handleFiltersChange = (newFilters) => {
     setFilters(newFilters);
-    resetPagination();
   };
 
   const handleSortChange = (newSort) => {
     setSortBy(newSort);
-    resetPagination();
   };
 
   const handleGroupChange = (newGroup) => {
     setGroupBy(newGroup);
-    resetPagination();
   };
 
+  // Use the loadMore function from the hook for server-side pagination
   const handleLoadMore = () => {
-    setItemsToShow(prev => prev + ITEMS_PER_PAGE);
+    loadMore();
   };
 
-  // Handle status change - add card to transitioning state for 1 second linger
+  // Handle status change - add card to transitioning state for visual feedback
   const handleStatusChange = (localId, newStatus) => {
-    // Get the current embed data from the query cache (unfiltered)
-    const queryData = queryClient.getQueryData(['redlineQueue', 'all']);
-    const embedData = queryData?.embeds?.find(e => e.localId === localId);
+    // Get the embed data from the current loaded embeds
+    const embedData = queueData?.embeds?.find(e => e.localId === localId);
     
     if (embedData) {
       // Store full embed data with updated status
@@ -138,47 +141,14 @@ export function RedlineQueuePage({ isActive = true }) {
       });
 
       // Remove from transitioning state after linger period
-      // Check that the cache has been updated with the new status before removing
-      // This prevents the card from reverting to the old status
       const timeoutId = setTimeout(() => {
-        // Verify the cache has the new status before removing from transitioning state
-        const currentCache = queryClient.getQueryData(['redlineQueue', 'all']);
-        const cachedEmbed = currentCache?.embeds?.find(e => e.localId === localId);
-        
-        // Only remove from transitioning state if cache has been updated with new status
-        // Otherwise, check again in 100ms
-        if (cachedEmbed && cachedEmbed.redlineStatus === newStatus) {
-          setTransitioningCards(prev => {
-            const updated = new Map(prev);
-            updated.delete(localId);
-            return updated;
-          });
-          transitioningTimeoutsRef.current.delete(localId);
-        } else {
-          // Cache not updated yet, check again in 100ms (up to 2 seconds total)
-          const retryTimeoutId = setTimeout(() => {
-            const retryCache = queryClient.getQueryData(['redlineQueue', 'all']);
-            const retryEmbed = retryCache?.embeds?.find(e => e.localId === localId);
-            
-            if (retryEmbed && retryEmbed.redlineStatus === newStatus) {
-              setTransitioningCards(prev => {
-                const updated = new Map(prev);
-                updated.delete(localId);
-                return updated;
-              });
-            } else {
-              // Force remove after max wait time (cache should be updated by now)
-              setTransitioningCards(prev => {
-                const updated = new Map(prev);
-                updated.delete(localId);
-                return updated;
-              });
-            }
-            transitioningTimeoutsRef.current.delete(localId);
-          }, 100);
-          transitioningTimeoutsRef.current.set(localId, retryTimeoutId);
-        }
-      }, 2000); // Initial check after 2 seconds
+        setTransitioningCards(prev => {
+          const updated = new Map(prev);
+          updated.delete(localId);
+          return updated;
+        });
+        transitioningTimeoutsRef.current.delete(localId);
+      }, 2000); // Show transitioning state for 2 seconds
 
       // Store timeout for cleanup
       transitioningTimeoutsRef.current.set(localId, timeoutId);
@@ -193,12 +163,34 @@ export function RedlineQueuePage({ isActive = true }) {
     };
   }, []);
 
-  // Manual refresh handler - immediately invalidates queue to see updated data
-  // Note: With client-side filtering, we invalidate the base 'all' query
+  // Manual refresh handler - resets pagination and refetches from server
+  // Note: Page content caching uses version-based invalidation, so explicit cache clear is unnecessary
+  // The backend will re-fetch page content if the page version changed since last fetch
   const handleManualRefresh = () => {
-    queryClient.invalidateQueries({ queryKey: ['redlineQueue', 'all'] });
+    refresh(); // Use the refresh function from the paginated hook
     queryClient.invalidateQueries({ queryKey: ['redlineStats'] });
+    queryClient.invalidateQueries({ queryKey: ['sourceNames'] });
   };
+
+  // Enrich embeds with source names from progressive loading
+  const enrichedEmbeds = useMemo(() => {
+    if (!queueData?.embeds) return [];
+    if (!sourceNames) return queueData.embeds;
+    
+    return queueData.embeds.map(embed => {
+      if (embed.sourceName) return embed; // Already has source name
+      if (!embed.excerptId) return embed; // No excerptId to look up
+      
+      const sourceData = sourceNames[embed.excerptId];
+      if (!sourceData) return embed; // Not loaded yet
+      
+      return {
+        ...embed,
+        sourceName: sourceData.name,
+        sourceCategory: sourceData.category
+      };
+    });
+  }, [queueData?.embeds, sourceNames]);
 
   return (
     <Box xcss={fullWidthContainerStyle}>
@@ -245,17 +237,22 @@ export function RedlineQueuePage({ isActive = true }) {
           transitioningCards.forEach((transitionInfo, localId) => {
             // Use stored embed data (from cache before filtering)
             if (transitionInfo.embedData) {
+              // Enrich transitioning embed with source name if available
+              const sourceData = sourceNames?.[transitionInfo.embedData.excerptId];
               transitioningEmbedsMap.set(localId, {
                 ...transitionInfo.embedData,
                 redlineStatus: transitionInfo.newStatus, // Use new status
-                isTransitioning: true
+                isTransitioning: true,
+                sourceName: sourceData?.name || transitionInfo.embedData.sourceName,
+                sourceCategory: sourceData?.category || transitionInfo.embedData.sourceCategory
               });
             }
           });
 
           // Combine regular embeds with transitioning embeds
           // Transitioning embeds should appear in their original position
-          const allEmbedsToShow = [...queueData.embeds];
+          // Use enrichedEmbeds for source name enrichment
+          const allEmbedsToShow = [...enrichedEmbeds];
           
           // Transitioning embeds take priority - they keep their new status during linger
           transitioningEmbedsMap.forEach((transitioningEmbed, localId) => {
@@ -280,7 +277,7 @@ export function RedlineQueuePage({ isActive = true }) {
                     </Box>
                   ) : (
                     <>
-                      {allEmbedsToShow.slice(0, itemsToShow).map(embed => {
+                      {allEmbedsToShow.map(embed => {
                         const isTransitioning = transitioningCards.has(embed.localId);
                         const transitionInfo = transitioningCards.get(embed.localId);
                         
@@ -303,12 +300,16 @@ export function RedlineQueuePage({ isActive = true }) {
                         );
                       })}
 
-                      {/* Load More button */}
-                      {itemsToShow < allEmbedsToShow.length && (
+                      {/* Load More button - server-side pagination */}
+                      {hasMore && (
                         <Box backgroundColor="color.background.neutral" padding="space.200">
                           <Inline space="space.200" alignBlock="center" alignInline="center">
-                            <Button appearance="primary" onClick={handleLoadMore}>
-                              Load More ({allEmbedsToShow.length - itemsToShow} remaining)
+                            <Button 
+                              appearance="primary" 
+                              onClick={handleLoadMore}
+                              isDisabled={queueFetching}
+                            >
+                              {queueFetching ? 'Loading...' : `Load More (${totalCount - loadedCount} remaining)`}
                             </Button>
                           </Inline>
                         </Box>
@@ -353,16 +354,14 @@ export function RedlineQueuePage({ isActive = true }) {
                           .filter(Boolean);
 
                         const allGroupEmbeds = [...embeds, ...transitioningInGroup];
-                        const visibleEmbeds = allGroupEmbeds.slice(0, itemsToShow);
-                        const hasMore = allGroupEmbeds.length > itemsToShow;
 
                         return (
                           <Box key={groupName}>
                             <Stack space="space.200">
                               <Heading size="medium">
-                                {groupName} (Showing {visibleEmbeds.length} of {allGroupEmbeds.length})
+                                {groupName} ({allGroupEmbeds.length})
                               </Heading>
-                              {visibleEmbeds.map(embed => {
+                              {allGroupEmbeds.map(embed => {
                                 const isTransitioning = transitioningCards.has(embed.localId);
                                 const transitionInfo = transitioningCards.get(embed.localId);
                                 
@@ -389,21 +388,20 @@ export function RedlineQueuePage({ isActive = true }) {
                         );
                       })}
 
-                      {/* Load More button for grouped view */}
-                      {(() => {
-                        const totalItems = Object.values(queueData.groups).reduce((sum, embeds) => sum + embeds.length, 0) + transitioningCards.size;
-                        const visibleItems = Math.min(itemsToShow, totalItems);
-
-                        return visibleItems < totalItems && (
-                          <Box backgroundColor="color.background.neutral" padding="space.200">
-                            <Inline space="space.200" alignBlock="center" alignInline="center">
-                              <Button appearance="primary" onClick={handleLoadMore}>
-                                Load More ({totalItems - visibleItems} remaining)
-                              </Button>
-                            </Inline>
-                          </Box>
-                        );
-                      })()}
+                      {/* Load More button for grouped view - server-side pagination */}
+                      {hasMore && (
+                        <Box backgroundColor="color.background.neutral" padding="space.200">
+                          <Inline space="space.200" alignBlock="center" alignInline="center">
+                            <Button 
+                              appearance="primary" 
+                              onClick={handleLoadMore}
+                              isDisabled={queueFetching}
+                            >
+                              {queueFetching ? 'Loading...' : `Load More (${totalCount - loadedCount} remaining)`}
+                            </Button>
+                          </Inline>
+                        </Box>
+                      )}
                     </>
                   )}
                 </Stack>
