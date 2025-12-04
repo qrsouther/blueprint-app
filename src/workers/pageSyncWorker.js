@@ -25,7 +25,7 @@
  * - Updates sources-last-modified timestamp for UI refresh
  */
 
-import { storage } from '@forge/api';
+import { storage, startsWith } from '@forge/api';
 import { fetchPageContent } from './helpers/page-scanner.js';
 import { extractChapterBodyFromAdf } from '../utils/storage-format-utils.js';
 import { logFunction, logPhase, logSuccess, logFailure, logWarning } from '../utils/forge-logger.js';
@@ -39,6 +39,9 @@ const SOURCES_ON_PAGE_PREFIX = 'sources-on-page:';
 
 // Timestamp for when Sources list was last modified (for UI cache invalidation)
 const SOURCES_LAST_MODIFIED_KEY = 'sources-last-modified';
+
+// Space key to filter - only process pages in this space
+const TARGET_SPACE_KEY = 'cs';
 
 /**
  * Process a page update event
@@ -83,6 +86,15 @@ export async function handler(event) {
 
     const { adfContent, pageData } = pageResult;
     const pageTitle = pageData?.title || `Page ${pageId}`;
+
+    // Step 1b: Check if page is in target space (optimization to avoid unnecessary processing)
+    // Only process pages in the 'cs' space where Blueprint macros are used
+    const spaceId = pageData?.spaceId;
+    if (spaceId) {
+      // Fetch space details to check key (only if we need to filter)
+      // For now, we'll process all pages but could add space filtering here if needed
+      // TODO: Add space key check when performance becomes an issue
+    }
 
     // Step 2: Find all Blueprint Embed macros on this page
     logPhase('pageSyncWorker', 'Scanning for Blueprint Embeds', { pageId, pageTitle });
@@ -368,6 +380,67 @@ async function removePageFromCache(pageId) {
 // ============================================================================
 
 /**
+ * Find orphaned Sources in storage that aren't on any page
+ * 
+ * This is used during bootstrap reconciliation to catch Sources that were
+ * deleted from pages before the tracking system was enabled.
+ * 
+ * @param {Array<string>} sourcesOnPage - excerptIds currently on the Source page
+ * @returns {Promise<Array<string>>} Array of orphaned excerptIds
+ */
+async function findOrphanedSourcesInStorage(sourcesOnPage) {
+  const orphanedIds = [];
+  const sourcesOnPageSet = new Set(sourcesOnPage);
+  
+  try {
+    // Query all excerpt: keys from storage
+    let cursor = await storage.query().where('key', startsWith('excerpt:')).getMany();
+    let pageCount = 1;
+    const maxPages = 20; // Safety limit
+    
+    // Process first page
+    if (cursor.results && cursor.results.length > 0) {
+      for (const item of cursor.results) {
+        const excerptId = item.key.replace('excerpt:', '');
+        // If this Source exists in storage but not on the page, it's orphaned
+        if (!sourcesOnPageSet.has(excerptId)) {
+          orphanedIds.push(excerptId);
+        }
+      }
+    }
+    
+    // Paginate through remaining pages
+    while (cursor.nextCursor && pageCount < maxPages) {
+      cursor = await storage.query()
+        .where('key', startsWith('excerpt:'))
+        .cursor(cursor.nextCursor)
+        .getMany();
+      
+      if (cursor.results && cursor.results.length > 0) {
+        for (const item of cursor.results) {
+          const excerptId = item.key.replace('excerpt:', '');
+          if (!sourcesOnPageSet.has(excerptId)) {
+            orphanedIds.push(excerptId);
+          }
+        }
+      }
+      pageCount++;
+    }
+    
+    logPhase('pageSyncWorker', 'Bootstrap orphan scan complete', {
+      totalInStorage: sourcesOnPageSet.size + orphanedIds.length,
+      onPage: sourcesOnPageSet.size,
+      orphaned: orphanedIds.length
+    });
+    
+    return orphanedIds;
+  } catch (error) {
+    logWarning('pageSyncWorker', 'Error scanning for orphaned Sources', { error: error.message });
+    return []; // Return empty on error - don't delete anything if we can't scan properly
+  }
+}
+
+/**
  * Find all Blueprint Source macros in ADF content
  * 
  * @param {Object} adfContent - ADF document
@@ -447,6 +520,30 @@ async function syncSourcesOnPage(pageId, pageTitle, sourcesOnPage) {
   const cacheKey = `${SOURCES_ON_PAGE_PREFIX}${pageId}`;
   const sourcesBefore = await storage.get(cacheKey) || [];
   
+  // 2b. BOOTSTRAP RECONCILIATION
+  // Check if bootstrap reconciliation has been completed. If not, scan storage
+  // for Sources that exist in storage but aren't on the page.
+  // This catches Sources that were deleted before tracking was enabled.
+  let bootstrapOrphans = [];
+  const bootstrapKey = 'sources-bootstrap-complete';
+  const bootstrapComplete = await storage.get(bootstrapKey);
+  
+  if (!bootstrapComplete && sourcesAfter.length > 0) {
+    logPhase('pageSyncWorker', 'Bootstrap reconciliation not complete - scanning for orphans', { pageId });
+    bootstrapOrphans = await findOrphanedSourcesInStorage(sourcesAfter);
+    if (bootstrapOrphans.length > 0) {
+      logWarning('pageSyncWorker', 'Found orphaned Sources during bootstrap', {
+        orphanCount: bootstrapOrphans.length,
+        orphanIds: bootstrapOrphans
+      });
+    }
+    // Mark bootstrap as complete so we don't scan again
+    await storage.set(bootstrapKey, { completedAt: new Date().toISOString(), pageId });
+    logSuccess('pageSyncWorker', 'Bootstrap reconciliation complete', { 
+      orphansFound: bootstrapOrphans.length 
+    });
+  }
+  
   // 3. Calculate diff
   const removed = sourcesBefore.filter(id => !sourcesAfter.includes(id));
   const added = sourcesAfter.filter(id => !sourcesBefore.includes(id));
@@ -458,10 +555,11 @@ async function syncSourcesOnPage(pageId, pageTitle, sourcesOnPage) {
     removedCount: removed.length,
     addedCount: added.length,
     removedIds: removed,
-    addedIds: added
+    addedIds: added,
+    bootstrapOrphansCount: bootstrapOrphans.length
   });
 
-  // 4. Soft-delete removed Sources (dryRun = false for actual deletion)
+  // 4. Soft-delete removed Sources (from BEFORE vs AFTER diff)
   let softDeletedCount = 0;
   for (const excerptId of removed) {
     logPhase('pageSyncWorker', 'Soft-deleting removed Source', { excerptId, pageId });
@@ -479,6 +577,26 @@ async function syncSourcesOnPage(pageId, pageTitle, sourcesOnPage) {
         excerptId, 
         pageId, 
         error: result.error 
+      });
+    }
+  }
+
+  // 4b. Soft-delete bootstrap orphans (Sources in storage not on any page)
+  for (const excerptId of bootstrapOrphans) {
+    logPhase('pageSyncWorker', 'Soft-deleting bootstrap orphan', { excerptId });
+    const result = await softDeleteOrphanedSource(
+      excerptId,
+      'Source not found on any page during bootstrap reconciliation',
+      { bootstrapReconciliation: true },
+      false // dryRun = false - actually delete
+    );
+    if (result.success) {
+      softDeletedCount++;
+      logSuccess('pageSyncWorker', 'Bootstrap orphan soft-deleted', { excerptId });
+    } else {
+      logWarning('pageSyncWorker', 'Failed to soft-delete bootstrap orphan', {
+        excerptId,
+        error: result.error
       });
     }
   }
@@ -506,13 +624,15 @@ async function syncSourcesOnPage(pageId, pageTitle, sourcesOnPage) {
     removed: removed.length,
     added: added.length,
     softDeleted: softDeletedCount,
+    bootstrapOrphans: bootstrapOrphans.length,
     totalOnPage: sourcesAfter.length
   });
   
   return { 
     removed: removed.length, 
     added: added.length, 
-    softDeleted: softDeletedCount 
+    softDeleted: softDeletedCount,
+    bootstrapOrphans: bootstrapOrphans.length
   };
 }
 
