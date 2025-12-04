@@ -5,5 +5,5 @@
  * DO NOT manually edit this file - it will be overwritten on each build.
  */
 
-export const BUILD_TIMESTAMP = '2025-12-04T04:00:32.448Z';
-export const BUILD_TIMESTAMP_FORMATTED = '2025-12-04 04:00:32 UTC';
+export const BUILD_TIMESTAMP = '2025-12-04T04:04:45.828Z';
+export const BUILD_TIMESTAMP_FORMATTED = '2025-12-04 04:04:45 UTC';
