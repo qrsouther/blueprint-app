@@ -43,10 +43,39 @@ import {
   Heading,
   Button,
   Strong,
-  SectionMessage
+  SectionMessage,
+  Lozenge
 } from '@forge/react';
 import { UpdateAvailableBanner } from './UpdateAvailableBanner';
 import { editButtonBorderContainerStyle } from '../../styles/embed-styles';
+
+/**
+ * RedlineStatusLozenge - Displays the redline approval status as a colored lozenge
+ * @param {string} status - The redline status value
+ */
+function RedlineStatusLozenge({ status }) {
+  if (!status) return null;
+  
+  const appearances = {
+    'reviewable': 'new',
+    'pre-approved': 'inprogress',
+    'needs-revision': 'removed',
+    'approved': 'success'
+  };
+  
+  const labels = {
+    'reviewable': 'Reviewable',
+    'pre-approved': 'Pre-Approved',
+    'needs-revision': 'Needs Revision',
+    'approved': 'Approved'
+  };
+  
+  return (
+    <Lozenge appearance={appearances[status] || 'default'}>
+      {labels[status] || status}
+    </Lozenge>
+  );
+}
 
 
 export function EmbedViewMode({
@@ -96,15 +125,18 @@ export function EmbedViewMode({
         {/* Edit button */}
         {onEditClick && (
           <Box xcss={editButtonBorderContainerStyle}>
-            <Button 
-              appearance="default" 
-              onClick={onEditClick}
-              shouldFitContainer={false}
-              iconAfter="chevron-down"
-              spacing="compact"
-            >
-              Edit the chapter below
-            </Button>
+            <Inline space="space.100" alignBlock="center">
+              <Button 
+                appearance="default" 
+                onClick={onEditClick}
+                shouldFitContainer={false}
+                iconBefore="chevron-down"
+                spacing="compact"
+              >
+                Edit the chapter below
+              </Button>
+              <RedlineStatusLozenge status={redlineStatus} />
+            </Inline>
           </Box>
         )}
         
@@ -138,16 +170,19 @@ export function EmbedViewMode({
         {/* Show Edit button when NOT stale (keep visible while checking staleness) */}
         {onEditClick && !isStale && (
           <Box xcss={editButtonBorderContainerStyle}>
-            <Button 
-              appearance="default" 
-              onClick={onEditClick}
-              shouldFitContainer={false}
-              iconAfter="chevron-down"
-              spacing="compact"
-              isDisabled={isCheckingStaleness}
-            >
-              Edit the chapter below
-            </Button>
+            <Inline space="space.100" alignBlock="center">
+              <Button 
+                appearance="default" 
+                onClick={onEditClick}
+                shouldFitContainer={false}
+                iconBefore="chevron-down"
+                spacing="compact"
+                isDisabled={isCheckingStaleness}
+              >
+                Edit the chapter below
+              </Button>
+              <RedlineStatusLozenge status={redlineStatus} />
+            </Inline>
           </Box>
         )}
         
@@ -206,12 +241,13 @@ export function EmbedViewMode({
               appearance="default" 
               onClick={onEditClick}
               shouldFitContainer={true}
-              iconAfter="chevron-down"
+              iconBefore="chevron-down"
               spacing="compact"
               isDisabled={true}
             >
               Loading Editor...
             </Button>
+            <RedlineStatusLozenge status={redlineStatus} />
           </Inline>
         </Box>
       </Box>
@@ -233,12 +269,13 @@ export function EmbedViewMode({
               appearance="default" 
               onClick={onEditClick}
               shouldFitContainer={false}
-              iconAfter="chevron-down"
+              iconBefore="chevron-down"
               spacing="compact"
               isDisabled={isCheckingStaleness}
             >
               Edit the Chapter below
             </Button>
+            <RedlineStatusLozenge status={redlineStatus} />
           </Inline>
         </Box>
       )}
