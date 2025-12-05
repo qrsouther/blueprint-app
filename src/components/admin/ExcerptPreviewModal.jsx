@@ -494,6 +494,46 @@ export function ExcerptPreviewModal({
                 </Stack>
               </TabPanel>
 
+              {/* Toggles TabPanel - must match TabList order */}
+              <TabPanel>
+                <Stack space="space.200">
+                  {contentText && detectedToggles.length === 0 && (
+                    <Text><Em>Checking for toggles...</Em></Text>
+                  )}
+
+                  {detectedToggles.length === 0 && !contentText && (
+                    <Text>No toggles detected. Add {'{{toggle:name}}'} ... {'{{/toggle:name}}'} syntax to your macro body to create toggles.</Text>
+                  )}
+
+                  {detectedToggles.length > 0 && (
+                    <Fragment>
+                      {detectedToggles.map((toggle) => (
+                        <Fragment key={toggle.name}>
+                          <Text><Strong><Code>{`{{toggle:${toggle.name}}}`}</Code></Strong></Text>
+                          <StableTextfield
+                            id={`toggle-desc-${toggle.name}`}
+                            stableKey={`toggle-desc-${toggle.name}`}
+                            label="Description"
+                            placeholder={isLoadingExcerpt ? 'Loading...' : 'Description'}
+                            value={toggleMetadata[toggle.name]?.description || ''}
+                            isDisabled={isLoadingExcerpt}
+                            onChange={(e) => {
+                              setToggleMetadata({
+                                ...toggleMetadata,
+                                [toggle.name]: {
+                                  description: e.target.value
+                                }
+                              });
+                            }}
+                          />
+                        </Fragment>
+                      ))}
+                    </Fragment>
+                  )}
+                </Stack>
+              </TabPanel>
+
+              {/* Variables TabPanel */}
               <TabPanel>
                 <Stack space="space.200">
                   {contentText && detectedVariables.length === 0 && (
@@ -569,48 +609,7 @@ export function ExcerptPreviewModal({
                 </Stack>
               </TabPanel>
 
-              <TabPanel>
-                <Stack space="space.200">
-                  {contentText && detectedToggles.length === 0 && (
-                    <Text><Em>Checking for toggles...</Em></Text>
-                  )}
-
-                  {detectedToggles.length === 0 && !contentText && (
-                    <Text>No toggles detected. Add {'{{toggle:name}}'} ... {'{{/toggle:name}}'} syntax to your macro body to create toggles.</Text>
-                  )}
-
-                  {detectedToggles.length > 0 && (
-                    <Fragment>
-                      {detectedToggles.map((toggle) => (
-                        <Fragment key={toggle.name}>
-                          <Text><Strong><Code>{`{{toggle:${toggle.name}}}`}</Code></Strong></Text>
-                          <StableTextfield
-                            id={`toggle-desc-${toggle.name}`}
-                            stableKey={`toggle-desc-${toggle.name}`}
-                            label="Description"
-                            placeholder={isLoadingExcerpt ? 'Loading...' : 'Description'}
-                            value={toggleMetadata[toggle.name]?.description || ''}
-                            isDisabled={isLoadingExcerpt}
-                            onChange={(e) => {
-                              setToggleMetadata({
-                                ...toggleMetadata,
-                                [toggle.name]: {
-                                  description: e.target.value
-                                }
-                              });
-                            }}
-                          />
-                        </Fragment>
-                      ))}
-                    </Fragment>
-                  )}
-
-                  <SectionMessage appearance="discovery">
-                    <Text>Edit macro body in the page editor. Use {'{{toggle:name}}'} and {'{{/toggle:name}}'} to wrap content that can be toggled on/off. IMPORTANT: After clicking "Save", you MUST publish the page to persist changes!</Text>
-                  </SectionMessage>
-                </Stack>
-              </TabPanel>
-
+              {/* Documentation TabPanel */}
               <TabPanel>
                 <Stack space="space.200">
                   {/* Existing documentation links */}
