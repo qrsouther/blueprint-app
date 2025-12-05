@@ -45,29 +45,13 @@ import {
 } from '../../utils/adf-rendering-utils';
 
 // Split view layout styles
-const splitContainerStyle = xcss({
-  display: 'flex',
-  flexDirection: 'row',
-  gap: 'space.300',
-  minHeight: '350px'
-});
-
-const leftPanelStyle = xcss({
-  width: '30%',
-  minWidth: '220px',
-  flexShrink: 0
-});
-
 const rightPanelStyle = xcss({
-  width: '70%',
-  flexGrow: 1,
   borderColor: 'color.border',
   borderWidth: 'border.width',
   borderStyle: 'solid',
   borderRadius: 'border.radius',
   padding: 'space.200',
-  backgroundColor: 'color.background.neutral.subtle',
-  overflow: 'auto'
+  backgroundColor: 'color.background.neutral.subtle'
 });
 
 const testerTabsStyle = xcss({
@@ -203,9 +187,9 @@ export function SourceMetadataTabs({
   // RENDER
   // ============================================================================
   return (
-    <Box xcss={splitContainerStyle}>
-      {/* LEFT PANEL (30%) - Metadata Editing Tabs */}
-      <Box xcss={leftPanelStyle}>
+    <Inline space="space.300" alignBlock="stretch" spread="space-between">
+      {/* LEFT PANEL - Metadata Editing Tabs */}
+      <Box>
         <Tabs onChange={onTabChange}>
           <TabList>
             <Tab>Main</Tab>
@@ -477,8 +461,8 @@ export function SourceMetadataTabs({
         </Tabs>
       </Box>
 
-      {/* RIGHT PANEL (70%) - Live Preview */}
-      <Box xcss={rightPanelStyle}>
+      {/* RIGHT PANEL - Live Preview (grows to fill remaining space) */}
+      <Box xcss={rightPanelStyle} grow="fill">
         <Stack space="space.200">
           {/* Ephemeral Tester Tabs */}
           <Box xcss={testerTabsStyle}>
@@ -537,6 +521,6 @@ export function SourceMetadataTabs({
           </Box>
         </Stack>
       </Box>
-    </Box>
+    </Inline>
   );
 }
