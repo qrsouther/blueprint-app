@@ -1,5 +1,4 @@
-import React, { Fragment, useState, useEffect, useMemo } from 'react';
-import { useForm as useReactHookForm, useWatch } from 'react-hook-form';
+import React, { Fragment, useState, useEffect } from 'react';
 import ForgeReconciler, {
   Form,
   FormSection,
@@ -12,19 +11,10 @@ import ForgeReconciler, {
   Code,
   Button,
   SectionMessage,
-  Toggle,
-  Tabs,
-  Tab,
-  TabList,
-  TabPanel,
   Inline,
   Stack,
   Box,
   Icon,
-  Heading,
-  AdfRenderer,
-  Pressable,
-  xcss,
   useForm,
   useConfig,
   useProductContext
@@ -34,46 +24,7 @@ import { QueryClient, QueryClientProvider, useQuery, useMutation, useQueryClient
 import { useCategoriesQuery } from './hooks/admin-hooks';
 import { StableTextfield } from './components/common/StableTextfield';
 import { SourceMetadataTabs } from './components/common/SourceMetadataTabs';
-import { VariableConfigPanel } from './components/VariableConfigPanel';
-import { ToggleConfigPanel } from './components/ToggleConfigPanel';
 import { logger } from './utils/logger.js';
-import {
-  cleanAdfForRenderer,
-  filterContentByToggles,
-  substituteVariablesInAdf
-} from './utils/adf-rendering-utils';
-
-// Styles for the tester panel
-const testerContainerStyle = xcss({
-  marginTop: 'space.200',
-  marginBottom: 'space.200',
-  borderColor: 'color.border',
-  borderWidth: 'border.width',
-  borderStyle: 'solid',
-  borderRadius: 'border.radius',
-  overflow: 'hidden'
-});
-
-const testerHeaderStyle = xcss({
-  padding: 'space.150',
-  backgroundColor: 'color.background.neutral',
-  cursor: 'pointer'
-});
-
-const testerContentStyle = xcss({
-  padding: 'space.200',
-  backgroundColor: 'color.background.input'
-});
-
-const previewBoxStyle = xcss({
-  marginTop: 'space.200',
-  padding: 'space.200',
-  borderColor: 'color.border',
-  borderWidth: 'border.width',
-  borderStyle: 'solid',
-  borderRadius: 'border.radius',
-  backgroundColor: 'color.background.neutral.subtle'
-});
 
 // Create a client
 const queryClient = new QueryClient({
@@ -198,96 +149,6 @@ const App = () => {
   const [newLinkAnchor, setNewLinkAnchor] = useState('');
   const [newLinkUrl, setNewLinkUrl] = useState('');
   const [urlError, setUrlError] = useState('');
-
-  // ============================================================================
-  // SOURCE TESTER PANEL STATE
-  // ============================================================================
-  // Ephemeral form for testing variable substitutions and toggles
-  // Values are NOT persisted - discarded when modal closes
-  const [isTesterOpen, setIsTesterOpen] = useState(false);
-  const [testerTabIndex, setTesterTabIndex] = useState(0); // 0 = Toggles, 1 = Variables
-
-  // Separate React Hook Form for tester (ephemeral, never saved)
-  const testerForm = useReactHookForm({
-    defaultValues: {
-      variableValues: {},
-      toggleStates: {}
-    }
-  });
-
-  const { control: testerControl, setValue: setTesterValue } = testerForm;
-
-  // Watch tester form values for live preview
-  const watchedTesterVariables = useWatch({
-    control: testerControl,
-    name: 'variableValues'
-  }) || {};
-
-  const watchedTesterToggles = useWatch({
-    control: testerControl,
-    name: 'toggleStates'
-  }) || {};
-
-  // Build mock excerpt object for config panels
-  // This converts detected variables/toggles to the format expected by VariableConfigPanel/ToggleConfigPanel
-  const mockExcerptForTester = {
-    variables: detectedVariables.map(v => ({
-      name: v.name,
-      description: variableMetadata[v.name]?.description || '',
-      example: variableMetadata[v.name]?.example || '',
-      required: variableMetadata[v.name]?.required || false
-    })),
-    toggles: detectedToggles.map(t => ({
-      name: t.name,
-      description: toggleMetadata[t.name]?.description || ''
-    })),
-    content: macroBody
-  };
-
-  // Generate preview content with substitutions applied
-  // Use useMemo to compute once per render cycle (avoids double-call issue)
-  // Dependencies are the actual source data, not derived arrays
-  const testerPreviewContent = useMemo(() => {
-    if (!macroBody) return null;
-
-    try {
-      // Deep clone the ADF content
-      let preview = JSON.parse(JSON.stringify(macroBody));
-
-      // Build variables and toggles arrays inline to avoid stale closure
-      const variables = detectedVariables.map(v => ({
-        name: v.name,
-        description: variableMetadata[v.name]?.description || '',
-        example: variableMetadata[v.name]?.example || '',
-        required: variableMetadata[v.name]?.required || false
-      }));
-
-      const toggles = detectedToggles.map(t => ({
-        name: t.name,
-        description: toggleMetadata[t.name]?.description || ''
-      }));
-
-      // Apply toggle filtering
-      if (toggles.length > 0) {
-        preview = filterContentByToggles(preview, watchedTesterToggles);
-      }
-
-      // Apply variable substitutions
-      if (variables.length > 0) {
-        preview = substituteVariablesInAdf(
-          preview,
-          watchedTesterVariables,
-          variables
-        );
-      }
-
-      // Clean for AdfRenderer compatibility
-      return cleanAdfForRenderer(preview);
-    } catch (error) {
-      logger.errors('Error generating tester preview:', error);
-      return null;
-    }
-  }, [macroBody, watchedTesterVariables, watchedTesterToggles, detectedVariables, detectedToggles, variableMetadata, toggleMetadata]);
 
   // Track if we've loaded data to prevent infinite loops
   const hasLoadedDataRef = React.useRef(false);
@@ -610,105 +471,8 @@ const App = () => {
         excerptId={excerptId}
         dataLoaded={dataLoaded}
         variant="config"
+        content={macroBody}
       />
-
-      {/* ========================================================================
-          SOURCE TESTER PANEL
-          Ephemeral testing UI for variable substitutions and toggle previews
-          ======================================================================== */}
-      {macroBody && (detectedVariables.length > 0 || detectedToggles.length > 0) && (
-        <Box xcss={testerContainerStyle}>
-          {/* Collapsible Header */}
-          <Pressable 
-            xcss={testerHeaderStyle} 
-            onClick={() => setIsTesterOpen(!isTesterOpen)}
-          >
-            <Inline space="space.100" alignBlock="center" spread="space-between">
-              <Inline space="space.100" alignBlock="center">
-                <Icon 
-                  glyph={isTesterOpen ? 'chevron-down' : 'chevron-right'} 
-                  label={isTesterOpen ? 'Collapse' : 'Expand'} 
-                />
-                <Heading size="small">Test Source</Heading>
-              </Inline>
-              <Text size="small" color="color.text.subtle">
-                Preview with sample values
-              </Text>
-            </Inline>
-          </Pressable>
-
-          {/* Expandable Content */}
-          {isTesterOpen && (
-            <Box xcss={testerContentStyle}>
-              {/* Tabs for Toggles and Variables */}
-              <Tabs
-                onChange={(index) => setTesterTabIndex(index)}
-                selected={testerTabIndex}
-                id="source-tester-tabs"
-              >
-                <TabList>
-                  <Tab isDisabled={detectedToggles.length === 0}>
-                    Toggles {detectedToggles.length === 0 && '(none)'}
-                  </Tab>
-                  <Tab isDisabled={detectedVariables.length === 0}>
-                    Variables {detectedVariables.length === 0 && '(none)'}
-                  </Tab>
-                </TabList>
-
-                {/* Toggles Tab Panel */}
-                <TabPanel>
-                  {detectedToggles.length > 0 ? (
-                    <ToggleConfigPanel
-                      excerpt={mockExcerptForTester}
-                      control={testerControl}
-                      setValue={setTesterValue}
-                      onBlur={() => {}} // No-op since we don't persist
-                    />
-                  ) : (
-                    <Box padding="space.200">
-                      <Text><Em>No toggles detected in this Source.</Em></Text>
-                    </Box>
-                  )}
-                </TabPanel>
-
-                {/* Variables Tab Panel */}
-                <TabPanel>
-                  {detectedVariables.length > 0 ? (
-                    <VariableConfigPanel
-                      excerpt={mockExcerptForTester}
-                      control={testerControl}
-                      setValue={setTesterValue}
-                      onBlur={() => {}} // No-op since we don't persist
-                      formKey={0}
-                    />
-                  ) : (
-                    <Box padding="space.200">
-                      <Text><Em>No variables detected in this Source.</Em></Text>
-                    </Box>
-                  )}
-                </TabPanel>
-              </Tabs>
-
-              {/* Live Preview */}
-              <Box xcss={previewBoxStyle}>
-                <Stack space="space.100">
-                  <Inline space="space.100" alignBlock="center">
-                    <Icon glyph="overview" label="Preview" />
-                    <Text><Strong>Live Preview</Strong></Text>
-                  </Inline>
-                  {testerPreviewContent ? (
-                    <AdfRenderer document={testerPreviewContent} />
-                  ) : (
-                    <Text color="color.text.subtle">
-                      <Em>Enter Source content to see preview...</Em>
-                    </Text>
-                  )}
-                </Stack>
-              </Box>
-            </Box>
-          )}
-        </Box>
-      )}
 
       <FormFooter>
         <Inline space="space.200" alignBlock="center" spread="space-between">
