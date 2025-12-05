@@ -23,6 +23,7 @@ import ForgeReconciler, {
   Icon,
   Heading,
   AdfRenderer,
+  Pressable,
   xcss,
   useForm,
   useConfig,
@@ -603,7 +604,7 @@ const App = () => {
       {macroBody && (detectedVariables.length > 0 || detectedToggles.length > 0) && (
         <Box xcss={testerContainerStyle}>
           {/* Collapsible Header */}
-          <Box 
+          <Pressable 
             xcss={testerHeaderStyle} 
             onClick={() => setIsTesterOpen(!isTesterOpen)}
           >
@@ -619,7 +620,7 @@ const App = () => {
                 Preview with sample values
               </Text>
             </Inline>
-          </Box>
+          </Pressable>
 
           {/* Expandable Content */}
           {isTesterOpen && (
