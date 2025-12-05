@@ -1,4 +1,4 @@
-import React, { Fragment, useState, useEffect, useCallback } from 'react';
+import React, { Fragment, useState, useEffect, useMemo } from 'react';
 import { useForm as useReactHookForm, useWatch } from 'react-hook-form';
 import ForgeReconciler, {
   Form,
@@ -245,24 +245,39 @@ const App = () => {
   };
 
   // Generate preview content with substitutions applied
-  const getTesterPreviewContent = useCallback(() => {
+  // Use useMemo to compute once per render cycle (avoids double-call issue)
+  // Dependencies are the actual source data, not derived arrays
+  const testerPreviewContent = useMemo(() => {
     if (!macroBody) return null;
 
     try {
       // Deep clone the ADF content
       let preview = JSON.parse(JSON.stringify(macroBody));
 
+      // Build variables and toggles arrays inline to avoid stale closure
+      const variables = detectedVariables.map(v => ({
+        name: v.name,
+        description: variableMetadata[v.name]?.description || '',
+        example: variableMetadata[v.name]?.example || '',
+        required: variableMetadata[v.name]?.required || false
+      }));
+
+      const toggles = detectedToggles.map(t => ({
+        name: t.name,
+        description: toggleMetadata[t.name]?.description || ''
+      }));
+
       // Apply toggle filtering
-      if (mockExcerptForTester.toggles.length > 0) {
+      if (toggles.length > 0) {
         preview = filterContentByToggles(preview, watchedTesterToggles);
       }
 
       // Apply variable substitutions
-      if (mockExcerptForTester.variables.length > 0) {
+      if (variables.length > 0) {
         preview = substituteVariablesInAdf(
           preview,
           watchedTesterVariables,
-          mockExcerptForTester.variables
+          variables
         );
       }
 
@@ -272,7 +287,7 @@ const App = () => {
       logger.errors('Error generating tester preview:', error);
       return null;
     }
-  }, [macroBody, watchedTesterVariables, watchedTesterToggles, mockExcerptForTester.variables, mockExcerptForTester.toggles]);
+  }, [macroBody, watchedTesterVariables, watchedTesterToggles, detectedVariables, detectedToggles, variableMetadata, toggleMetadata]);
 
   // Track if we've loaded data to prevent infinite loops
   const hasLoadedDataRef = React.useRef(false);
@@ -681,8 +696,8 @@ const App = () => {
                     <Icon glyph="overview" label="Preview" />
                     <Text><Strong>Live Preview</Strong></Text>
                   </Inline>
-                  {getTesterPreviewContent() ? (
-                    <AdfRenderer document={getTesterPreviewContent()} />
+                  {testerPreviewContent ? (
+                    <AdfRenderer document={testerPreviewContent} />
                   ) : (
                     <Text color="color.text.subtle">
                       <Em>Enter Source content to see preview...</Em>
