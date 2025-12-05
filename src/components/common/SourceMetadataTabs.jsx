@@ -45,6 +45,11 @@ import {
 } from '../../utils/adf-rendering-utils';
 
 // Split view layout styles
+const leftPanelStyle = xcss({
+  width: '280px',
+  minWidth: '280px'
+});
+
 const rightPanelStyle = xcss({
   flexGrow: 1,
   borderColor: 'color.border',
@@ -190,7 +195,7 @@ export function SourceMetadataTabs({
   return (
     <Inline space="space.300" alignBlock="start">
       {/* LEFT PANEL - Metadata Editing Tabs */}
-      <Box>
+      <Box xcss={leftPanelStyle}>
         <Tabs onChange={onTabChange}>
           <TabList>
             <Tab>Main</Tab>
@@ -201,167 +206,173 @@ export function SourceMetadataTabs({
 
           {/* Main Tab */}
           <TabPanel>
-            <Stack space="space.150">
-              <Stack space="space.050">
-                <Label labelFor={fieldId('excerptName')}>Source Name</Label>
-                <StableTextfield
-                  id={fieldId('excerptName')}
-                  stableKey={`${stableKeyPrefix}-excerpt-name-${excerptId || 'new'}-${dataLoaded ? 'loaded' : 'empty'}`}
-                  value={excerptName || ''}
-                  placeholder={isLoading ? 'Loading...' : ''}
-                  isDisabled={isLoading}
-                  isInvalid={!!validationErrors?.excerptName}
-                  onChange={(e) => {
-                    setExcerptName(e.target.value);
-                    if (validationErrors?.excerptName && setValidationErrors) {
-                      setValidationErrors(prev => {
-                        const next = { ...prev };
-                        delete next.excerptName;
-                        return next;
-                      });
-                    }
-                  }}
-                />
-                {validationErrors?.excerptName && (
-                  <Text color="color.text.danger" size="small">{validationErrors.excerptName}</Text>
-                )}
-              </Stack>
+            <Box paddingBlockStart="space.150">
+              <Stack space="space.100">
+                <Stack space="space.100">
+                  <Label labelFor={fieldId('excerptName')}>Source Name</Label>
+                  <StableTextfield
+                    id={fieldId('excerptName')}
+                    stableKey={`${stableKeyPrefix}-excerpt-name-${excerptId || 'new'}-${dataLoaded ? 'loaded' : 'empty'}`}
+                    value={excerptName || ''}
+                    placeholder={isLoading ? 'Loading...' : ''}
+                    isDisabled={isLoading}
+                    isInvalid={!!validationErrors?.excerptName}
+                    onChange={(e) => {
+                      setExcerptName(e.target.value);
+                      if (validationErrors?.excerptName && setValidationErrors) {
+                        setValidationErrors(prev => {
+                          const next = { ...prev };
+                          delete next.excerptName;
+                          return next;
+                        });
+                      }
+                    }}
+                  />
+                  {validationErrors?.excerptName && (
+                    <Text color="color.text.danger" size="small">{validationErrors.excerptName}</Text>
+                  )}
+                </Stack>
 
-              <Stack space="space.050">
-                <Label labelFor={fieldId('category')}>Category</Label>
-                <Select
-                  id={fieldId('category')}
-                  options={categoryOptions}
-                  value={isLoadingCategories ? undefined : categoryOptions.find(opt => opt.value === category)}
-                  placeholder={isLoadingCategories ? 'Loading...' : undefined}
-                  isDisabled={isLoading || isLoadingCategories}
-                  onChange={(e) => setCategory(e.value)}
-                />
-              </Stack>
+                <Stack space="space.050">
+                  <Label labelFor={fieldId('category')}>Category</Label>
+                  <Select
+                    id={fieldId('category')}
+                    options={categoryOptions}
+                    value={isLoadingCategories ? undefined : categoryOptions.find(opt => opt.value === category)}
+                    placeholder={isLoadingCategories ? 'Loading...' : undefined}
+                    isDisabled={isLoading || isLoadingCategories}
+                    onChange={(e) => setCategory(e.value)}
+                  />
+                </Stack>
 
-              <Inline space="space.100" alignBlock="center">
-                <Label labelFor={fieldId('bespoke')}>Bespoke</Label>
-                <Toggle
-                  id={fieldId('bespoke')}
-                  isChecked={bespoke}
-                  isDisabled={isLoading}
-                  onChange={(e) => setBespoke(e.target.checked)}
-                />
-              </Inline>
-            </Stack>
+                <Inline space="space.100" alignBlock="center">
+                  <Label labelFor={fieldId('bespoke')}>Bespoke</Label>
+                  <Toggle
+                    id={fieldId('bespoke')}
+                    isChecked={bespoke}
+                    isDisabled={isLoading}
+                    onChange={(e) => setBespoke(e.target.checked)}
+                  />
+                </Inline>
+              </Stack>
+            </Box>
           </TabPanel>
 
           {/* Toggles Tab */}
           <TabPanel>
-            <Stack space="space.150">
-              {hasContent && detectedToggles.length === 0 && hasDetectedToggles && (
-                <Text><Em>No toggles detected.</Em></Text>
-              )}
+            <Box paddingBlockStart="space.150">
+              <Stack space="space.150">
+                {hasContent && detectedToggles.length === 0 && hasDetectedToggles && (
+                  <Text><Em>No toggles detected.</Em></Text>
+                )}
 
-              {!hasDetectedToggles && hasContent && (
-                <Text><Em>Checking for toggles...</Em></Text>
-              )}
+                {!hasDetectedToggles && hasContent && (
+                  <Text><Em>Checking for toggles...</Em></Text>
+                )}
 
-              {detectedToggles.length === 0 && !hasContent && (
-                <Text size="small">No toggles. Use {'{{toggle:name}}...{{/toggle:name}}'} syntax.</Text>
-              )}
+                {detectedToggles.length === 0 && !hasContent && (
+                  <Text size="small">No toggles. Use {'{{toggle:name}}...{{/toggle:name}}'} syntax.</Text>
+                )}
 
-              {detectedToggles.length > 0 && detectedToggles.map((toggle) => (
-                <Stack key={toggle.name} space="space.100">
-                  <Text><Strong><Code>{`{{toggle:${toggle.name}}}`}</Code></Strong></Text>
-                  <StableTextfield
-                    id={`toggle-desc-${toggle.name}`}
-                    stableKey={`${stableKeyPrefix}-toggle-desc-${toggle.name}`}
-                    label="Description"
-                    placeholder={isLoading ? 'Loading...' : 'Description'}
-                    value={toggleMetadata[toggle.name]?.description || ''}
-                    isDisabled={isLoading}
-                    onChange={(e) => {
-                      setToggleMetadata({
-                        ...toggleMetadata,
-                        [toggle.name]: { description: e.target.value }
-                      });
-                    }}
-                  />
-                </Stack>
-              ))}
-            </Stack>
+                {detectedToggles.length > 0 && detectedToggles.map((toggle) => (
+                  <Stack key={toggle.name} space="space.100">
+                    <Text><Strong><Code>{`{{toggle:${toggle.name}}}`}</Code></Strong></Text>
+                    <StableTextfield
+                      id={`toggle-desc-${toggle.name}`}
+                      stableKey={`${stableKeyPrefix}-toggle-desc-${toggle.name}`}
+                      label="Description"
+                      placeholder={isLoading ? 'Loading...' : 'Description'}
+                      value={toggleMetadata[toggle.name]?.description || ''}
+                      isDisabled={isLoading}
+                      onChange={(e) => {
+                        setToggleMetadata({
+                          ...toggleMetadata,
+                          [toggle.name]: { description: e.target.value }
+                        });
+                      }}
+                    />
+                  </Stack>
+                ))}
+              </Stack>
+            </Box>
           </TabPanel>
 
           {/* Variables Tab */}
           <TabPanel>
-            <Stack space="space.150">
-              {hasContent && detectedVariables.length === 0 && hasDetectedVariables && (
-                <Text><Em>No variables detected.</Em></Text>
-              )}
+            <Box paddingBlockStart="space.150">
+              <Stack space="space.150">
+                {hasContent && detectedVariables.length === 0 && hasDetectedVariables && (
+                  <Text><Em>No variables detected.</Em></Text>
+                )}
 
-              {!hasDetectedVariables && hasContent && (
-                <Text><Em>Checking for variables...</Em></Text>
-              )}
+                {!hasDetectedVariables && hasContent && (
+                  <Text><Em>Checking for variables...</Em></Text>
+                )}
 
-              {detectedVariables.length === 0 && !hasContent && (
-                <Text size="small">No variables. Use {'{{variable}}'} syntax.</Text>
-              )}
+                {detectedVariables.length === 0 && !hasContent && (
+                  <Text size="small">No variables. Use {'{{variable}}'} syntax.</Text>
+                )}
 
-              {detectedVariables.length > 0 && detectedVariables.map((variable) => (
-                <Stack key={variable.name} space="space.100">
-                  <Inline space="space.100" alignBlock="center" spread="space-between">
-                    <Text><Strong><Code>{`{{${variable.name}}}`}</Code></Strong></Text>
-                    <Inline space="space.050" alignBlock="center">
-                      <Text size="small">Req</Text>
-                      <Toggle
-                        id={`required-${variable.name}`}
-                        isChecked={variableMetadata[variable.name]?.required || false}
-                        isDisabled={isLoading}
-                        onChange={(e) => {
-                          setVariableMetadata({
-                            ...variableMetadata,
-                            [variable.name]: {
-                              ...variableMetadata[variable.name],
-                              required: e.target.checked
-                            }
-                          });
-                        }}
-                      />
+                {detectedVariables.length > 0 && detectedVariables.map((variable) => (
+                  <Stack key={variable.name} space="space.100">
+                    <Inline space="space.100" alignBlock="center" spread="space-between">
+                      <Text><Strong><Code>{`{{${variable.name}}}`}</Code></Strong></Text>
+                      <Inline space="space.050" alignBlock="center">
+                        <Text size="small">Req</Text>
+                        <Toggle
+                          id={`required-${variable.name}`}
+                          isChecked={variableMetadata[variable.name]?.required || false}
+                          isDisabled={isLoading}
+                          onChange={(e) => {
+                            setVariableMetadata({
+                              ...variableMetadata,
+                              [variable.name]: {
+                                ...variableMetadata[variable.name],
+                                required: e.target.checked
+                              }
+                            });
+                          }}
+                        />
+                      </Inline>
                     </Inline>
-                  </Inline>
-                  <StableTextfield
-                    id={`var-desc-${variable.name}`}
-                    stableKey={`${stableKeyPrefix}-var-desc-${variable.name}`}
-                    label="Description"
-                    placeholder={isLoading ? 'Loading...' : 'Description'}
-                    value={variableMetadata[variable.name]?.description || ''}
-                    isDisabled={isLoading}
-                    onChange={(e) => {
-                      setVariableMetadata({
-                        ...variableMetadata,
-                        [variable.name]: {
-                          ...variableMetadata[variable.name],
-                          description: e.target.value
-                        }
-                      });
-                    }}
-                  />
-                  <StableTextfield
-                    id={`var-example-${variable.name}`}
-                    stableKey={`${stableKeyPrefix}-var-example-${variable.name}`}
-                    label="Example"
-                    placeholder={isLoading ? 'Loading...' : 'Example'}
-                    value={variableMetadata[variable.name]?.example || ''}
-                    isDisabled={isLoading}
-                    onChange={(e) => {
-                      setVariableMetadata({
-                        ...variableMetadata,
-                        [variable.name]: {
-                          ...variableMetadata[variable.name],
-                          example: e.target.value
-                        }
-                      });
-                    }}
-                  />
-                </Stack>
-              ))}
-            </Stack>
+                    <StableTextfield
+                      id={`var-desc-${variable.name}`}
+                      stableKey={`${stableKeyPrefix}-var-desc-${variable.name}`}
+                      label="Description"
+                      placeholder={isLoading ? 'Loading...' : 'Description'}
+                      value={variableMetadata[variable.name]?.description || ''}
+                      isDisabled={isLoading}
+                      onChange={(e) => {
+                        setVariableMetadata({
+                          ...variableMetadata,
+                          [variable.name]: {
+                            ...variableMetadata[variable.name],
+                            description: e.target.value
+                          }
+                        });
+                      }}
+                    />
+                    <StableTextfield
+                      id={`var-example-${variable.name}`}
+                      stableKey={`${stableKeyPrefix}-var-example-${variable.name}`}
+                      label="Example"
+                      placeholder={isLoading ? 'Loading...' : 'Example'}
+                      value={variableMetadata[variable.name]?.example || ''}
+                      isDisabled={isLoading}
+                      onChange={(e) => {
+                        setVariableMetadata({
+                          ...variableMetadata,
+                          [variable.name]: {
+                            ...variableMetadata[variable.name],
+                            example: e.target.value
+                          }
+                        });
+                      }}
+                    />
+                  </Stack>
+                ))}
+              </Stack>
+            </Box>
           </TabPanel>
 
           {/* Documentation Tab */}
