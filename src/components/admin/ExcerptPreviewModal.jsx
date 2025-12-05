@@ -436,71 +436,62 @@ export function ExcerptPreviewModal({
             <Tabs>
               <TabList space="space.200">
                 <Tab>Name/Category</Tab>
-                <Tab>Variables</Tab>
                 <Tab>Toggles</Tab>
+                <Tab>Variables</Tab>
                 <Tab>Documentation</Tab>
               </TabList>
 
               <TabPanel>
-                <Box paddingBottom="space.300">
-                  <Stack space="space.100">
-                    <Box>
-                      <Label labelFor="excerptName">
-                        Blueprint Source Name
-                      </Label>
+                <Stack space="space.200">
+                  {/* Form fields inline with bullet separators */}
+                  <Inline space="space.200" separator="•" alignBlock="end">
+                    {/* Name field */}
+                    <Stack space="space.050">
+                      <Label labelFor="excerptName">Source Name</Label>
                       <StableTextfield
                         id="excerptName"
                         stableKey="excerpt-name-input"
-                        width="100%"
                         value={excerptName}
                         placeholder={isLoadingExcerpt ? 'Loading...' : ''}
                         isDisabled={isLoadingExcerpt}
                         onChange={(e) => setExcerptName(e.target.value)}
                       />
-                    </Box>
-
-                    <Box paddingTop="space.200">
-                      <Label labelFor="category">
-                        Blueprint Source Category
-                      </Label>
+                    </Stack>
+                    {/* Category field */}
+                    <Stack space="space.050">
+                      <Label labelFor="category">Category</Label>
                       <Select
                         id="category"
-                        appearance='default'
-                        width="100%"
                         options={categoryOptions}
                         value={(isLoadingExcerpt || isLoadingCategories) ? undefined : categoryOptions.find(opt => opt.value === category)}
                         placeholder={(isLoadingExcerpt || isLoadingCategories) ? 'Loading...' : undefined}
                         onChange={(e) => setCategory(e.value)}
                       />
-                    </Box>
+                    </Stack>
+                    {/* Bespoke toggle */}
+                    <Inline space="space.100" alignBlock="center">
+                      <Label labelFor="bespoke-toggle">Bespoke</Label>
+                      <Toggle
+                        id="bespoke-toggle"
+                        isChecked={bespoke}
+                        isDisabled={isLoadingExcerpt}
+                        onChange={(e) => setBespoke(e.target.checked)}
+                      />
+                    </Inline>
+                  </Inline>
 
-                    <Box paddingTop="space.200">
-                      <Inline space="space.200" alignBlock="center">
-                        <Text>Bespoke Source</Text>
-                        <Toggle
-                          id="bespoke-toggle"
-                          isChecked={bespoke}
-                          isDisabled={isLoadingExcerpt}
-                          onChange={(e) => setBespoke(e.target.checked)}
-                        />
-                      </Inline>
+                  {/* Content Preview */}
+                  <Box>
+                    <Label>Content Preview</Label>
+                    <Box paddingTop="space.100" xcss={previewBoxStyle}>
+                      {excerptData?.content && typeof excerptData.content === 'object' ? (
+                        <AdfRenderer document={excerptData.content} />
+                      ) : (
+                        <Text>{excerptData?.content || 'No content stored'}</Text>
+                      )}
                     </Box>
-
-                    <Box paddingTop="space.200">
-                      <Label>
-                        Content Preview
-                      </Label>
-                      <Box paddingTop="space.100" xcss={previewBoxStyle}>
-                        {excerptData?.content && typeof excerptData.content === 'object' ? (
-                          <AdfRenderer document={excerptData.content} />
-                        ) : (
-                          <Text>{excerptData?.content || 'No content stored'}</Text>
-                        )}
-                      </Box>
-                    </Box>
-
-                  </Stack>
-                </Box>
+                  </Box>
+                </Stack>
               </TabPanel>
 
               <TabPanel>
@@ -575,10 +566,6 @@ export function ExcerptPreviewModal({
                       ))}
                     </Fragment>
                   )}
-
-                  <SectionMessage appearance="discovery">
-                    <Text>Edit macro body in the page editor. Use {'{{variable}}'} syntax for variables. IMPORTANT: After clicking "Save", you MUST publish the page to persist changes!</Text>
-                  </SectionMessage>
                 </Stack>
               </TabPanel>
 
