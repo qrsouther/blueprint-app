@@ -46,6 +46,7 @@ import {
 
 // Split view layout styles
 const rightPanelStyle = xcss({
+  flexGrow: 1,
   borderColor: 'color.border',
   borderWidth: 'border.width',
   borderStyle: 'solid',
@@ -187,7 +188,7 @@ export function SourceMetadataTabs({
   // RENDER
   // ============================================================================
   return (
-    <Inline space="space.300" alignBlock="stretch" spread="space-between">
+    <Inline space="space.300" alignBlock="start">
       {/* LEFT PANEL - Metadata Editing Tabs */}
       <Box>
         <Tabs onChange={onTabChange}>
@@ -462,7 +463,7 @@ export function SourceMetadataTabs({
       </Box>
 
       {/* RIGHT PANEL - Live Preview (grows to fill remaining space) */}
-      <Box xcss={rightPanelStyle} grow="fill">
+      <Box xcss={rightPanelStyle}>
         <Stack space="space.200">
           {/* Ephemeral Tester Tabs */}
           <Box xcss={testerTabsStyle}>
