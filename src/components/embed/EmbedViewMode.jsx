@@ -240,7 +240,7 @@ export function EmbedViewMode({
             <Button 
               appearance="default" 
               onClick={onEditClick}
-              shouldFitContainer={true}
+              shouldFitContainer={false}
               iconBefore="chevron-down"
               spacing="compact"
               isDisabled={true}

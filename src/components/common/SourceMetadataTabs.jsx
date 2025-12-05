@@ -15,6 +15,7 @@ import { useForm as useReactHookForm, useWatch } from 'react-hook-form';
 import {
   Text,
   Strong,
+  Heading,
   Em,
   Code,
   Button,
@@ -210,24 +211,26 @@ export function SourceMetadataTabs({
               <Stack space="space.100">
                 <Stack space="space.100">
                   <Label labelFor={fieldId('excerptName')}>Source Name</Label>
-                  <StableTextfield
-                    id={fieldId('excerptName')}
-                    stableKey={`${stableKeyPrefix}-excerpt-name-${excerptId || 'new'}-${dataLoaded ? 'loaded' : 'empty'}`}
-                    value={excerptName || ''}
-                    placeholder={isLoading ? 'Loading...' : ''}
-                    isDisabled={isLoading}
-                    isInvalid={!!validationErrors?.excerptName}
-                    onChange={(e) => {
-                      setExcerptName(e.target.value);
-                      if (validationErrors?.excerptName && setValidationErrors) {
-                        setValidationErrors(prev => {
-                          const next = { ...prev };
-                          delete next.excerptName;
-                          return next;
-                        });
-                      }
-                    }}
-                  />
+                  <Box xcss={{ flexGrow: 1 }}>
+                    <StableTextfield
+                      id={fieldId('excerptName')}
+                      stableKey={`${stableKeyPrefix}-excerpt-name-${excerptId || 'new'}-${dataLoaded ? 'loaded' : 'empty'}`}
+                      value={excerptName || ''}
+                      placeholder={isLoading ? 'Loading...' : ''}
+                      isDisabled={isLoading}
+                      isInvalid={!!validationErrors?.excerptName}
+                      onChange={(e) => {
+                        setExcerptName(e.target.value);
+                        if (validationErrors?.excerptName && setValidationErrors) {
+                          setValidationErrors(prev => {
+                            const next = { ...prev };
+                            delete next.excerptName;
+                            return next;
+                          });
+                        }
+                      }}
+                    />
+                  </Box>
                   {validationErrors?.excerptName && (
                     <Text color="color.text.danger" size="small">{validationErrors.excerptName}</Text>
                   )}
@@ -423,51 +426,54 @@ export function SourceMetadataTabs({
                   ))}
                 </Fragment>
               )}
-
-              <Text><Strong>Add Link</Strong></Text>
-              <StableTextfield
-                stableKey={`${stableKeyPrefix}-doc-link-anchor`}
-                label="Anchor"
-                placeholder={isLoading ? 'Loading...' : 'e.g., API Ref'}
-                value={newLinkAnchor}
-                isDisabled={isLoading}
-                onChange={(e) => setNewLinkAnchor(e.target.value)}
-              />
-              <StableTextfield
-                stableKey={`${stableKeyPrefix}-doc-link-url`}
-                label="URL"
-                placeholder={isLoading ? 'Loading...' : 'https://...'}
-                value={newLinkUrl}
-                isDisabled={isLoading}
-                onChange={(e) => {
-                  setNewLinkUrl(e.target.value);
-                  const url = e.target.value.trim();
-                  if (url && !url.match(/^https?:\/\/.+/i)) {
-                    setUrlError('Must start with http(s)://');
-                  } else {
-                    setUrlError('');
-                  }
-                }}
-              />
-              {urlError && (
-                <Text color="color.text.danger" size="small">{urlError}</Text>
-              )}
-              <Button
-                appearance="primary"
-                isDisabled={!newLinkAnchor.trim() || !newLinkUrl.trim() || !!urlError || isLoading}
-                onClick={() => {
-                  if (newLinkAnchor.trim() && newLinkUrl.trim() && !urlError) {
-                    setDocumentationLinks([
-                      ...documentationLinks,
-                      { anchor: newLinkAnchor.trim(), url: newLinkUrl.trim() }
-                    ]);
-                    setNewLinkAnchor('');
-                    setNewLinkUrl('');
-                  }
-                }}
-              >
-                Add
-              </Button>
+              <Box paddingBlockStart='space.150'>
+                <Heading size="small">Add Link</Heading>
+                <Stack space="space.100">
+                  <StableTextfield
+                    stableKey={`${stableKeyPrefix}-doc-link-anchor`}
+                    label="Anchor"
+                    placeholder={isLoading ? 'Loading...' : 'e.g., API Ref'}
+                    value={newLinkAnchor}
+                    isDisabled={isLoading}
+                    onChange={(e) => setNewLinkAnchor(e.target.value)}
+                  />
+                  <StableTextfield
+                    stableKey={`${stableKeyPrefix}-doc-link-url`}
+                    label="URL"
+                    placeholder={isLoading ? 'Loading...' : 'https://...'}
+                    value={newLinkUrl}
+                    isDisabled={isLoading}
+                    onChange={(e) => {
+                      setNewLinkUrl(e.target.value);
+                      const url = e.target.value.trim();
+                      if (url && !url.match(/^https?:\/\/.+/i)) {
+                        setUrlError('Must start with http(s)://');
+                      } else {
+                        setUrlError('');
+                      }
+                    }}
+                  />
+                  {urlError && (
+                    <Text color="color.text.danger" size="small">{urlError}</Text>
+                  )}
+                  <Button
+                    appearance="primary"
+                    isDisabled={!newLinkAnchor.trim() || !newLinkUrl.trim() || !!urlError || isLoading}
+                    onClick={() => {
+                      if (newLinkAnchor.trim() && newLinkUrl.trim() && !urlError) {
+                        setDocumentationLinks([
+                          ...documentationLinks,
+                          { anchor: newLinkAnchor.trim(), url: newLinkUrl.trim() }
+                        ]);
+                        setNewLinkAnchor('');
+                        setNewLinkUrl('');
+                      }
+                    }}
+                  >
+                    Add
+                  </Button>
+                </Stack>
+              </Box>
             </Stack>
           </TabPanel>
         </Tabs>
@@ -523,7 +529,7 @@ export function SourceMetadataTabs({
           {/* Live ADF Preview */}
           <Box xcss={previewContentStyle}>
             <Stack space="space.100">
-              <Text><Strong>Live Preview</Strong></Text>
+              <Text><Strong>{bespoke ? '🟣' : '🟢'} {excerptName || 'Untitled Source'}</Strong></Text>
               {testerPreviewContent ? (
                 <AdfRenderer document={testerPreviewContent} />
               ) : (

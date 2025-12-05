@@ -741,7 +741,7 @@ const App = () => {
             <Button
               appearance="default"
               onClick={undefined}
-              shouldFitContainer={true}
+              shouldFitContainer={false}
               iconAfter="chevron-down"
               spacing="compact"
               isDisabled={true}
@@ -855,7 +855,7 @@ const App = () => {
               <Button
                 appearance="default"
                 onClick={undefined}
-                shouldFitContainer={true}
+                shouldFitContainer={false}
                 iconAfter="chevron-down"
                 isDisabled={true}
                 spacing="compact"

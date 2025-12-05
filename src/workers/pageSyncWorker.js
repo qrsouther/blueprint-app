@@ -89,11 +89,19 @@ export async function handler(event) {
 
     // Step 1b: Check if page is in target space (optimization to avoid unnecessary processing)
     // Only process pages in the 'cs' space where Blueprint macros are used
-    const spaceId = pageData?.spaceId;
-    if (spaceId) {
-      // Fetch space details to check key (only if we need to filter)
-      // For now, we'll process all pages but could add space filtering here if needed
-      // TODO: Add space key check when performance becomes an issue
+    const spaceKey = pageData?.space?.key;
+    if (spaceKey && spaceKey !== TARGET_SPACE_KEY) {
+      logPhase('pageSyncWorker', 'Skipping page - not in target space', {
+        pageId,
+        pageTitle,
+        spaceKey,
+        targetSpaceKey: TARGET_SPACE_KEY
+      });
+      return;
+    }
+    
+    if (!spaceKey) {
+      logWarning('pageSyncWorker', 'Page has no space key - processing anyway', { pageId, pageTitle });
     }
 
     // Step 2: Find all Blueprint Embed macros on this page

@@ -668,7 +668,7 @@ export function EmbedEditMode({
                   >
                   <Inline space="space.100" alignBlock="center" alignInline="start">
                     {/* Compliance Level Select with color emoji indicators */}
-                    <Box xcss={xcss({ width: '250px', paddingBottom: 'space.100' })}>
+                    <Box xcss={xcss({ width: '150px', paddingBottom: 'space.0' })}>
                       <Select
                         inputId="compliance-level-select"
                         options={complianceLevelOptions}
