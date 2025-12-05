@@ -15,7 +15,8 @@
  * @returns {JSX.Element}
  */
 
-import React, { Fragment, useState, useEffect, useRef } from 'react';
+import React, { Fragment, useState, useEffect, useRef, useMemo } from 'react';
+import { useForm as useReactHookForm, useWatch } from 'react-hook-form';
 import {
   Text,
   Strong,
@@ -40,7 +41,8 @@ import {
   Toggle,
   Icon,
   Label,
-  AdfRenderer
+  AdfRenderer,
+  xcss
 } from '@forge/react';
 import { invoke, router } from '@forge/bridge';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
@@ -48,7 +50,54 @@ import { useCategoriesQuery } from '../../hooks/admin-hooks';
 import { extractTextFromAdf } from '../../utils/adf-utils';
 import { StableTextfield } from '../common/StableTextfield';
 import { SourceMetadataTabs } from '../common/SourceMetadataTabs';
+import { VariableConfigPanel } from '../VariableConfigPanel';
+import { ToggleConfigPanel } from '../ToggleConfigPanel';
+import { DocumentationLinksDisplay } from '../embed/DocumentationLinksDisplay';
 import { logger } from '../../utils/logger.js';
+import {
+  cleanAdfForRenderer,
+  filterContentByToggles,
+  substituteVariablesInAdf
+} from '../../utils/adf-rendering-utils';
+
+// Split view layout styles
+const splitContainerStyle = xcss({
+  display: 'flex',
+  flexDirection: 'row',
+  gap: 'space.300',
+  minHeight: '400px'
+});
+
+const leftPanelStyle = xcss({
+  width: '25%',
+  minWidth: '200px',
+  flexShrink: 0
+});
+
+const rightPanelStyle = xcss({
+  width: '75%',
+  flexGrow: 1,
+  borderColor: 'color.border',
+  borderWidth: 'border.width',
+  borderStyle: 'solid',
+  borderRadius: 'border.radius',
+  padding: 'space.200',
+  backgroundColor: 'color.background.neutral.subtle',
+  overflow: 'auto'
+});
+
+const testerTabsStyle = xcss({
+  marginBottom: 'space.200'
+});
+
+const previewContentStyle = xcss({
+  padding: 'space.200',
+  borderColor: 'color.border',
+  borderWidth: 'border.width',
+  borderStyle: 'solid',
+  borderRadius: 'border.radius',
+  backgroundColor: 'color.background.input'
+});
 
 // Custom hook for fetching excerpt data with React Query
 const useExcerptQuery = (excerptId, enabled) => {
@@ -165,6 +214,33 @@ export function ExcerptPreviewModal({
   const [newLinkUrl, setNewLinkUrl] = useState('');
   const [urlError, setUrlError] = useState('');
 
+  // ============================================================================
+  // EPHEMERAL TESTER STATE (for live preview with sample values)
+  // Values are NOT persisted - discarded when modal closes
+  // ============================================================================
+  const [testerTabIndex, setTesterTabIndex] = useState(0); // 0 = Toggles, 1 = Variables
+
+  // Separate React Hook Form for tester (ephemeral, never saved)
+  const testerForm = useReactHookForm({
+    defaultValues: {
+      variableValues: {},
+      toggleStates: {}
+    }
+  });
+
+  const { control: testerControl, setValue: setTesterValue, reset: resetTesterForm } = testerForm;
+
+  // Watch tester form values for live preview
+  const watchedTesterVariables = useWatch({
+    control: testerControl,
+    name: 'variableValues'
+  }) || {};
+
+  const watchedTesterToggles = useWatch({
+    control: testerControl,
+    name: 'toggleStates'
+  }) || {};
+
   // Track if we've loaded data to prevent infinite loops
   const hasLoadedDataRef = useRef(false);
   const lastExcerptIdRef = useRef(null);
@@ -184,13 +260,71 @@ export function ExcerptPreviewModal({
       setNewLinkAnchor('');
       setNewLinkUrl('');
       setUrlError('');
+      // Reset ephemeral tester form
+      setTesterTabIndex(0);
+      resetTesterForm({ variableValues: {}, toggleStates: {} });
     }
-  }, [showPreviewModal]);
+  }, [showPreviewModal, resetTesterForm]);
 
   // Extract text content from ADF for variable/toggle detection
   // Use editorContent if available (user has edited), otherwise use excerptData.content
   const contentForDetection = editorContent || excerptData?.content;
   const contentText = contentForDetection ? extractTextFromAdf(contentForDetection) : '';
+
+  // Build mock excerpt object for tester config panels
+  // Converts detected variables/toggles to format expected by VariableConfigPanel/ToggleConfigPanel
+  const mockExcerptForTester = useMemo(() => ({
+    variables: detectedVariables.map(v => ({
+      name: v.name,
+      description: variableMetadata[v.name]?.description || '',
+      example: variableMetadata[v.name]?.example || '',
+      required: variableMetadata[v.name]?.required || false
+    })),
+    toggles: detectedToggles.map(t => ({
+      name: t.name,
+      description: toggleMetadata[t.name]?.description || ''
+    })),
+    content: contentForDetection
+  }), [detectedVariables, variableMetadata, detectedToggles, toggleMetadata, contentForDetection]);
+
+  // Generate preview content with substitutions applied
+  const testerPreviewContent = useMemo(() => {
+    if (!contentForDetection) return null;
+
+    try {
+      // Deep clone the ADF content
+      let preview = JSON.parse(JSON.stringify(contentForDetection));
+
+      // Build variables and toggles arrays inline
+      const variables = detectedVariables.map(v => ({
+        name: v.name,
+        description: variableMetadata[v.name]?.description || '',
+        example: variableMetadata[v.name]?.example || '',
+        required: variableMetadata[v.name]?.required || false
+      }));
+
+      const toggles = detectedToggles.map(t => ({
+        name: t.name,
+        description: toggleMetadata[t.name]?.description || ''
+      }));
+
+      // Apply toggle filtering
+      if (toggles.length > 0) {
+        preview = filterContentByToggles(preview, watchedTesterToggles);
+      }
+
+      // Apply variable substitutions
+      if (variables.length > 0) {
+        preview = substituteVariablesInAdf(preview, watchedTesterVariables, variables);
+      }
+
+      // Clean for AdfRenderer compatibility
+      return cleanAdfForRenderer(preview);
+    } catch (error) {
+      logger.errors('Error generating tester preview:', error);
+      return null;
+    }
+  }, [contentForDetection, watchedTesterVariables, watchedTesterToggles, detectedVariables, detectedToggles, variableMetadata, toggleMetadata]);
 
   // Get initial data from excerpts list for immediate display
   const initialExcerpt = excerpts?.find(e => e.id === excerptId);
@@ -435,283 +569,526 @@ export function ExcerptPreviewModal({
           ) : (
             <Tabs>
               <TabList space="space.200">
-                <Tab>Name/Category</Tab>
+                <Tab>Main</Tab>
                 <Tab>Toggles</Tab>
                 <Tab>Variables</Tab>
                 <Tab>Documentation</Tab>
               </TabList>
 
+              {/* Main TabPanel */}
               <TabPanel>
-                <Stack space="space.200">
-                  {/* Form fields inline with bullet separators */}
-                  <Inline space="space.200" separator="•" alignBlock="end">
-                    {/* Name field */}
-                    <Stack space="space.050">
-                      <Label labelFor="excerptName">Source Name</Label>
-                      <StableTextfield
-                        id="excerptName"
-                        stableKey="excerpt-name-input"
-                        value={excerptName}
-                        placeholder={isLoadingExcerpt ? 'Loading...' : ''}
-                        isDisabled={isLoadingExcerpt}
-                        onChange={(e) => setExcerptName(e.target.value)}
-                      />
+                <Box xcss={splitContainerStyle}>
+                  {/* LEFT PANEL (25%) - Form Controls */}
+                  <Box xcss={leftPanelStyle}>
+                    <Stack space="space.200">
+                      {/* Name field */}
+                      <Stack space="space.050">
+                        <Label labelFor="excerptName">Source Name</Label>
+                        <StableTextfield
+                          id="excerptName"
+                          stableKey="excerpt-name-input"
+                          value={excerptName}
+                          placeholder={isLoadingExcerpt ? 'Loading...' : ''}
+                          isDisabled={isLoadingExcerpt}
+                          onChange={(e) => setExcerptName(e.target.value)}
+                        />
+                      </Stack>
+                      {/* Category field */}
+                      <Stack space="space.050">
+                        <Label labelFor="category">Category</Label>
+                        <Select
+                          id="category"
+                          options={categoryOptions}
+                          value={(isLoadingExcerpt || isLoadingCategories) ? undefined : categoryOptions.find(opt => opt.value === category)}
+                          placeholder={(isLoadingExcerpt || isLoadingCategories) ? 'Loading...' : undefined}
+                          onChange={(e) => setCategory(e.value)}
+                        />
+                      </Stack>
+                      {/* Bespoke toggle */}
+                      <Inline space="space.100" alignBlock="center">
+                        <Label labelFor="bespoke-toggle">Bespoke</Label>
+                        <Toggle
+                          id="bespoke-toggle"
+                          isChecked={bespoke}
+                          isDisabled={isLoadingExcerpt}
+                          onChange={(e) => setBespoke(e.target.checked)}
+                        />
+                      </Inline>
                     </Stack>
-                    {/* Category field */}
-                    <Stack space="space.050">
-                      <Label labelFor="category">Category</Label>
-                      <Select
-                        id="category"
-                        options={categoryOptions}
-                        value={(isLoadingExcerpt || isLoadingCategories) ? undefined : categoryOptions.find(opt => opt.value === category)}
-                        placeholder={(isLoadingExcerpt || isLoadingCategories) ? 'Loading...' : undefined}
-                        onChange={(e) => setCategory(e.value)}
-                      />
-                    </Stack>
-                    {/* Bespoke toggle */}
-                    <Inline space="space.100" alignBlock="center">
-                      <Label labelFor="bespoke-toggle">Bespoke</Label>
-                      <Toggle
-                        id="bespoke-toggle"
-                        isChecked={bespoke}
-                        isDisabled={isLoadingExcerpt}
-                        onChange={(e) => setBespoke(e.target.checked)}
-                      />
-                    </Inline>
-                  </Inline>
-
-                  {/* Content Preview */}
-                  <Box>
-                    <Label>Content Preview</Label>
-                    <Box paddingTop="space.100" xcss={previewBoxStyle}>
-                      {excerptData?.content && typeof excerptData.content === 'object' ? (
-                        <AdfRenderer document={excerptData.content} />
-                      ) : (
-                        <Text>{excerptData?.content || 'No content stored'}</Text>
-                      )}
-                    </Box>
                   </Box>
-                </Stack>
+
+                  {/* RIGHT PANEL (75%) - Live Preview */}
+                  <Box xcss={rightPanelStyle}>
+                    <Stack space="space.200">
+                      {/* Ephemeral tester tabs */}
+                      <Box xcss={testerTabsStyle}>
+                        <Tabs
+                          onChange={(index) => setTesterTabIndex(index)}
+                          selected={testerTabIndex}
+                          id="tester-tabs-main"
+                        >
+                          <TabList>
+                            <Tab>Test Toggles</Tab>
+                            <Tab>Test Variables</Tab>
+                          </TabList>
+                          <TabPanel>
+                            {detectedToggles.length > 0 ? (
+                              <ToggleConfigPanel
+                                excerpt={mockExcerptForTester}
+                                control={testerControl}
+                                setValue={setTesterValue}
+                                onBlur={() => {}}
+                              />
+                            ) : (
+                              <Text><Em>No toggles in this Source</Em></Text>
+                            )}
+                          </TabPanel>
+                          <TabPanel>
+                            {detectedVariables.length > 0 ? (
+                              <VariableConfigPanel
+                                excerpt={mockExcerptForTester}
+                                control={testerControl}
+                                setValue={setTesterValue}
+                                onBlur={() => {}}
+                                formKey={0}
+                              />
+                            ) : (
+                              <Text><Em>No variables in this Source</Em></Text>
+                            )}
+                          </TabPanel>
+                        </Tabs>
+                      </Box>
+
+                      {/* Documentation Links Display */}
+                      {documentationLinks.length > 0 && (
+                        <DocumentationLinksDisplay documentationLinks={documentationLinks} />
+                      )}
+
+                      {/* Live ADF Preview */}
+                      <Box xcss={previewContentStyle}>
+                        <Stack space="space.100">
+                          <Text><Strong>Live Preview</Strong></Text>
+                          {testerPreviewContent ? (
+                            <AdfRenderer document={testerPreviewContent} />
+                          ) : (
+                            <Text color="color.text.subtle"><Em>No content to preview</Em></Text>
+                          )}
+                        </Stack>
+                      </Box>
+                    </Stack>
+                  </Box>
+                </Box>
               </TabPanel>
 
-              {/* Toggles TabPanel - must match TabList order */}
+              {/* Toggles TabPanel */}
               <TabPanel>
-                <Stack space="space.200">
-                  {contentText && detectedToggles.length === 0 && (
-                    <Text><Em>Checking for toggles...</Em></Text>
-                  )}
+                <Box xcss={splitContainerStyle}>
+                  {/* LEFT PANEL (25%) - Toggle Metadata Editors */}
+                  <Box xcss={leftPanelStyle}>
+                    <Stack space="space.200">
+                      {contentText && detectedToggles.length === 0 && (
+                        <Text><Em>Checking for toggles...</Em></Text>
+                      )}
 
-                  {detectedToggles.length === 0 && !contentText && (
-                    <Text>No toggles detected. Add {'{{toggle:name}}'} ... {'{{/toggle:name}}'} syntax to your macro body to create toggles.</Text>
-                  )}
+                      {detectedToggles.length === 0 && !contentText && (
+                        <Text>No toggles detected. Add {'{{toggle:name}}'} ... {'{{/toggle:name}}'} syntax.</Text>
+                      )}
 
-                  {detectedToggles.length > 0 && (
-                    <Fragment>
-                      {detectedToggles.map((toggle) => (
-                        <Fragment key={toggle.name}>
-                          <Text><Strong><Code>{`{{toggle:${toggle.name}}}`}</Code></Strong></Text>
-                          <StableTextfield
-                            id={`toggle-desc-${toggle.name}`}
-                            stableKey={`toggle-desc-${toggle.name}`}
-                            label="Description"
-                            placeholder={isLoadingExcerpt ? 'Loading...' : 'Description'}
-                            value={toggleMetadata[toggle.name]?.description || ''}
-                            isDisabled={isLoadingExcerpt}
-                            onChange={(e) => {
-                              setToggleMetadata({
-                                ...toggleMetadata,
-                                [toggle.name]: {
-                                  description: e.target.value
-                                }
-                              });
-                            }}
-                          />
+                      {detectedToggles.length > 0 && (
+                        <Fragment>
+                          {detectedToggles.map((toggle) => (
+                            <Stack key={toggle.name} space="space.100">
+                              <Text><Strong><Code>{`{{toggle:${toggle.name}}}`}</Code></Strong></Text>
+                              <StableTextfield
+                                id={`toggle-desc-${toggle.name}`}
+                                stableKey={`toggle-desc-${toggle.name}`}
+                                label="Description"
+                                placeholder={isLoadingExcerpt ? 'Loading...' : 'Description'}
+                                value={toggleMetadata[toggle.name]?.description || ''}
+                                isDisabled={isLoadingExcerpt}
+                                onChange={(e) => {
+                                  setToggleMetadata({
+                                    ...toggleMetadata,
+                                    [toggle.name]: {
+                                      description: e.target.value
+                                    }
+                                  });
+                                }}
+                              />
+                            </Stack>
+                          ))}
                         </Fragment>
-                      ))}
-                    </Fragment>
-                  )}
-                </Stack>
+                      )}
+                    </Stack>
+                  </Box>
+
+                  {/* RIGHT PANEL (75%) - Live Preview */}
+                  <Box xcss={rightPanelStyle}>
+                    <Stack space="space.200">
+                      {/* Ephemeral tester tabs */}
+                      <Box xcss={testerTabsStyle}>
+                        <Tabs
+                          onChange={(index) => setTesterTabIndex(index)}
+                          selected={testerTabIndex}
+                          id="tester-tabs-toggles"
+                        >
+                          <TabList>
+                            <Tab>Test Toggles</Tab>
+                            <Tab>Test Variables</Tab>
+                          </TabList>
+                          <TabPanel>
+                            {detectedToggles.length > 0 ? (
+                              <ToggleConfigPanel
+                                excerpt={mockExcerptForTester}
+                                control={testerControl}
+                                setValue={setTesterValue}
+                                onBlur={() => {}}
+                              />
+                            ) : (
+                              <Text><Em>No toggles in this Source</Em></Text>
+                            )}
+                          </TabPanel>
+                          <TabPanel>
+                            {detectedVariables.length > 0 ? (
+                              <VariableConfigPanel
+                                excerpt={mockExcerptForTester}
+                                control={testerControl}
+                                setValue={setTesterValue}
+                                onBlur={() => {}}
+                                formKey={1}
+                              />
+                            ) : (
+                              <Text><Em>No variables in this Source</Em></Text>
+                            )}
+                          </TabPanel>
+                        </Tabs>
+                      </Box>
+
+                      {/* Documentation Links Display */}
+                      {documentationLinks.length > 0 && (
+                        <DocumentationLinksDisplay documentationLinks={documentationLinks} />
+                      )}
+
+                      {/* Live ADF Preview */}
+                      <Box xcss={previewContentStyle}>
+                        <Stack space="space.100">
+                          <Text><Strong>Live Preview</Strong></Text>
+                          {testerPreviewContent ? (
+                            <AdfRenderer document={testerPreviewContent} />
+                          ) : (
+                            <Text color="color.text.subtle"><Em>No content to preview</Em></Text>
+                          )}
+                        </Stack>
+                      </Box>
+                    </Stack>
+                  </Box>
+                </Box>
               </TabPanel>
 
               {/* Variables TabPanel */}
               <TabPanel>
-                <Stack space="space.200">
-                  {contentText && detectedVariables.length === 0 && (
-                    <Text><Em>Checking for variables...</Em></Text>
-                  )}
+                <Box xcss={splitContainerStyle}>
+                  {/* LEFT PANEL (25%) - Variable Metadata Editors */}
+                  <Box xcss={leftPanelStyle}>
+                    <Stack space="space.200">
+                      {contentText && detectedVariables.length === 0 && (
+                        <Text><Em>Checking for variables...</Em></Text>
+                      )}
 
-                  {detectedVariables.length === 0 && !contentText && (
-                    <Text>No variables detected. Add {'{{variable}}'} syntax to your macro body to create variables.</Text>
-                  )}
+                      {detectedVariables.length === 0 && !contentText && (
+                        <Text>No variables detected. Add {'{{variable}}'} syntax.</Text>
+                      )}
 
-                  {detectedVariables.length > 0 && (
-                    <Fragment>
-                      {detectedVariables.map((variable) => (
-                        <Fragment key={variable.name}>
-                          <Inline space="space.300" alignBlock="center" spread="space-between">
-                            <Text><Strong><Code>{`{{${variable.name}}}`}</Code></Strong></Text>
-                            <Inline space="space.100" alignBlock="center">
-                              <Text>Required</Text>
-                              <Toggle
-                                id={`required-${variable.name}`}
-                                isChecked={variableMetadata[variable.name]?.required || false}
+                      {detectedVariables.length > 0 && (
+                        <Fragment>
+                          {detectedVariables.map((variable) => (
+                            <Stack key={variable.name} space="space.100">
+                              <Inline space="space.100" alignBlock="center" spread="space-between">
+                                <Text><Strong><Code>{`{{${variable.name}}}`}</Code></Strong></Text>
+                                <Inline space="space.050" alignBlock="center">
+                                  <Text size="small">Req</Text>
+                                  <Toggle
+                                    id={`required-${variable.name}`}
+                                    isChecked={variableMetadata[variable.name]?.required || false}
+                                    isDisabled={isLoadingExcerpt}
+                                    onChange={(e) => {
+                                      setVariableMetadata({
+                                        ...variableMetadata,
+                                        [variable.name]: {
+                                          ...variableMetadata[variable.name],
+                                          required: e.target.checked
+                                        }
+                                      });
+                                    }}
+                                  />
+                                </Inline>
+                              </Inline>
+                              <StableTextfield
+                                id={`var-desc-${variable.name}`}
+                                stableKey={`var-desc-${variable.name}`}
+                                label="Description"
+                                placeholder={isLoadingExcerpt ? 'Loading...' : 'Description'}
+                                value={variableMetadata[variable.name]?.description || ''}
                                 isDisabled={isLoadingExcerpt}
                                 onChange={(e) => {
                                   setVariableMetadata({
                                     ...variableMetadata,
                                     [variable.name]: {
                                       ...variableMetadata[variable.name],
-                                      required: e.target.checked
+                                      description: e.target.value
                                     }
                                   });
                                 }}
                               />
-                            </Inline>
-                          </Inline>
-                          <StableTextfield
-                            id={`var-desc-${variable.name}`}
-                            stableKey={`var-desc-${variable.name}`}
-                            label="Description"
-                            placeholder={isLoadingExcerpt ? 'Loading...' : 'Description'}
-                            value={variableMetadata[variable.name]?.description || ''}
-                            isDisabled={isLoadingExcerpt}
-                            onChange={(e) => {
-                              setVariableMetadata({
-                                ...variableMetadata,
-                                [variable.name]: {
-                                  ...variableMetadata[variable.name],
-                                  description: e.target.value
-                                }
-                              });
-                            }}
-                          />
-                          <StableTextfield
-                            id={`var-example-${variable.name}`}
-                            stableKey={`var-example-${variable.name}`}
-                            label="Example"
-                            placeholder={isLoadingExcerpt ? 'Loading...' : 'Example'}
-                            value={variableMetadata[variable.name]?.example || ''}
-                            isDisabled={isLoadingExcerpt}
-                            onChange={(e) => {
-                              setVariableMetadata({
-                                ...variableMetadata,
-                                [variable.name]: {
-                                  ...variableMetadata[variable.name],
-                                  example: e.target.value
-                                }
-                              });
-                            }}
-                          />
+                              <StableTextfield
+                                id={`var-example-${variable.name}`}
+                                stableKey={`var-example-${variable.name}`}
+                                label="Example"
+                                placeholder={isLoadingExcerpt ? 'Loading...' : 'Example'}
+                                value={variableMetadata[variable.name]?.example || ''}
+                                isDisabled={isLoadingExcerpt}
+                                onChange={(e) => {
+                                  setVariableMetadata({
+                                    ...variableMetadata,
+                                    [variable.name]: {
+                                      ...variableMetadata[variable.name],
+                                      example: e.target.value
+                                    }
+                                  });
+                                }}
+                              />
+                            </Stack>
+                          ))}
                         </Fragment>
-                      ))}
-                    </Fragment>
-                  )}
-                </Stack>
+                      )}
+                    </Stack>
+                  </Box>
+
+                  {/* RIGHT PANEL (75%) - Live Preview */}
+                  <Box xcss={rightPanelStyle}>
+                    <Stack space="space.200">
+                      {/* Ephemeral tester tabs */}
+                      <Box xcss={testerTabsStyle}>
+                        <Tabs
+                          onChange={(index) => setTesterTabIndex(index)}
+                          selected={testerTabIndex}
+                          id="tester-tabs-variables"
+                        >
+                          <TabList>
+                            <Tab>Test Toggles</Tab>
+                            <Tab>Test Variables</Tab>
+                          </TabList>
+                          <TabPanel>
+                            {detectedToggles.length > 0 ? (
+                              <ToggleConfigPanel
+                                excerpt={mockExcerptForTester}
+                                control={testerControl}
+                                setValue={setTesterValue}
+                                onBlur={() => {}}
+                              />
+                            ) : (
+                              <Text><Em>No toggles in this Source</Em></Text>
+                            )}
+                          </TabPanel>
+                          <TabPanel>
+                            {detectedVariables.length > 0 ? (
+                              <VariableConfigPanel
+                                excerpt={mockExcerptForTester}
+                                control={testerControl}
+                                setValue={setTesterValue}
+                                onBlur={() => {}}
+                                formKey={2}
+                              />
+                            ) : (
+                              <Text><Em>No variables in this Source</Em></Text>
+                            )}
+                          </TabPanel>
+                        </Tabs>
+                      </Box>
+
+                      {/* Documentation Links Display */}
+                      {documentationLinks.length > 0 && (
+                        <DocumentationLinksDisplay documentationLinks={documentationLinks} />
+                      )}
+
+                      {/* Live ADF Preview */}
+                      <Box xcss={previewContentStyle}>
+                        <Stack space="space.100">
+                          <Text><Strong>Live Preview</Strong></Text>
+                          {testerPreviewContent ? (
+                            <AdfRenderer document={testerPreviewContent} />
+                          ) : (
+                            <Text color="color.text.subtle"><Em>No content to preview</Em></Text>
+                          )}
+                        </Stack>
+                      </Box>
+                    </Stack>
+                  </Box>
+                </Box>
               </TabPanel>
 
               {/* Documentation TabPanel */}
               <TabPanel>
-                <Stack space="space.200">
-                  {/* Existing documentation links */}
-                  {documentationLinks.length > 0 && (
-                    <Fragment>
-                      <Text><Strong>Documentation Links</Strong></Text>
-                      {documentationLinks.map((link, index) => (
-                        <Box key={index} padding="space.100" backgroundColor="color.background.neutral.subtle" style={{ borderRadius: '3px' }}>
-                          <Inline space="space.200" alignBlock="center" spread="space-between">
-                            <Stack space="space.050">
-                              <Text><Strong>{link.anchor}</Strong></Text>
-                              <Text size="small"><Em>{link.url}</Em></Text>
-                            </Stack>
-                            <Inline space="space.100">
-                              <Button
-                                appearance="subtle"
-                                iconBefore={<Icon glyph="arrow-up" label="Move up" />}
-                                isDisabled={index === 0 || isLoadingExcerpt}
-                                onClick={() => {
-                                  const newLinks = [...documentationLinks];
-                                  [newLinks[index - 1], newLinks[index]] = [newLinks[index], newLinks[index - 1]];
-                                  setDocumentationLinks(newLinks);
-                                }}
-                              />
-                              <Button
-                                appearance="subtle"
-                                iconBefore={<Icon glyph="arrow-down" label="Move down" />}
-                                isDisabled={index === documentationLinks.length - 1 || isLoadingExcerpt}
-                                onClick={() => {
-                                  const newLinks = [...documentationLinks];
-                                  [newLinks[index], newLinks[index + 1]] = [newLinks[index + 1], newLinks[index]];
-                                  setDocumentationLinks(newLinks);
-                                }}
-                              />
-                              <Button
-                                appearance="danger"
-                                iconBefore={<Icon glyph="trash" label="Delete" />}
-                                isDisabled={isLoadingExcerpt}
-                                onClick={() => {
-                                  setDocumentationLinks(documentationLinks.filter((_, i) => i !== index));
-                                }}
-                              />
-                            </Inline>
-                          </Inline>
-                        </Box>
-                      ))}
-                    </Fragment>
-                  )}
+                <Box xcss={splitContainerStyle}>
+                  {/* LEFT PANEL (25%) - Documentation Link Editors */}
+                  <Box xcss={leftPanelStyle}>
+                    <Stack space="space.200">
+                      {/* Existing documentation links */}
+                      {documentationLinks.length > 0 && (
+                        <Fragment>
+                          <Text><Strong>Doc Links</Strong></Text>
+                          {documentationLinks.map((link, index) => (
+                            <Box key={index} padding="space.100" backgroundColor="color.background.neutral.subtle" xcss={{ borderRadius: 'border.radius' }}>
+                              <Stack space="space.050">
+                                <Text size="small"><Strong>{link.anchor}</Strong></Text>
+                                <Inline space="space.050">
+                                  <Button
+                                    appearance="subtle"
+                                    spacing="compact"
+                                    iconBefore={<Icon glyph="arrow-up" label="Move up" size="small" />}
+                                    isDisabled={index === 0 || isLoadingExcerpt}
+                                    onClick={() => {
+                                      const newLinks = [...documentationLinks];
+                                      [newLinks[index - 1], newLinks[index]] = [newLinks[index], newLinks[index - 1]];
+                                      setDocumentationLinks(newLinks);
+                                    }}
+                                  />
+                                  <Button
+                                    appearance="subtle"
+                                    spacing="compact"
+                                    iconBefore={<Icon glyph="arrow-down" label="Move down" size="small" />}
+                                    isDisabled={index === documentationLinks.length - 1 || isLoadingExcerpt}
+                                    onClick={() => {
+                                      const newLinks = [...documentationLinks];
+                                      [newLinks[index], newLinks[index + 1]] = [newLinks[index + 1], newLinks[index]];
+                                      setDocumentationLinks(newLinks);
+                                    }}
+                                  />
+                                  <Button
+                                    appearance="danger"
+                                    spacing="compact"
+                                    iconBefore={<Icon glyph="trash" label="Delete" size="small" />}
+                                    isDisabled={isLoadingExcerpt}
+                                    onClick={() => {
+                                      setDocumentationLinks(documentationLinks.filter((_, i) => i !== index));
+                                    }}
+                                  />
+                                </Inline>
+                              </Stack>
+                            </Box>
+                          ))}
+                        </Fragment>
+                      )}
 
-                  {/* Add new documentation link form */}
-                  <Text><Strong>Add New Documentation Link</Strong></Text>
-                  <StableTextfield
-                    stableKey="doc-link-anchor"
-                    label="Anchor Text"
-                    placeholder={isLoadingExcerpt ? 'Loading...' : 'e.g., API Reference'}
-                    value={newLinkAnchor}
-                    isDisabled={isLoadingExcerpt}
-                    onChange={(e) => setNewLinkAnchor(e.target.value)}
-                  />
-                  <StableTextfield
-                    stableKey="doc-link-url"
-                    label="URL"
-                    placeholder={isLoadingExcerpt ? 'Loading...' : 'https://example.com/docs'}
-                    value={newLinkUrl}
-                    isDisabled={isLoadingExcerpt}
-                    onChange={(e) => {
-                      setNewLinkUrl(e.target.value);
-                      // Basic URL validation
-                      const url = e.target.value.trim();
-                      if (url && !url.match(/^https?:\/\/.+/i)) {
-                        setUrlError('URL must start with http:// or https://');
-                      } else {
-                        setUrlError('');
-                      }
-                    }}
-                  />
-                  {urlError && (
-                    <SectionMessage appearance="error">
-                      <Text>{urlError}</Text>
-                    </SectionMessage>
-                  )}
-                  <Button
-                    appearance="primary"
-                    isDisabled={!newLinkAnchor.trim() || !newLinkUrl.trim() || !!urlError || isLoadingExcerpt}
-                    onClick={() => {
-                      if (newLinkAnchor.trim() && newLinkUrl.trim() && !urlError) {
-                        setDocumentationLinks([
-                          ...documentationLinks,
-                          { anchor: newLinkAnchor.trim(), url: newLinkUrl.trim() }
-                        ]);
-                        setNewLinkAnchor('');
-                        setNewLinkUrl('');
-                      }
-                    }}
-                  >
-                    Add Link
-                  </Button>
+                      {/* Add new documentation link form */}
+                      <Text><Strong>Add Link</Strong></Text>
+                      <StableTextfield
+                        stableKey="doc-link-anchor"
+                        label="Anchor"
+                        placeholder={isLoadingExcerpt ? 'Loading...' : 'e.g., API Ref'}
+                        value={newLinkAnchor}
+                        isDisabled={isLoadingExcerpt}
+                        onChange={(e) => setNewLinkAnchor(e.target.value)}
+                      />
+                      <StableTextfield
+                        stableKey="doc-link-url"
+                        label="URL"
+                        placeholder={isLoadingExcerpt ? 'Loading...' : 'https://...'}
+                        value={newLinkUrl}
+                        isDisabled={isLoadingExcerpt}
+                        onChange={(e) => {
+                          setNewLinkUrl(e.target.value);
+                          const url = e.target.value.trim();
+                          if (url && !url.match(/^https?:\/\/.+/i)) {
+                            setUrlError('Must start with http(s)://');
+                          } else {
+                            setUrlError('');
+                          }
+                        }}
+                      />
+                      {urlError && (
+                        <Text color="color.text.danger" size="small">{urlError}</Text>
+                      )}
+                      <Button
+                        appearance="primary"
+                        isDisabled={!newLinkAnchor.trim() || !newLinkUrl.trim() || !!urlError || isLoadingExcerpt}
+                        onClick={() => {
+                          if (newLinkAnchor.trim() && newLinkUrl.trim() && !urlError) {
+                            setDocumentationLinks([
+                              ...documentationLinks,
+                              { anchor: newLinkAnchor.trim(), url: newLinkUrl.trim() }
+                            ]);
+                            setNewLinkAnchor('');
+                            setNewLinkUrl('');
+                          }
+                        }}
+                      >
+                        Add
+                      </Button>
+                    </Stack>
+                  </Box>
 
-                  <SectionMessage appearance="discovery">
-                    <Text>Add documentation links that will appear in all Embed instances using this Source. Links open in a new tab.</Text>
-                  </SectionMessage>
-                </Stack>
+                  {/* RIGHT PANEL (75%) - Live Preview */}
+                  <Box xcss={rightPanelStyle}>
+                    <Stack space="space.200">
+                      {/* Ephemeral tester tabs */}
+                      <Box xcss={testerTabsStyle}>
+                        <Tabs
+                          onChange={(index) => setTesterTabIndex(index)}
+                          selected={testerTabIndex}
+                          id="tester-tabs-docs"
+                        >
+                          <TabList>
+                            <Tab>Test Toggles</Tab>
+                            <Tab>Test Variables</Tab>
+                          </TabList>
+                          <TabPanel>
+                            {detectedToggles.length > 0 ? (
+                              <ToggleConfigPanel
+                                excerpt={mockExcerptForTester}
+                                control={testerControl}
+                                setValue={setTesterValue}
+                                onBlur={() => {}}
+                              />
+                            ) : (
+                              <Text><Em>No toggles in this Source</Em></Text>
+                            )}
+                          </TabPanel>
+                          <TabPanel>
+                            {detectedVariables.length > 0 ? (
+                              <VariableConfigPanel
+                                excerpt={mockExcerptForTester}
+                                control={testerControl}
+                                setValue={setTesterValue}
+                                onBlur={() => {}}
+                                formKey={3}
+                              />
+                            ) : (
+                              <Text><Em>No variables in this Source</Em></Text>
+                            )}
+                          </TabPanel>
+                        </Tabs>
+                      </Box>
+
+                      {/* Documentation Links Display */}
+                      {documentationLinks.length > 0 && (
+                        <DocumentationLinksDisplay documentationLinks={documentationLinks} />
+                      )}
+
+                      {/* Live ADF Preview */}
+                      <Box xcss={previewContentStyle}>
+                        <Stack space="space.100">
+                          <Text><Strong>Live Preview</Strong></Text>
+                          {testerPreviewContent ? (
+                            <AdfRenderer document={testerPreviewContent} />
+                          ) : (
+                            <Text color="color.text.subtle"><Em>No content to preview</Em></Text>
+                          )}
+                        </Stack>
+                      </Box>
+                    </Stack>
+                  </Box>
+                </Box>
               </TabPanel>
             </Tabs>
           )}
