@@ -174,6 +174,11 @@ const App = () => {
   const [isRestoringEmbed, setIsRestoringEmbed] = useState(false);
 
   // ============================================================================
+  // INSERT CHAPTER ABOVE STATE
+  // ============================================================================
+  const [isInsertingAbove, setIsInsertingAbove] = useState(false);
+
+  // ============================================================================
   // UI STATE
   // ============================================================================
   const [selectedTabIndex, setSelectedTabIndex] = useState(null); // null until excerpt loads
@@ -707,6 +712,47 @@ const App = () => {
   };
 
   // ============================================================================
+  // INSERT CHAPTER ABOVE HANDLER
+  // ============================================================================
+  const handleInsertChapterAbove = async () => {
+    const pageId = context?.contentId || context?.extension?.content?.id;
+    
+    if (!pageId || !effectiveLocalId || !selectedExcerptId) {
+      logger.errors('[EmbedContainer] Missing required data for insert above:', {
+        pageId,
+        localId: effectiveLocalId,
+        excerptId: selectedExcerptId
+      });
+      return;
+    }
+
+    setIsInsertingAbove(true);
+    
+    try {
+      const result = await invoke('insertEmbedAbove', {
+        pageId,
+        localId: effectiveLocalId,
+        excerptId: selectedExcerptId
+      });
+
+      if (result.success) {
+        logger.saves('[EmbedContainer] New chapter inserted above', {
+          newLocalId: result.newLocalId,
+          message: result.message
+        });
+        // The page needs to be reloaded for the new Embed to appear
+        // User can reload via browser or Confluence UI
+      } else {
+        logger.errors('[EmbedContainer] Insert above failed:', result.error);
+      }
+    } catch (error) {
+      logger.errors('[EmbedContainer] Insert above error:', error);
+    } finally {
+      setIsInsertingAbove(false);
+    }
+  };
+
+  // ============================================================================
   // INCOMPLETE STATUS CACHING (must be before conditional returns for hooks rules)
   // ============================================================================
   const cachedIncomplete = variableValuesData?.cachedIncomplete;
@@ -732,21 +778,44 @@ const App = () => {
   // CONDITIONAL RENDERS
   // ============================================================================
 
-  // View mode with no selectedExcerptId - show loading button
+  // View mode with no selectedExcerptId - show loading button OR unconfigured state
   if (!selectedExcerptId && !isEditing && !isEditingEmbed) {
+    // If we're still loading variable values, show loading state
+    if (isLoadingVariableValues) {
+      return (
+        <Box xcss={styles}>
+          <Box xcss={editButtonBorderContainerStyle}>
+            <Inline space="space.100" alignBlock="center">
+              <Button
+                appearance="default"
+                onClick={undefined}
+                shouldFitContainer={false}
+                iconAfter="chevron-down"
+                spacing="compact"
+                isDisabled={true}
+              >
+                Loading Editor...
+              </Button>
+            </Inline>
+          </Box>
+        </Box>
+      );
+    }
+    
+    // Loading is complete but no excerptId - this is an unconfigured Embed
+    // Show a clickable button to enter edit mode and configure it
     return (
       <Box xcss={styles}>
         <Box xcss={editButtonBorderContainerStyle}>
           <Inline space="space.100" alignBlock="center">
             <Button
-              appearance="default"
-              onClick={undefined}
+              appearance="primary"
+              onClick={() => setIsEditingEmbed(true)}
               shouldFitContainer={false}
               iconAfter="chevron-down"
               spacing="compact"
-              isDisabled={true}
             >
-              Loading Editor...
+              Configure Chapter
             </Button>
           </Inline>
         </Box>
@@ -805,6 +874,8 @@ const App = () => {
         isPublished={false}
         isIncomplete={true}
         onEditClick={() => setIsEditingEmbed(true)}
+        onInsertChapterAbove={selectedExcerptId ? handleInsertChapterAbove : null}
+        isInsertingAbove={isInsertingAbove}
       />
     );
   }
@@ -835,6 +906,8 @@ const App = () => {
         isPublished={publishStatus?.isPublished || false}
         isIncomplete={true}
         onEditClick={() => setIsEditingEmbed(true)}
+        onInsertChapterAbove={selectedExcerptId ? handleInsertChapterAbove : null}
+        isInsertingAbove={isInsertingAbove}
       />
     );
   }
@@ -889,6 +962,8 @@ const App = () => {
         isPublished={false}
         isIncomplete={true}
         onEditClick={() => setIsEditingEmbed(true)}
+        onInsertChapterAbove={selectedExcerptId ? handleInsertChapterAbove : null}
+        isInsertingAbove={isInsertingAbove}
       />
     );
   }
@@ -1033,6 +1108,8 @@ const App = () => {
       isPublished={publishStatus?.isPublished || false}
       isIncomplete={incomplete}
       onEditClick={() => setIsEditingEmbed(true)}
+      onInsertChapterAbove={selectedExcerptId ? handleInsertChapterAbove : null}
+      isInsertingAbove={isInsertingAbove}
     />
   );
 };

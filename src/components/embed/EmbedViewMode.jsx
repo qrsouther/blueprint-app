@@ -8,6 +8,7 @@
  * 
  * Features:
  * - Shows "Edit the chapter below" button (various states: loading, enabled, disabled)
+ * - Shows "Insert additional Chapter above this" button (inline with Edit button)
  * - Shows "Update Available" button when content is stale
  * - Shows "under construction" SectionMessage when required variables are missing
  * - Shows Update Available banner with diff view (after clicking Update Available)
@@ -30,6 +31,8 @@
  * @param {boolean} props.isPublished - Whether content has been published to page
  * @param {Function} props.onRepublish - Handler for republish button when stale
  * @param {Function} props.onEditClick - Handler for Edit button (Locked Page Model)
+ * @param {Function} props.onInsertChapterAbove - Handler for Insert Chapter Above button
+ * @param {boolean} props.isInsertingAbove - Whether insert operation is in progress
  * @param {boolean} props.isIncomplete - Whether required variables are missing
  * @returns {JSX.Element} - View mode JSX (buttons and messages only, no content)
  */
@@ -101,7 +104,10 @@ export function EmbedViewMode({
   isIncomplete = false,
   onRepublish,
   // Locked Page Model props
-  onEditClick
+  onEditClick,
+  // Insert Chapter Above props
+  onInsertChapterAbove,
+  isInsertingAbove = false
 }) {
   // State for progressive disclosure - only show banner when user clicks Review button
   const [showUpdateBanner, setShowUpdateBanner] = useState(false);
@@ -122,7 +128,7 @@ export function EmbedViewMode({
     const sourceName = excerpt?.name || 'Untitled';
     return (
       <Box xcss={xcss({ padding: 'space.050' })}>
-        {/* Edit button */}
+        {/* Edit button + Insert Chapter Above button */}
         {onEditClick && (
           <Box xcss={editButtonBorderContainerStyle}>
             <Inline space="space.100" alignBlock="center">
@@ -135,6 +141,17 @@ export function EmbedViewMode({
               >
                 Edit the chapter below
               </Button>
+              {onInsertChapterAbove && (
+                <Button
+                  appearance="subtle"
+                  onClick={onInsertChapterAbove}
+                  shouldFitContainer={false}
+                  spacing="compact"
+                  isDisabled={isInsertingAbove}
+                >
+                  {isInsertingAbove ? 'Inserting...' : 'Insert additional Chapter above this'}
+                </Button>
+              )}
               <RedlineStatusLozenge status={redlineStatus} />
             </Inline>
           </Box>
@@ -162,12 +179,13 @@ export function EmbedViewMode({
   // to render the preview content - it's already on the page natively.
   // We only show:
   // 1. Edit button (when NOT stale, for Locked Page Model)
-  // 2. Update Available button (when stale, replaces Edit button)
-  // 3. Update Available banner with diff view (after clicking Update Available)
+  // 2. Insert Chapter Above button (inline with Edit)
+  // 3. Update Available button (when stale, replaces Edit button)
+  // 4. Update Available banner with diff view (after clicking Update Available)
   if (isPublished) {
     return (
       <Box xcss={xcss({ padding: 'space.050' })}>
-        {/* Show Edit button when NOT stale (keep visible while checking staleness) */}
+        {/* Show Edit button + Insert Chapter Above when NOT stale */}
         {onEditClick && !isStale && (
           <Box xcss={editButtonBorderContainerStyle}>
             <Inline space="space.100" alignBlock="center">
@@ -181,6 +199,17 @@ export function EmbedViewMode({
               >
                 Edit the chapter below
               </Button>
+              {onInsertChapterAbove && (
+                <Button
+                  appearance="subtle"
+                  onClick={onInsertChapterAbove}
+                  shouldFitContainer={false}
+                  spacing="compact"
+                  isDisabled={isInsertingAbove || isCheckingStaleness}
+                >
+                  {isInsertingAbove ? 'Inserting...' : 'Insert additional Chapter above this'}
+                </Button>
+              )}
               <RedlineStatusLozenge status={redlineStatus} />
             </Inline>
           </Box>
@@ -258,7 +287,7 @@ export function EmbedViewMode({
   // Content rendering is removed - Embed macros never render content in view mode
   return (
     <Box xcss={xcss({ padding: 'space.050' })}>
-      {/* Edit button for Locked Page Model */}
+      {/* Edit button + Insert Chapter Above for Locked Page Model */}
       {onEditClick && (
         <Box xcss={editButtonBorderContainerStyle}>
           <Inline 
@@ -275,6 +304,17 @@ export function EmbedViewMode({
             >
               Edit the Chapter below
             </Button>
+            {onInsertChapterAbove && (
+              <Button
+                appearance="subtle"
+                onClick={onInsertChapterAbove}
+                shouldFitContainer={false}
+                spacing="compact"
+                isDisabled={isInsertingAbove || isCheckingStaleness}
+              >
+                {isInsertingAbove ? 'Inserting...' : 'Insert additional Chapter above this'}
+              </Button>
+            )}
             <RedlineStatusLozenge status={redlineStatus} />
           </Inline>
         </Box>

@@ -1,9 +1,25 @@
 /**
- * SourceMetadataTabs Component
- *
- * Shared component for editing Source metadata across both:
- * - source-config.jsx (Forge macro config modal)
- * - ExcerptPreviewModal.jsx (Admin UI modal)
+ * ╔══════════════════════════════════════════════════════════════════════════════╗
+ * ║                       SourceMetadataTabs Component                           ║
+ * ╠══════════════════════════════════════════════════════════════════════════════╣
+ * ║                                                                              ║
+ * ║  This is the SHARED UI component used by both Source editing modals:        ║
+ * ║  - source-config.jsx (Forge macro config modal)                             ║
+ * ║  - ExcerptPreviewModal.jsx (Admin UI modal)                                 ║
+ * ║                                                                              ║
+ * ║  ⚠️  IMPORTANT: The parent components are "clones" that must stay in sync.  ║
+ * ║  See the header comments in those files for details.                        ║
+ * ║                                                                              ║
+ * ║  This component receives all state via props and is purely presentational   ║
+ * ║  with local tester state. The detection and save logic lives in the         ║
+ * ║  parent components (or useSourceEditor hook).                               ║
+ * ║                                                                              ║
+ * ║  RELATED FILES:                                                              ║
+ * ║  - src/source-config.jsx (gold standard parent)                             ║
+ * ║  - src/components/admin/ExcerptPreviewModal.jsx (clone parent)              ║
+ * ║  - src/hooks/useSourceEditor.js (shared hook for ExcerptPreviewModal)       ║
+ * ║                                                                              ║
+ * ╚══════════════════════════════════════════════════════════════════════════════╝
  *
  * Features a split view layout:
  * - Left panel (30%): Tabs for editing metadata (Name/Category, Variables, Toggles, Documentation)
@@ -84,6 +100,8 @@ export function SourceMetadataTabs({
   setCategory,
   bespoke,
   setBespoke,
+  headless,
+  setHeadless,
   categoryOptions,
   isLoading = false,
   isLoadingCategories = false,
@@ -143,12 +161,13 @@ export function SourceMetadataTabs({
   }) || {};
 
   // Build mock excerpt for tester panels
+  // Note: 'required' is now auto-computed from toggle context (v.required comes from backend detection)
   const mockExcerptForTester = useMemo(() => ({
     variables: detectedVariables.map(v => ({
       name: v.name,
       description: variableMetadata[v.name]?.description || '',
       example: variableMetadata[v.name]?.example || '',
-      required: variableMetadata[v.name]?.required || false
+      required: v.required || false  // Auto-computed from toggle context, not from metadata
     })),
     toggles: detectedToggles.map(t => ({
       name: t.name,
@@ -164,11 +183,12 @@ export function SourceMetadataTabs({
     try {
       let preview = JSON.parse(JSON.stringify(content));
 
+      // Note: 'required' is auto-computed from toggle context (v.required from backend)
       const variables = detectedVariables.map(v => ({
         name: v.name,
         description: variableMetadata[v.name]?.description || '',
         example: variableMetadata[v.name]?.example || '',
-        required: variableMetadata[v.name]?.required || false
+        required: v.required || false  // Auto-computed, not from metadata
       }));
 
       const toggles = detectedToggles.map(t => ({
@@ -257,6 +277,21 @@ export function SourceMetadataTabs({
                     onChange={(e) => setBespoke(e.target.checked)}
                   />
                 </Inline>
+
+                <Inline space="space.100" alignBlock="center">
+                  <Label labelFor={fieldId('headless')}>Headless Chapter</Label>
+                  <Toggle
+                    id={fieldId('headless')}
+                    isChecked={headless || false}
+                    isDisabled={isLoading}
+                    onChange={(e) => setHeadless && setHeadless(e.target.checked)}
+                  />
+                </Inline>
+                {headless && (
+                  <Text size="small" color="color.text.subtle">
+                    <Em>Headless chapters have no heading or compliance emoji</Em>
+                  </Text>
+                )}
               </Stack>
             </Box>
           </TabPanel>
@@ -320,23 +355,10 @@ export function SourceMetadataTabs({
                   <Stack key={variable.name} space="space.100">
                     <Inline space="space.100" alignBlock="center" spread="space-between">
                       <Text><Strong><Code>{`{{${variable.name}}}`}</Code></Strong></Text>
-                      <Inline space="space.050" alignBlock="center">
-                        <Text size="small">Req</Text>
-                        <Toggle
-                          id={`required-${variable.name}`}
-                          isChecked={variableMetadata[variable.name]?.required || false}
-                          isDisabled={isLoading}
-                          onChange={(e) => {
-                            setVariableMetadata({
-                              ...variableMetadata,
-                              [variable.name]: {
-                                ...variableMetadata[variable.name],
-                                required: e.target.checked
-                              }
-                            });
-                          }}
-                        />
-                      </Inline>
+                      {/* Auto-computed required status indicator (based on toggle context) */}
+                      <Text size="small" color={variable.required ? 'color.text.warning' : 'color.text.subtle'}>
+                        {variable.required ? 'Required' : 'Optional'}
+                      </Text>
                     </Inline>
                     <StableTextfield
                       id={`var-desc-${variable.name}`}
@@ -529,7 +551,9 @@ export function SourceMetadataTabs({
           {/* Live ADF Preview */}
           <Box xcss={previewContentStyle}>
             <Stack space="space.100">
-              <Text><Strong>{bespoke ? '🟣' : '🟢'} {excerptName || 'Untitled Source'}</Strong></Text>
+              {!headless && (
+                <Text><Strong>{bespoke ? '🟣' : '🟢'} {excerptName || 'Untitled Source'}</Strong></Text>
+              )}
               {testerPreviewContent ? (
                 <AdfRenderer document={testerPreviewContent} />
               ) : (

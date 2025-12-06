@@ -36,6 +36,19 @@ export const cleanAdfForRenderer = (adfNode) => {
 
   const cleaned = { ...adfNode };
 
+  // WORKAROUND: Forge's AdfRenderer doesn't properly render emoji nodes
+  // Convert emoji nodes to text nodes using the emoji's text attribute (actual character)
+  // This ensures emojis display correctly instead of showing :shortName:
+  if (cleaned.type === 'emoji' && cleaned.attrs) {
+    // Prefer 'text' attribute (actual emoji character like "✅")
+    // Fall back to shortName if text is not available
+    const emojiText = cleaned.attrs.text || cleaned.attrs.shortName || '';
+    return {
+      type: 'text',
+      text: emojiText
+    };
+  }
+
   if (cleaned.attrs) {
     const cleanedAttrs = { ...cleaned.attrs };
 
@@ -48,24 +61,26 @@ export const cleanAdfForRenderer = (adfNode) => {
       if (cleanedAttrs.panelIcon === null) delete cleanedAttrs.panelIcon;
       if (cleanedAttrs.panelIconText === null) delete cleanedAttrs.panelIconText;
       if (cleanedAttrs.panelColor === null) delete cleanedAttrs.panelColor;
+      cleaned.attrs = cleanedAttrs;
     }
-
     // Remove null-valued table cell attributes
-    if (cleaned.type === 'tableCell' || cleaned.type === 'tableHeader') {
+    else if (cleaned.type === 'tableCell' || cleaned.type === 'tableHeader') {
       if (cleanedAttrs.background === null) delete cleanedAttrs.background;
       if (cleanedAttrs.colwidth === null) delete cleanedAttrs.colwidth;
+      cleaned.attrs = cleanedAttrs;
     }
-
     // Remove unsupported table attributes
-    if (cleaned.type === 'table') {
+    else if (cleaned.type === 'table') {
       if (cleanedAttrs.displayMode === null) delete cleanedAttrs.displayMode;
       delete cleanedAttrs.width;
       delete cleanedAttrs.__autoSize;
       delete cleanedAttrs.isNumberColumnEnabled;
       delete cleanedAttrs.layout;
+      cleaned.attrs = cleanedAttrs;
+    } else {
+      // For all other node types, apply cleaned attrs
+      cleaned.attrs = cleanedAttrs;
     }
-
-    cleaned.attrs = cleanedAttrs;
   }
 
   // Recursively clean content array

@@ -71,10 +71,7 @@ const textfieldWrapperStyle = xcss({
 const toggleFooterStyle = xcss({
   paddingBlockStart: 'space.150',
   paddingBlockEnd: 'space.050',
-  paddingInline: 'space.100',
-  borderTopWidth: 'border.width',
-  borderTopStyle: 'solid',
-  borderTopColor: 'color.border'
+  paddingInline: 'space.100'
 });
 
 /**

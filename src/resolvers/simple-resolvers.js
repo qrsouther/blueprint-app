@@ -9,7 +9,7 @@
 
 import { storage, startsWith } from '@forge/api';
 import api, { route } from '@forge/api';
-import { detectVariables, detectToggles } from '../utils/detection-utils.js';
+import { detectVariables, detectToggles, detectVariablesWithToggleContext } from '../utils/detection-utils.js';
 import { saveVersion } from '../utils/version-manager.js';
 import { validateExcerptData, safeStorageSet } from '../utils/storage-validator.js';
 import { updateExcerptIndex } from '../utils/storage-utils.js';
@@ -81,7 +81,9 @@ export async function detectVariablesFromContent(req) {
       );
     }
 
-    const variables = detectVariables(contentToProcess);
+    // Use toggle-aware detection to auto-compute required property
+    // Variables outside toggles are required, variables only inside toggles are optional
+    const variables = detectVariablesWithToggleContext(contentToProcess);
     return {
       success: true,
       data: {
@@ -1924,6 +1926,266 @@ export async function backfillBespokeProperty(req) {
         updated: results.updated,
         skipped: results.skipped,
         errors: results.errors
+      }
+    };
+  }
+}
+
+/**
+ * Backfill headless property on all existing Sources
+ *
+ * Iterates through all Sources in the excerpt-index and adds headless: false
+ * to any Source that doesn't already have the property defined.
+ *
+ * This is a one-time migration utility to ensure all Sources have the headless
+ * property after the feature is introduced.
+ *
+ * @returns {Promise<Object>} Result with { success, updated, skipped, errors }
+ */
+export async function backfillHeadlessProperty(req) {
+  logFunction('backfillHeadlessProperty', 'START', {});
+
+  const results = {
+    updated: 0,
+    skipped: 0,
+    errors: []
+  };
+
+  try {
+    // Get the excerpt index
+    const index = await storage.get('excerpt-index') || { excerpts: [] };
+
+    if (!index.excerpts || index.excerpts.length === 0) {
+      logSuccess('backfillHeadlessProperty', 'No excerpts to backfill', { updated: 0 });
+      return {
+        success: true,
+        data: {
+          updated: 0,
+          skipped: 0,
+          errors: []
+        }
+      };
+    }
+
+    logPhase('backfillHeadlessProperty', 'Processing excerpts', { count: index.excerpts.length });
+
+    for (const { id } of index.excerpts) {
+      try {
+        const excerpt = await storage.get(`excerpt:${id}`);
+
+        if (!excerpt) {
+          results.errors.push({ id, error: 'Excerpt not found in storage' });
+          continue;
+        }
+
+        // Check if headless property already exists
+        if (excerpt.headless !== undefined) {
+          results.skipped++;
+          continue;
+        }
+
+        // Add headless: false to the excerpt
+        excerpt.headless = false;
+        excerpt.updatedAt = new Date().toISOString();
+
+        // Recalculate content hash since we modified the object
+        excerpt.contentHash = calculateContentHash(excerpt);
+
+        // Save the updated excerpt
+        await storage.set(`excerpt:${id}`, excerpt);
+        results.updated++;
+
+      } catch (excerptError) {
+        logFailure('backfillHeadlessProperty', 'Error processing excerpt', excerptError, { id });
+        results.errors.push({ id, error: excerptError.message });
+      }
+    }
+
+    logSuccess('backfillHeadlessProperty', 'Completed', {
+      updated: results.updated,
+      skipped: results.skipped,
+      errorCount: results.errors.length
+    });
+
+    return {
+      success: results.errors.length === 0,
+      data: {
+        updated: results.updated,
+        skipped: results.skipped,
+        errors: results.errors
+      }
+    };
+
+  } catch (error) {
+    logFailure('backfillHeadlessProperty', 'Error', error);
+    return {
+      success: false,
+      error: error.message,
+      data: {
+        updated: results.updated,
+        skipped: results.skipped,
+        errors: results.errors
+      }
+    };
+  }
+}
+
+/**
+ * Backfill variable required property on all existing Sources
+ *
+ * Iterates through all Sources in the excerpt-index and re-computes the
+ * 'required' property for each variable based on toggle context:
+ * - Variables with occurrences OUTSIDE any toggle → required: true
+ * - Variables ONLY inside toggle blocks → required: false
+ *
+ * This is a one-time migration utility to convert from manually-set required
+ * values to auto-computed values based on toggle context.
+ *
+ * @returns {Promise<Object>} Result with { success, updated, skipped, errors }
+ */
+export async function backfillVariableRequiredProperty(req) {
+  logFunction('backfillVariableRequiredProperty', 'START', {});
+
+  const results = {
+    updated: 0,
+    skipped: 0,
+    errors: [],
+    details: []  // Track per-source details for reporting
+  };
+
+  try {
+    // Get the excerpt index
+    const index = await storage.get('excerpt-index') || { excerpts: [] };
+
+    if (!index.excerpts || index.excerpts.length === 0) {
+      logSuccess('backfillVariableRequiredProperty', 'No excerpts to backfill', { updated: 0 });
+      return {
+        success: true,
+        data: {
+          updated: 0,
+          skipped: 0,
+          errors: [],
+          details: []
+        }
+      };
+    }
+
+    logPhase('backfillVariableRequiredProperty', 'Processing excerpts', { count: index.excerpts.length });
+
+    for (const { id } of index.excerpts) {
+      try {
+        const excerpt = await storage.get(`excerpt:${id}`);
+
+        if (!excerpt) {
+          results.errors.push({ id, error: 'Excerpt not found in storage' });
+          continue;
+        }
+
+        // Skip if no content (can't compute toggle context)
+        if (!excerpt.content) {
+          results.skipped++;
+          results.details.push({ id, name: excerpt.name, status: 'skipped', reason: 'no content' });
+          continue;
+        }
+
+        // Skip if no variables
+        if (!excerpt.variables || excerpt.variables.length === 0) {
+          results.skipped++;
+          results.details.push({ id, name: excerpt.name, status: 'skipped', reason: 'no variables' });
+          continue;
+        }
+
+        // Re-detect variables with toggle context to get auto-computed required values
+        const detectedVariables = detectVariablesWithToggleContext(excerpt.content);
+
+        // Build a map of variable name -> auto-computed required
+        const computedRequired = new Map();
+        for (const v of detectedVariables) {
+          computedRequired.set(v.name, v.required);
+        }
+
+        // Track changes for reporting
+        const changes = [];
+        let hasChanges = false;
+
+        // Update variables with new required values, preserving other metadata
+        const updatedVariables = excerpt.variables.map(v => {
+          const newRequired = computedRequired.has(v.name) ? computedRequired.get(v.name) : false;
+          const oldRequired = v.required || false;
+
+          if (newRequired !== oldRequired) {
+            hasChanges = true;
+            changes.push({
+              variable: v.name,
+              oldRequired,
+              newRequired
+            });
+          }
+
+          return {
+            ...v,
+            required: newRequired
+          };
+        });
+
+        // Skip if no changes needed
+        if (!hasChanges) {
+          results.skipped++;
+          results.details.push({ id, name: excerpt.name, status: 'skipped', reason: 'no changes needed' });
+          continue;
+        }
+
+        // Update the excerpt
+        excerpt.variables = updatedVariables;
+        excerpt.updatedAt = new Date().toISOString();
+
+        // Recalculate content hash since we modified the object
+        excerpt.contentHash = calculateContentHash(excerpt);
+
+        // Save the updated excerpt
+        await storage.set(`excerpt:${id}`, excerpt);
+        results.updated++;
+        results.details.push({
+          id,
+          name: excerpt.name,
+          status: 'updated',
+          changes
+        });
+
+        logPhase('backfillVariableRequiredProperty', `Updated ${excerpt.name}`, { changes });
+
+      } catch (excerptError) {
+        logFailure('backfillVariableRequiredProperty', 'Error processing excerpt', excerptError, { id });
+        results.errors.push({ id, error: excerptError.message });
+      }
+    }
+
+    logSuccess('backfillVariableRequiredProperty', 'Completed', {
+      updated: results.updated,
+      skipped: results.skipped,
+      errorCount: results.errors.length
+    });
+
+    return {
+      success: results.errors.length === 0,
+      data: {
+        updated: results.updated,
+        skipped: results.skipped,
+        errors: results.errors,
+        details: results.details
+      }
+    };
+
+  } catch (error) {
+    logFailure('backfillVariableRequiredProperty', 'Error', error);
+    return {
+      success: false,
+      error: error.message,
+      data: {
+        updated: results.updated,
+        skipped: results.skipped,
+        errors: results.errors,
+        details: results.details
       }
     };
   }

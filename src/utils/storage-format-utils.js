@@ -224,18 +224,27 @@ ${links}
  * @param {Array} options.documentationLinks - Array of {anchor, url} objects for documentation links panel
  * @returns {string} Complete chapter HTML with boundary markers
  */
-export function buildChapterStructure({ chapterId, localId, heading, bodyContent, complianceLevel = null, isBespoke = false, documentationLinks = [] }) {
+export function buildChapterStructure({ chapterId, localId, heading, bodyContent, complianceLevel = null, isBespoke = false, documentationLinks = [], headless = false }) {
   if (!chapterId || !localId) {
     throw new Error('buildChapterStructure requires chapterId and localId');
   }
 
-  const escapedHeading = escapeHtml(heading || 'Untitled Chapter');
-  const statusMacro = buildStatusMacro(complianceLevel, isBespoke);
-  const docsPanel = buildDocumentationLinksPanel(documentationLinks);
-
   // Build chapter with hidden Content Properties boundary markers
   const startMarker = buildBoundaryMarker(localId, 'START');
   const endMarker = buildBoundaryMarker(localId, 'END');
+
+  // If headless, skip heading and emoji - just include body content and docs
+  if (headless) {
+    const docsPanel = buildDocumentationLinksPanel(documentationLinks);
+    return `${startMarker}
+${docsPanel}${bodyContent || ''}
+${endMarker}`;
+  }
+
+  // Standard mode: include heading with emoji
+  const escapedHeading = escapeHtml(heading || 'Untitled Chapter');
+  const statusMacro = buildStatusMacro(complianceLevel, isBespoke);
+  const docsPanel = buildDocumentationLinksPanel(documentationLinks);
 
   return `${startMarker}
 <h2>${statusMacro} ${escapedHeading}</h2>
@@ -259,13 +268,10 @@ ${endMarker}`;
  * @param {boolean} options.isBespoke - Fallback for when complianceLevel is null
  * @returns {string} Placeholder HTML with boundary markers
  */
-export function buildChapterPlaceholder({ chapterId, localId, heading, complianceLevel = null, isBespoke = false }) {
+export function buildChapterPlaceholder({ chapterId, localId, heading, complianceLevel = null, isBespoke = false, headless = false }) {
   if (!chapterId || !localId) {
     throw new Error('buildChapterPlaceholder requires chapterId and localId');
   }
-
-  const escapedHeading = escapeHtml(heading || 'New Chapter');
-  const statusMacro = buildStatusMacro(complianceLevel, isBespoke);
 
   const placeholderContent = `<ac:structured-macro ac:name="info" ac:schema-version="1">
 <ac:rich-text-body>
@@ -277,6 +283,18 @@ export function buildChapterPlaceholder({ chapterId, localId, heading, complianc
   // Build chapter with hidden Content Properties boundary markers
   const startMarker = buildBoundaryMarker(localId, 'START');
   const endMarker = buildBoundaryMarker(localId, 'END');
+
+  // If headless, skip heading and emoji
+  if (headless) {
+    return `${startMarker}
+${placeholderContent}
+<hr />
+${endMarker}`;
+  }
+
+  // Standard mode: include heading with emoji
+  const escapedHeading = escapeHtml(heading || 'New Chapter');
+  const statusMacro = buildStatusMacro(complianceLevel, isBespoke);
 
   return `${startMarker}
 <h2>${statusMacro} ${escapedHeading}</h2>
@@ -303,14 +321,10 @@ ${endMarker}`;
  * @param {string} options.complianceLevel - Compliance level (non-standard, tbd, na)
  * @returns {string} Complete chapter HTML with boundary markers
  */
-export function buildFreeformChapter({ chapterId, localId, heading, freeformContent = '', complianceLevel }) {
+export function buildFreeformChapter({ chapterId, localId, heading, freeformContent = '', complianceLevel, headless = false }) {
   if (!chapterId || !localId) {
     throw new Error('buildFreeformChapter requires chapterId and localId');
   }
-
-  const escapedHeading = escapeHtml(heading || 'Untitled Chapter');
-  // For freeform mode, always use the compliance level (no bespoke fallback)
-  const statusMacro = buildStatusMacro(complianceLevel, false);
 
   // Convert freeform text to paragraphs
   // Split by newlines and wrap each non-empty line in <p> tags
@@ -328,10 +342,72 @@ export function buildFreeformChapter({ chapterId, localId, heading, freeformCont
   const startMarker = buildBoundaryMarker(localId, 'START');
   const endMarker = buildBoundaryMarker(localId, 'END');
 
+  // If headless, skip heading and emoji
+  if (headless) {
+    return `${startMarker}
+${bodyContent}
+${endMarker}`;
+  }
+
+  // Standard mode: include heading with emoji
+  const escapedHeading = escapeHtml(heading || 'Untitled Chapter');
+  // For freeform mode, always use the compliance level (no bespoke fallback)
+  const statusMacro = buildStatusMacro(complianceLevel, false);
+
   return `${startMarker}
 <h2>${statusMacro} ${escapedHeading}</h2>
 ${bodyContent}
 ${endMarker}`;
+}
+
+/**
+ * Find the position of an Embed macro in page storage format
+ *
+ * Searches for the Embed macro with the given localId in the page storage content.
+ * Handles both ADF extension format and structured-macro format.
+ *
+ * @param {string} pageBody - Full page storage content
+ * @param {string} localId - Embed macro localId to find
+ * @returns {Object|null} { position: number, macroEnd: number } or null if not found
+ */
+export function findEmbedMacroPosition(pageBody, localId) {
+  if (!pageBody || !localId) return null;
+
+  // Try ADF extension format first (newer format)
+  // Look for: <ac:adf-attribute key="local-id">${localId}</ac:adf-attribute>
+  const adfLocalIdPattern = `<ac:adf-attribute key="local-id">${localId}</ac:adf-attribute>`;
+  const adfLocalIdIndex = pageBody.indexOf(adfLocalIdPattern);
+  
+  if (adfLocalIdIndex !== -1) {
+    // Find the end of the ADF extension (look for closing </ac:adf-extension>)
+    const adfExtensionStart = pageBody.lastIndexOf('<ac:adf-extension', adfLocalIdIndex);
+    if (adfExtensionStart !== -1) {
+      const adfExtensionEnd = pageBody.indexOf('</ac:adf-extension>', adfLocalIdIndex);
+      if (adfExtensionEnd !== -1) {
+        return {
+          position: adfExtensionStart,
+          macroEnd: adfExtensionEnd + '</ac:adf-extension>'.length
+        };
+      }
+    }
+  }
+
+  // Try structured-macro format (legacy or fallback)
+  // Look for: <ac:parameter ac:name="localId">${localId}</ac:parameter> within blueprint-standard-embed macro
+  const macroPattern = new RegExp(
+    `(<ac:structured-macro[^>]*ac:name="blueprint-standard-embed"[^>]*>[\\s\\S]*?<ac:parameter[^>]*ac:name="localId"[^>]*>${localId.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}<\\/ac:parameter>[\\s\\S]*?<\\/ac:structured-macro>)`,
+    'g'
+  );
+  
+  const match = macroPattern.exec(pageBody);
+  if (match) {
+    return {
+      position: match.index,
+      macroEnd: match.index + match[0].length
+    };
+  }
+
+  return null;
 }
 
 /**
@@ -369,20 +445,15 @@ export function findChapter(pageBody, localId) {
   const startIdPattern = `<ac:parameter ac:name="id">${startMarkerId}</ac:parameter>`;
   const endIdPattern = `<ac:parameter ac:name="id">${endMarkerId}</ac:parameter>`;
   
-  console.log('[findChapter] DEBUG - searching for start marker:', startIdPattern);
-  
   const startIdIndex = pageBody.indexOf(startIdPattern);
   const endIdIndex = pageBody.indexOf(endIdPattern);
   
   if (startIdIndex !== -1 && endIdIndex !== -1) {
-    console.log('[findChapter] DEBUG - found Content Properties boundaries');
-    
     // Find the opening of the START details macro (search backwards from the id parameter)
     const beforeStartId = pageBody.substring(0, startIdIndex);
     const startMacroOpen = beforeStartId.lastIndexOf('<ac:structured-macro');
     
     if (startMacroOpen === -1) {
-      console.log('[findChapter] DEBUG - could not find START macro opening');
       return null;
     }
     
@@ -390,18 +461,11 @@ export function findChapter(pageBody, localId) {
     // Search forward from endIdIndex for </ac:structured-macro>
     const afterEndId = pageBody.indexOf('</ac:structured-macro>', endIdIndex);
     if (afterEndId === -1) {
-      console.log('[findChapter] DEBUG - could not find END macro closing');
       return null;
     }
     const endMacroClose = afterEndId + '</ac:structured-macro>'.length;
     
     const chapterContent = pageBody.substring(startMacroOpen, endMacroClose);
-    
-    console.log('[findChapter] DEBUG - found chapter via Content Properties boundaries:', {
-      startIndex: startMacroOpen,
-      endIndex: endMacroClose,
-      contentLength: chapterContent.length
-    });
     
     return {
       startIndex: startMacroOpen,
@@ -410,8 +474,6 @@ export function findChapter(pageBody, localId) {
       localId: localId
     };
   }
-  
-  console.log('[findChapter] DEBUG - Content Properties boundaries not found, trying legacy Section macro');
 
   // FALLBACK: Look for legacy Section macro structure
   // Look for: <ac:parameter ac:name="blueprint-local">${localId}</ac:parameter>
@@ -419,7 +481,6 @@ export function findChapter(pageBody, localId) {
   const legacyParamIndex = pageBody.indexOf(legacyParamPattern);
   
   if (legacyParamIndex === -1) {
-    console.log('[findChapter] DEBUG - no legacy blueprint-local parameter found');
     return null;
   }
 
@@ -427,7 +488,6 @@ export function findChapter(pageBody, localId) {
   const beforeParam = pageBody.substring(0, legacyParamIndex);
   const macroStart = beforeParam.lastIndexOf('<ac:structured-macro');
   if (macroStart === -1) {
-    console.log('[findChapter] DEBUG - no opening macro tag found');
     return null;
   }
 
@@ -435,7 +495,6 @@ export function findChapter(pageBody, localId) {
   const macroTagEnd = pageBody.indexOf('>', macroStart);
   const macroTag = pageBody.substring(macroStart, macroTagEnd + 1);
   if (!macroTag.includes('ac:name="section"')) {
-    console.log('[findChapter] DEBUG - macro is not a section:', macroTag);
     return null;
   }
 
@@ -491,12 +550,10 @@ export function findChapter(pageBody, localId) {
     const distanceToMacro = macroStart - lastH2Index;
     if (distanceToMacro < 500) {
       chapterStart = lastH2Index;
-      console.log('[findChapter] DEBUG - found <h2> at', lastH2Index, 'distance:', distanceToMacro);
     }
   }
 
   const content = pageBody.substring(chapterStart, macroEnd);
-  console.log('[findChapter] DEBUG - found chapter from', chapterStart, 'to', macroEnd);
 
   return {
     startIndex: chapterStart,

@@ -10,7 +10,7 @@
 import { storage, startsWith } from '@forge/api';
 import api, { route } from '@forge/api';
 import { generateUUID } from '../utils.js';
-import { detectVariables, detectToggles, detectVariableOccurrences, mergeOccurrencesIntoVariables } from '../utils/detection-utils.js';
+import { detectVariables, detectToggles, detectVariableOccurrences, mergeOccurrencesIntoVariables, detectVariablesWithToggleContext } from '../utils/detection-utils.js';
 import { updateExcerptIndex } from '../utils/storage-utils.js';
 import { calculateContentHash } from '../utils/hash-utils.js';
 import { logFunction, logPhase, logSuccess, logFailure, logWarning } from '../utils/forge-logger.js';
@@ -25,7 +25,7 @@ export async function saveExcerpt(req) {
   logFunction('saveExcerpt', 'Starting save operation', { excerptId: req.payload.excerptId, excerptName: req.payload.excerptName });
 
   // Input validation
-  const { excerptName, category, content, excerptId, variableMetadata, toggleMetadata, documentationLinks, sourcePageId, sourceSpaceKey, sourceLocalId, bespoke } = req.payload;
+  const { excerptName, category, content, excerptId, variableMetadata, toggleMetadata, documentationLinks, sourcePageId, sourceSpaceKey, sourceLocalId, bespoke, headless } = req.payload;
 
   // Validate required fields
   if (!excerptName || typeof excerptName !== 'string' || excerptName.trim() === '') {
@@ -118,17 +118,20 @@ export async function saveExcerpt(req) {
     ]
   };
 
-  // Detect variables in content
-  const detectedVariables = detectVariables(contentToProcess);
+  // Detect variables with toggle context awareness
+  // Variables outside toggles are auto-required, variables only inside toggles are auto-optional
+  // This replaces manual required assignment - required is fully computed based on toggle context
+  const detectedVariables = detectVariablesWithToggleContext(contentToProcess);
 
-  // Merge detected variables with provided metadata
+  // Merge detected variables with provided metadata (description/example only)
+  // The 'required' property is auto-computed and NOT taken from metadata
   let variables = detectedVariables.map(v => {
     const metadata = variableMetadata?.find(m => m.name === v.name);
     return {
       name: v.name,
       description: metadata?.description || '',
       example: metadata?.example || '',
-      required: metadata?.required || false
+      required: v.required  // Auto-computed from toggle context, not from metadata
     };
   });
 
@@ -157,6 +160,7 @@ export async function saveExcerpt(req) {
     name: excerptName,
     category: category || 'General',
     bespoke: bespoke !== undefined ? bespoke : (existingExcerpt?.bespoke || false),
+    headless: headless !== undefined ? headless : (existingExcerpt?.headless || false),
     content: contentToProcess,
     variables: variables,
     toggles: toggles,
@@ -223,6 +227,7 @@ export async function saveExcerpt(req) {
       excerptName: excerptName,
       category: category,
       bespoke: excerpt.bespoke,
+      headless: excerpt.headless,
       content: content,
       variables: variables,
       toggles: toggles,
@@ -278,20 +283,23 @@ export async function updateExcerptContent(req) {
       );
     }
 
-    // Update content and re-detect variables/toggles
-    const detectedVariables = detectVariables(content);
+    // Update content and re-detect variables/toggles with toggle context awareness
+    // Variables outside toggles are auto-required, variables only inside toggles are auto-optional
+    const detectedVariables = detectVariablesWithToggleContext(content);
     const detectedToggles = detectToggles(content);
 
-    // Preserve existing variable metadata, but update the list
+    // Preserve existing variable metadata (description/example), but update the list
+    // The 'required' property is always re-computed from toggle context
     let variables = detectedVariables.map(v => {
       const existing = excerpt.variables?.find(ev => ev.name === v.name);
       // Preserve existing metadata but don't preserve old occurrences (will be re-computed)
-      const { occurrences, ...existingMetadata } = existing || {};
-      return existingMetadata?.name ? existingMetadata : {
+      // Also don't preserve old 'required' value - it's now auto-computed
+      const { occurrences, required: _oldRequired, ...existingMetadata } = existing || {};
+      return {
         name: v.name,
-        description: '',
-        example: '',
-        multiline: false
+        description: existingMetadata?.description || '',
+        example: existingMetadata?.example || '',
+        required: v.required  // Auto-computed from toggle context
       };
     });
 

@@ -576,3 +576,105 @@ export function detectToggles(content) {
 
   return toggles;
 }
+
+/**
+ * Detect variables with toggle context awareness
+ *
+ * Walks the content and detects all variables, tracking whether each occurrence
+ * is inside a toggle block or outside. Variables are automatically marked as
+ * required if they have at least one occurrence OUTSIDE any toggle block.
+ *
+ * This enables automatic "required" detection:
+ * - Variables with any occurrence outside toggles → required: true (always rendered)
+ * - Variables ONLY inside toggles → required: false (may not render if toggle disabled)
+ *
+ * Supports both plain text strings and ADF format objects.
+ *
+ * @param {string|Object} content - The content to scan (plain text or ADF object)
+ * @returns {Array<Object>} Array of variable objects with name, description, example, and auto-computed required
+ *
+ * @example
+ * const content = "Hello {{name}}. {{toggle:details}}Your role is {{role}}.{{/toggle:details}}";
+ * const vars = detectVariablesWithToggleContext(content);
+ * // Returns: [
+ * //   { name: 'name', description: '', example: '', required: true },   // outside toggle
+ * //   { name: 'role', description: '', example: '', required: false }   // only inside toggle
+ * // ]
+ */
+export function detectVariablesWithToggleContext(content) {
+  // Extract text from content (handle both string and ADF object)
+  let textContent = '';
+  if (typeof content === 'string') {
+    textContent = content;
+  } else if (content && typeof content === 'object') {
+    // ADF format
+    textContent = extractTextFromAdf(content);
+  }
+
+  if (!textContent) {
+    return [];
+  }
+
+  // Track variables and whether they appear outside toggles
+  // Map: variableName -> { hasOccurrenceOutsideToggle: boolean }
+  const variableInfo = new Map();
+
+  // Combined regex to find all markers and variables in order
+  // Matches: {{toggle:name}}, {{/toggle:name}}, or {{variableName}}
+  const markerRegex = /\{\{(toggle:([^}]+)|\/toggle:([^}]+)|([^}]+))\}\}/g;
+
+  // Track toggle depth (0 = outside all toggles, >0 = inside toggle(s))
+  let toggleDepth = 0;
+
+  let match;
+  while ((match = markerRegex.exec(textContent)) !== null) {
+    const fullMatch = match[1]; // Content inside {{...}}
+
+    // Check if it's an opening toggle marker: {{toggle:name}}
+    if (match[2]) {
+      // Opening toggle - increase depth
+      toggleDepth++;
+      continue;
+    }
+
+    // Check if it's a closing toggle marker: {{/toggle:name}}
+    if (match[3]) {
+      // Closing toggle - decrease depth (but don't go below 0)
+      toggleDepth = Math.max(0, toggleDepth - 1);
+      continue;
+    }
+
+    // It's a variable: {{variableName}}
+    const varName = match[4]?.trim();
+    if (!varName) continue;
+
+    // Skip any remaining toggle-like patterns (safety check)
+    if (varName.startsWith('toggle:') || varName.startsWith('/toggle:')) {
+      continue;
+    }
+
+    // Track this variable
+    if (!variableInfo.has(varName)) {
+      variableInfo.set(varName, { hasOccurrenceOutsideToggle: false });
+    }
+
+    // If we're at depth 0 (outside all toggles), mark it
+    if (toggleDepth === 0) {
+      variableInfo.get(varName).hasOccurrenceOutsideToggle = true;
+    }
+  }
+
+  // Convert to array format with auto-computed required property
+  const variables = [];
+  for (const [name, info] of variableInfo) {
+    variables.push({
+      name,
+      description: '',
+      example: '',
+      // Required if ANY occurrence is outside a toggle (will always be rendered)
+      required: info.hasOccurrenceOutsideToggle
+    });
+  }
+
+  return variables;
+}

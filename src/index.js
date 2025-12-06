@@ -43,6 +43,8 @@ import {
   setAdminUrl as setAdminUrlResolver,
   getForgeEnvironment as getForgeEnvironmentResolver,
   backfillBespokeProperty as backfillBespokePropertyResolver,
+  backfillHeadlessProperty as backfillHeadlessPropertyResolver,
+  backfillVariableRequiredProperty as backfillVariableRequiredPropertyResolver,
   cacheIncompleteStatus as cacheIncompleteStatusResolver
 } from './resolvers/simple-resolvers.js';
 
@@ -151,7 +153,8 @@ import {
   publishChapter as publishChapterResolver,
   getPublishStatus as getPublishStatusResolver,
   injectPlaceholder as injectPlaceholderResolver,
-  removeChapterFromPage as removeChapterFromPageResolver
+  removeChapterFromPage as removeChapterFromPageResolver,
+  insertEmbedAbove as insertEmbedAboveResolver
 } from './resolvers/injection-resolver.js';
 
 // Import compositor resolver functions
@@ -390,6 +393,8 @@ resolver.define('backfillRedlineFields', backfillRedlineFieldsResolver);
 
 // Backfill bespoke property on all Sources (one-time migration)
 resolver.define('backfillBespokeProperty', backfillBespokePropertyResolver);
+resolver.define('backfillHeadlessProperty', backfillHeadlessPropertyResolver);
+resolver.define('backfillVariableRequiredProperty', backfillVariableRequiredPropertyResolver);
 
 // Cache incomplete status for faster unpublished Embed detection
 resolver.define('cacheIncompleteStatus', cacheIncompleteStatusResolver);
@@ -1079,6 +1084,9 @@ resolver.define('injectPlaceholder', injectPlaceholderResolver);
 
 // Remove a chapter from a page (called when user opts out via Compositor)
 resolver.define('removeChapterFromPage', removeChapterFromPageResolver);
+
+// Insert a new Embed macro above an existing one (for adding chapters)
+resolver.define('insertEmbedAbove', insertEmbedAboveResolver);
 
 // ============================================================================
 // COMPOSITOR RESOLVERS (Page-Level Blueprint Composition)

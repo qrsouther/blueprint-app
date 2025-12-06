@@ -157,7 +157,11 @@ export async function saveVersion(storageInstance, storageKey, data, metadata = 
 
   try {
     // Check if pruning is needed (once per day)
-    await pruneExpiredVersionsIfNeeded(storageInstance);
+    // CRITICAL FIX: Don't await pruning - it can take 30+ seconds and cause Forge timeouts
+    // Run it in the background (fire-and-forget) to avoid blocking user operations
+    pruneExpiredVersionsIfNeeded(storageInstance).catch(pruneError => {
+      logFailure(FUNCTION_NAME, 'Background pruning failed (non-blocking)', pruneError);
+    });
 
     // Extract entity ID from storage key (e.g., "excerpt:abc123" -> "abc123")
     const keyParts = storageKey.split(':');

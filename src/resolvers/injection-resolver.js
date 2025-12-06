@@ -20,6 +20,7 @@ import {
   buildChapterPlaceholder,
   buildFreeformChapter,
   findChapter,
+  findEmbedMacroPosition,
   stripLeadingHeading
 } from '../utils/storage-format-utils.js';
 import {
@@ -374,8 +375,10 @@ export async function publishChapter(req) {
       if (renderedAdf && typeof renderedAdf === 'object' && renderedAdf.type === 'doc') {
         // Log content stats before filtering
         const beforeContentLength = JSON.stringify(renderedAdf).length;
+        const beforeContentNodes = renderedAdf.content?.length || 0;
         logPhase('publishChapter', 'Before toggle filtering', { 
           contentLength: beforeContentLength,
+          contentNodes: beforeContentNodes,
           toggleStates: toggleStates,
           hasToggles: JSON.stringify(renderedAdf).includes('{{toggle:')
         });
@@ -398,21 +401,56 @@ export async function publishChapter(req) {
         
         // Log content stats after filtering
         const afterContentLength = JSON.stringify(renderedAdf).length;
+        const afterContentNodes = renderedAdf.content?.length || 0;
         logPhase('publishChapter', 'After toggle filtering', { 
           contentLength: afterContentLength,
-          contentReduction: beforeContentLength - afterContentLength
+          contentNodes: afterContentNodes,
+          contentReduction: beforeContentLength - afterContentLength,
+          nodesReduction: beforeContentNodes - afterContentNodes
         });
+        
+        // Validate that content is not empty after filtering
+        if (!renderedAdf.content || renderedAdf.content.length === 0) {
+          logFailure('publishChapter', 'Content is empty after filtering', new Error('No content remaining after toggle filtering'), {
+            excerptId,
+            localId,
+            toggleStates,
+            beforeContentNodes,
+            afterContentNodes
+          });
+          return { 
+            success: false, 
+            error: 'Content is empty after applying toggles. Please ensure at least one toggle is enabled or disable all toggles to show all content.' 
+          };
+        }
       } else {
-        logWarning('publishChapter', 'Content is not ADF format', { excerptId });
+        logWarning('publishChapter', 'Content is not ADF format', { excerptId, localId, contentType: typeof renderedAdf });
+        return { 
+          success: false, 
+          error: `Source content is not in ADF format. Content type: ${typeof renderedAdf}` 
+        };
       }
 
       // 4. Convert ADF to storage format
-      logPhase('publishChapter', 'Converting ADF to storage format', { excerptId });
+      logPhase('publishChapter', 'Converting ADF to storage format', { excerptId, localId });
       storageContent = await convertAdfToStorage(renderedAdf);
-      if (!storageContent) {
-        logFailure('publishChapter', 'ADF conversion failed', new Error('Conversion returned null'));
-        return { success: false, error: 'Failed to convert content to storage format' };
+      if (!storageContent || (typeof storageContent === 'string' && storageContent.trim().length === 0)) {
+        logFailure('publishChapter', 'ADF conversion failed', new Error('Conversion returned null or empty'), {
+          excerptId,
+          localId,
+          renderedAdfType: typeof renderedAdf,
+          renderedAdfHasContent: !!renderedAdf,
+          renderedAdfContentLength: renderedAdf?.content?.length || 0,
+          renderedAdfStringLength: JSON.stringify(renderedAdf).length
+        });
+        return { success: false, error: 'Failed to convert content to storage format (conversion returned empty result). This may indicate the content structure is invalid or incompatible.' };
       }
+      
+      logPhase('publishChapter', 'ADF conversion successful', {
+        excerptId,
+        localId,
+        storageContentLength: storageContent.length
+      });
     }
 
     // 5. Get current page content
@@ -434,23 +472,39 @@ export async function publishChapter(req) {
 
     // 6. Determine chapter ID (use existing or generate from localId)
     const chapterId = embedConfig.chapterId || `chapter-${localId}`;
-    console.log('[publishChapter] DEBUG - chapterId:', chapterId);
-    console.log('[publishChapter] DEBUG - embedConfig.chapterId:', embedConfig.chapterId);
+    logPhase('publishChapter', 'Determining chapter ID', { 
+      chapterId, 
+      embedConfigChapterId: embedConfig.chapterId,
+      localId 
+    });
 
-    // 7. Check if chapter already exists in page (search by localId for new Content Properties boundaries)
-    console.log('[publishChapter] DEBUG - searching for chapter by localId:', localId);
-    console.log('[publishChapter] DEBUG - page body length:', pageBody.length);
+    // 7. Find the Embed macro position - this is always our anchor point
+    logPhase('publishChapter', 'Finding Embed macro position', { 
+      localId, 
+      pageBodyLength: pageBody.length 
+    });
     
-    const existingChapter = findChapter(pageBody, localId);
-    console.log('[publishChapter] DEBUG - existingChapter found:', existingChapter !== null);
-    if (existingChapter) {
-      console.log('[publishChapter] DEBUG - existingChapter.startIndex:', existingChapter.startIndex);
-      console.log('[publishChapter] DEBUG - existingChapter.endIndex:', existingChapter.endIndex);
+    const embedPosition = findEmbedMacroPosition(pageBody, localId);
+    
+    if (!embedPosition) {
+      logFailure('publishChapter', 'Embed macro not found in page', new Error('Embed macro not found'), {
+        localId,
+        pageId,
+        pageBodyLength: pageBody.length
+      });
+      return { 
+        success: false, 
+        error: 'Embed macro not found in page. The Embed may have been deleted or moved.' 
+      };
     }
+    
+    logPhase('publishChapter', 'Found Embed macro', {
+      localId,
+      embedStart: embedPosition.position,
+      embedEnd: embedPosition.macroEnd
+    });
 
-    let newPageBody;
-
-    // Build the chapter HTML (same structure for new or update)
+    // 8. Build the chapter HTML
     // Use passed heading or fall back to excerpt name
     const heading = passedHeading || excerpt.name || 'Untitled Chapter';
     
@@ -462,7 +516,8 @@ export async function publishChapter(req) {
         localId,
         heading: heading,
         freeformContent: freeformContent || '',
-        complianceLevel
+        complianceLevel,
+        headless: excerpt.headless || false
       });
     } else {
       // Strip leading heading from body content to prevent duplicate headings
@@ -478,26 +533,94 @@ export async function publishChapter(req) {
         bodyContent: cleanedBodyContent,
         complianceLevel,
         isBespoke: excerpt.bespoke || false,
-        documentationLinks: excerpt.documentationLinks || []
+        documentationLinks: excerpt.documentationLinks || [],
+        headless: excerpt.headless || false
       });
     }
 
-    if (existingChapter) {
-      // Update existing chapter - replace entire layout block
-      // (With Locked Page Model, the whole chapter IS the managed content)
-      logPhase('publishChapter', 'Replacing existing chapter', { chapterId });
+    // 9. Search for existing chapter boundaries AFTER the Embed macro
+    // This ensures we always anchor on the Embed position
+    const contentAfterEmbed = pageBody.substring(embedPosition.macroEnd);
+    const startMarkerId = `blueprint-start-${localId}`;
+    const endMarkerId = `blueprint-end-${localId}`;
+    const startMarkerPattern = `<ac:parameter ac:name="id">${startMarkerId}</ac:parameter>`;
+    const endMarkerPattern = `<ac:parameter ac:name="id">${endMarkerId}</ac:parameter>`;
+    
+    const startMarkerRelativeIndex = contentAfterEmbed.indexOf(startMarkerPattern);
+    const endMarkerRelativeIndex = contentAfterEmbed.indexOf(endMarkerPattern);
+    
+    let newPageBody;
+    
+    if (startMarkerRelativeIndex !== -1 && endMarkerRelativeIndex !== -1) {
+      // Existing chapter found after Embed - replace it
+      // Find the full boundaries (need to find the opening/closing of the details macros)
+      const beforeStartMarker = contentAfterEmbed.substring(0, startMarkerRelativeIndex);
+      const chapterStartOffset = beforeStartMarker.lastIndexOf('<ac:structured-macro');
+      
+      if (chapterStartOffset !== -1) {
+        const afterEndMarker = contentAfterEmbed.indexOf('</ac:structured-macro>', endMarkerRelativeIndex);
+        if (afterEndMarker !== -1) {
+          const chapterEndOffset = afterEndMarker + '</ac:structured-macro>'.length;
+          
+          // Calculate absolute positions
+          const absoluteChapterStart = embedPosition.macroEnd + chapterStartOffset;
+          const absoluteChapterEnd = embedPosition.macroEnd + chapterEndOffset;
+          
+          logPhase('publishChapter', 'Replacing existing chapter after Embed', {
+            localId,
+            chapterId,
+            absoluteChapterStart,
+            absoluteChapterEnd
+          });
+          
+          newPageBody =
+            pageBody.substring(0, absoluteChapterStart) +
+            chapterHtml +
+            pageBody.substring(absoluteChapterEnd);
+        }
+      }
+    }
+    
+    // If we didn't replace (no existing chapter or couldn't parse boundaries), insert new
+    if (!newPageBody) {
+      logPhase('publishChapter', 'Inserting new chapter after Embed', {
+        localId,
+        chapterId,
+        insertPosition: embedPosition.macroEnd
+      });
+      
       newPageBody =
-        pageBody.substring(0, existingChapter.startIndex) +
-        chapterHtml +
-        pageBody.substring(existingChapter.endIndex);
-    } else {
-      // New chapter - append to page
-      logPhase('publishChapter', 'Injecting new chapter', { chapterId });
-      newPageBody = pageBody.trim() + '\n\n' + chapterHtml;
+        pageBody.substring(0, embedPosition.macroEnd) +
+        '\n\n' + chapterHtml + '\n' +
+        pageBody.substring(embedPosition.macroEnd);
     }
 
-    // 8. Update page via REST API
-    logPhase('publishChapter', 'Updating page', { pageId, newVersion: currentVersion + 1 });
+    // 10. Validate that chapterHtml is not empty
+    if (!chapterHtml || chapterHtml.trim().length === 0) {
+      logFailure('publishChapter', 'Chapter HTML is empty', new Error('Empty chapter HTML'), { localId, chapterId });
+      return { success: false, error: 'Generated chapter content is empty' };
+    }
+
+    // 11. Validate that newPageBody contains the chapter markers
+    // (startMarkerId and endMarkerId are already defined in step 9)
+    if (!newPageBody.includes(startMarkerId) || !newPageBody.includes(endMarkerId)) {
+      logFailure('publishChapter', 'Chapter markers missing from page body', new Error('Markers not found'), { 
+        localId, 
+        chapterId,
+        hasStartMarker: newPageBody.includes(startMarkerId),
+        hasEndMarker: newPageBody.includes(endMarkerId),
+        chapterHtmlLength: chapterHtml.length
+      });
+      return { success: false, error: 'Chapter markers missing from generated content' };
+    }
+
+    // 12. Update page via REST API
+    logPhase('publishChapter', 'Updating page', { 
+      pageId, 
+      newVersion: currentVersion + 1,
+      newPageBodyLength: newPageBody.length,
+      chapterHtmlLength: chapterHtml.length
+    });
     const updateResponse = await api.asApp().requestConfluence(
       route`/wiki/api/v2/pages/${pageId}`,
       {
@@ -524,11 +647,77 @@ export async function publishChapter(req) {
 
     if (!updateResponse.ok) {
       const errorText = await updateResponse.text();
-      logFailure('publishChapter', 'Failed to update page', new Error(errorText), { status: updateResponse.status });
+      logFailure('publishChapter', 'Failed to update page', new Error(errorText), { 
+        status: updateResponse.status,
+        pageId,
+        localId,
+        chapterId
+      });
       return { success: false, error: `Failed to update page: ${updateResponse.status}` };
     }
 
     const updatedPage = await updateResponse.json();
+    
+    // Verify the content was actually persisted by reading it back
+    logPhase('publishChapter', 'Verifying content was persisted', { pageId, localId });
+    const verifyResponse = await api.asApp().requestConfluence(
+      route`/wiki/api/v2/pages/${pageId}?body-format=storage`,
+      { headers: { 'Accept': 'application/json' } }
+    );
+    
+    if (verifyResponse.ok) {
+      const verifyPageData = await verifyResponse.json();
+      const verifyPageBody = verifyPageData.body.storage.value;
+      const verifyChapter = findChapter(verifyPageBody, localId);
+      
+      if (!verifyChapter) {
+        // Check if markers exist in the page body (even if findChapter didn't find them)
+        const startMarkerId = `blueprint-start-${localId}`;
+        const endMarkerId = `blueprint-end-${localId}`;
+        const hasStartMarker = verifyPageBody.includes(startMarkerId);
+        const hasEndMarker = verifyPageBody.includes(endMarkerId);
+        
+        logFailure('publishChapter', 'Content verification failed - chapter not found after update', new Error('Content not persisted'), {
+          pageId,
+          localId,
+          chapterId,
+          pageVersion: updatedPage.version.number,
+          pageBodyLength: verifyPageBody.length,
+          hasStartMarker,
+          hasEndMarker,
+          startMarkerPattern: `<ac:parameter ac:name="id">${startMarkerId}</ac:parameter>`,
+          endMarkerPattern: `<ac:parameter ac:name="id">${endMarkerId}</ac:parameter>`
+        });
+        
+        // If markers exist but findChapter didn't find them, it's a detection issue, not a persistence issue
+        if (hasStartMarker && hasEndMarker) {
+          logWarning('publishChapter', 'Markers exist but findChapter failed - may be a detection issue', {
+            localId,
+            pageId
+          });
+          // Don't fail - the content is likely there, just not detected correctly
+        } else {
+          return { 
+            success: false, 
+            error: `Page update succeeded but content was not persisted. Markers missing: start=${!hasStartMarker}, end=${!hasEndMarker}. This may indicate a Confluence validation issue or content was stripped.` 
+          };
+        }
+      }
+      
+      logPhase('publishChapter', 'Content verification successful', {
+        pageId,
+        localId,
+        chapterId,
+        verifiedChapterLength: verifyChapter.content.length
+      });
+    } else {
+      logWarning('publishChapter', 'Could not verify content persistence (verification request failed)', {
+        pageId,
+        localId,
+        status: verifyResponse.status
+      });
+      // Don't fail the publish if verification fails - just log a warning
+    }
 
     // 9. Update Embed config with published state
     // Store the Source's contentHash and ADF content at publish time for staleness detection
@@ -732,6 +921,15 @@ export async function injectPlaceholder(req) {
       return { success: true, message: 'Chapter already exists', chapterId };
     }
 
+    // Get excerpt to check for headless property (if excerptId is provided)
+    let isHeadless = false;
+    if (excerptId) {
+      const excerpt = await storage.get(`excerpt:${excerptId}`);
+      if (excerpt) {
+        isHeadless = excerpt.headless || false;
+      }
+    }
+
     // Build placeholder
     // Placeholder uses 'tbd' compliance level by default since no Source is selected yet
     const placeholderHtml = buildChapterPlaceholder({
@@ -739,7 +937,8 @@ export async function injectPlaceholder(req) {
       localId,
       heading: heading || 'New Chapter',
       complianceLevel: 'tbd',
-      isBespoke: false
+      isBespoke: false,
+      headless: isHeadless
     });
 
     const newPageBody = pageBody.trim() + '\n\n' + placeholderHtml;
@@ -878,6 +1077,162 @@ export async function removeChapterFromPage(req) {
 
   } catch (error) {
     logFailure('removeChapterFromPage', 'Error', error, { pageId, chapterId });
+    return { success: false, error: error.message };
+  }
+}
+
+/**
+ * Insert a new Embed macro above an existing one
+ *
+ * Creates a new Embed macro in the page storage directly ABOVE the specified
+ * Embed. The new Embed is pre-attached to the same Source as the existing one,
+ * allowing users to create a "clone" chapter that can be independently configured.
+ *
+ * @param {Object} req - Request object with payload
+ * @param {string} req.payload.pageId - Confluence page ID
+ * @param {string} req.payload.localId - Current Embed's localId (insert above this)
+ * @param {string} req.payload.excerptId - Source ID to attach to the new Embed
+ * @returns {Promise<Object>} Result with success status and newLocalId
+ */
+export async function insertEmbedAbove(req) {
+  const { pageId, localId, excerptId } = req.payload || {};
+
+  logFunction('insertEmbedAbove', 'START', { pageId, localId, excerptId });
+
+  try {
+    if (!pageId || !localId || !excerptId) {
+      return { success: false, error: 'Missing required parameters: pageId, localId, excerptId' };
+    }
+
+    // 1. Generate a new UUID for the new Embed
+    const newLocalId = crypto.randomUUID();
+    logPhase('insertEmbedAbove', 'Generated new localId', { newLocalId });
+
+    // 2. Get page content
+    const pageResponse = await api.asApp().requestConfluence(
+      route`/wiki/api/v2/pages/${pageId}?body-format=storage`,
+      { headers: { 'Accept': 'application/json' } }
+    );
+
+    if (!pageResponse.ok) {
+      const errorText = await pageResponse.text();
+      logFailure('insertEmbedAbove', 'Failed to get page', new Error(errorText));
+      return { success: false, error: 'Failed to get page' };
+    }
+
+    const pageData = await pageResponse.json();
+    const pageBody = pageData.body.storage.value;
+    const currentVersion = pageData.version.number;
+
+    // 3. Find the current Embed macro position
+    const embedPosition = findEmbedMacroPosition(pageBody, localId);
+    
+    if (!embedPosition) {
+      logFailure('insertEmbedAbove', 'Embed macro not found in page', new Error('Embed not found'), { localId });
+      return { success: false, error: 'Embed macro not found in page. It may have been deleted or moved.' };
+    }
+
+    logPhase('insertEmbedAbove', 'Found Embed position', { 
+      position: embedPosition.position, 
+      macroEnd: embedPosition.macroEnd 
+    });
+
+    // 4. Extract extension-key from the existing Embed macro to use the same environment
+    // This is more reliable than trying to extract from context, which varies by call source
+    const existingMacroContent = pageBody.substring(embedPosition.position, embedPosition.macroEnd);
+    
+    // Extract extension-key from existing macro
+    const extensionKeyMatch = existingMacroContent.match(/<ac:adf-attribute key="extension-key">([^<]+)<\/ac:adf-attribute>/);
+    if (!extensionKeyMatch) {
+      logFailure('insertEmbedAbove', 'Could not extract extension-key from existing Embed', new Error('Missing extension-key'));
+      return { success: false, error: 'Could not determine Embed configuration from existing macro.' };
+    }
+    
+    const extensionKey = extensionKeyMatch[1];
+    const extensionId = `ari:cloud:ecosystem::extension/${extensionKey}`;
+    
+    // Extract environment info from extension-key (format: APP_ID/ENV_ID/static/MACRO_KEY)
+    const keyParts = extensionKey.split('/');
+    const ENV_ID = keyParts[1] || 'ae38f536-b4c8-4dfa-a1c9-62026d61b4f9';
+    
+    // Determine environment label based on whether we're using the development env ID
+    const isDevelopment = ENV_ID === 'ae38f536-b4c8-4dfa-a1c9-62026d61b4f9';
+    const envLabel = isDevelopment ? ' (Development)' : '';
+    const forgeEnv = isDevelopment ? 'DEVELOPMENT' : 'PRODUCTION';
+
+    logPhase('insertEmbedAbove', 'Using extension config from existing Embed', { 
+      extensionKey, 
+      ENV_ID, 
+      isDevelopment 
+    });
+
+    const newEmbedMacro = `<ac:adf-extension><ac:adf-node type="extension"><ac:adf-attribute key="extension-key">${extensionKey}</ac:adf-attribute><ac:adf-attribute key="extension-type">com.atlassian.ecosystem</ac:adf-attribute><ac:adf-attribute key="parameters"><ac:adf-parameter key="local-id">${newLocalId}</ac:adf-parameter><ac:adf-parameter key="extension-id">${extensionId}</ac:adf-parameter><ac:adf-parameter key="extension-title">🎯 Blueprint App - Embed${envLabel}</ac:adf-parameter><ac:adf-parameter key="layout">default</ac:adf-parameter><ac:adf-parameter key="forge-environment">${forgeEnv}</ac:adf-parameter><ac:adf-parameter key="render">native</ac:adf-parameter></ac:adf-attribute><ac:adf-attribute key="text">🎯 Blueprint App - Embed${envLabel}</ac:adf-attribute><ac:adf-attribute key="layout">default</ac:adf-attribute><ac:adf-attribute key="local-id">${newLocalId}</ac:adf-attribute></ac:adf-node></ac:adf-extension>`;
+
+    // 5. Insert the new macro BEFORE the current Embed's position
+    const beforeEmbed = pageBody.substring(0, embedPosition.position);
+    const afterEmbed = pageBody.substring(embedPosition.position);
+    const newPageBody = beforeEmbed + newEmbedMacro + '\n\n' + afterEmbed;
+
+    // 6. Initialize storage for the new Embed with the same excerptId
+    await storage.set(`macro-vars:${newLocalId}`, {
+      excerptId,
+      pageId,
+      variableValues: {},
+      toggleStates: {},
+      customInsertions: [],
+      internalNotes: [],
+      createdAt: new Date().toISOString()
+    });
+
+    logPhase('insertEmbedAbove', 'Initialized storage for new Embed', { newLocalId, excerptId });
+
+    // 7. Update the page
+    const updateResponse = await api.asApp().requestConfluence(
+      route`/wiki/api/v2/pages/${pageId}`,
+      {
+        method: 'PUT',
+        headers: {
+          'Accept': 'application/json',
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          id: pageId,
+          status: 'current',
+          title: pageData.title,
+          body: {
+            representation: 'storage',
+            value: newPageBody
+          },
+          version: {
+            number: currentVersion + 1,
+            message: 'Blueprint: Added new chapter above'
+          }
+        })
+      }
+    );
+
+    if (!updateResponse.ok) {
+      const errorText = await updateResponse.text();
+      logFailure('insertEmbedAbove', 'Failed to update page', new Error(errorText));
+      // Clean up the storage we created since page update failed
+      await storage.delete(`macro-vars:${newLocalId}`);
+      return { success: false, error: 'Failed to update page' };
+    }
+
+    logSuccess('insertEmbedAbove', 'New Embed inserted above', { 
+      newLocalId, 
+      excerptId,
+      pageId 
+    });
+
+    return { 
+      success: true, 
+      newLocalId,
+      message: 'New chapter inserted above. Reload the page to see it.'
+    };
+
+  } catch (error) {
+    logFailure('insertEmbedAbove', 'Error', error, { pageId, localId, excerptId });
     return { success: false, error: error.message };
   }
 }

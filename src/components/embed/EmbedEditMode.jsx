@@ -659,7 +659,8 @@ export function EmbedEditMode({
           })}>
             <Stack space="space.0">
               {/* Chapter Heading with Compliance Level - Editable above Preview */}
-              {excerpt && (
+              {/* Hide heading and compliance level selector when Source is headless */}
+              {excerpt && !excerpt.headless && (
                 <Box xcss={xcss({ 
                   marginBottom: 'space.100',
                   paddingLeft: 'space.150',

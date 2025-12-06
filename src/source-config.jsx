@@ -1,3 +1,35 @@
+/**
+ * ╔══════════════════════════════════════════════════════════════════════════════╗
+ * ║                    ⚠️  CRITICAL: CLONE COMPONENT WARNING  ⚠️                  ║
+ * ╠══════════════════════════════════════════════════════════════════════════════╣
+ * ║                                                                              ║
+ * ║  This component (source-config.jsx) and ExcerptPreviewModal.jsx are         ║
+ * ║  INTENTIONAL CLONES that must be kept in sync.                              ║
+ * ║                                                                              ║
+ * ║  WHY THEY'RE SEPARATE:                                                       ║
+ * ║  - source-config.jsx uses Forge macro APIs (useConfig, useProductContext,   ║
+ * ║    view.submit) that are unavailable in the Admin context                   ║
+ * ║  - ExcerptPreviewModal runs inside the Admin UI Modal context               ║
+ * ║  - These Forge-specific integrations make true code sharing risky           ║
+ * ║                                                                              ║
+ * ║  🔴 MANDATORY: When modifying EITHER component:                              ║
+ * ║     1. Check if the same change applies to the other                        ║
+ * ║     2. Apply identical changes to BOTH to prevent drift                     ║
+ * ║     3. Both must call the SAME backend functions for detection/save         ║
+ * ║                                                                              ║
+ * ║  SHARED BACKEND FUNCTIONS (must be identical in both):                       ║
+ * ║  - detectVariablesFromContent → detectVariablesWithToggleContext            ║
+ * ║  - detectTogglesFromContent → detectToggles                                 ║
+ * ║  - saveExcerpt                                                              ║
+ * ║                                                                              ║
+ * ║  RELATED FILES:                                                              ║
+ * ║  - src/components/admin/ExcerptPreviewModal.jsx (the clone)                 ║
+ * ║  - src/components/common/SourceMetadataTabs.jsx (shared UI component)       ║
+ * ║  - src/hooks/useSourceEditor.js (shared hook - used by ExcerptPreviewModal) ║
+ * ║                                                                              ║
+ * ╚══════════════════════════════════════════════════════════════════════════════╝
+ */
+
 import React, { Fragment, useState, useEffect } from 'react';
 import ForgeReconciler, {
   Form,
@@ -79,12 +111,13 @@ const useSaveExcerptMutation = () => {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: async ({ excerptName, category, bespoke, content, excerptId, variableMetadata, toggleMetadata, documentationLinks, sourcePageId, sourcePageTitle, sourceSpaceKey, sourceLocalId }) => {
+    mutationFn: async ({ excerptName, category, bespoke, headless, content, excerptId, variableMetadata, toggleMetadata, documentationLinks, sourcePageId, sourcePageTitle, sourceSpaceKey, sourceLocalId }) => {
       try {
         const result = await invoke('saveExcerpt', {
           excerptName,
           category,
           bespoke,
+          headless,
           content,
           excerptId,
           variableMetadata,
@@ -137,6 +170,7 @@ const App = () => {
   const [excerptName, setExcerptName] = useState('');
   const [category, setCategory] = useState('General');
   const [bespoke, setBespoke] = useState(false); // Track whether Source is bespoke (custom) vs standard
+  const [headless, setHeadless] = useState(false); // Track whether Source is headless (no heading/emoji)
   const [dataLoaded, setDataLoaded] = useState(false); // Track when data has been loaded for key generation
   const [detectedVariables, setDetectedVariables] = useState([]);
   const [variableMetadata, setVariableMetadata] = useState({});
@@ -248,17 +282,19 @@ const App = () => {
 
         // Load variable metadata, toggle metadata, documentation links, and bespoke only once per excerptId
         if (!hasLoadedDataRef.current) {
-          // Load bespoke flag
+          // Load bespoke and headless flags
           setBespoke(excerptData.bespoke || false);
+          setHeadless(excerptData.headless || false);
 
-          // Load variable metadata
+          // Load variable metadata (description and example only)
+          // Note: 'required' is now auto-computed from toggle context, not stored in metadata
           if (excerptData.variables && Array.isArray(excerptData.variables)) {
             const metadata = {};
             excerptData.variables.forEach(v => {
               metadata[v.name] = {
                 description: v.description || '',
-                example: v.example || '',
-                required: v.required || false
+                example: v.example || ''
+                // 'required' is auto-computed from toggle context, not user-editable
               };
             });
             setVariableMetadata(metadata);
@@ -342,12 +378,13 @@ const App = () => {
   }));
 
   const onSubmit = async (formData) => {
-    // Merge detected variables with their metadata
+    // Merge detected variables with their metadata (description/example only)
+    // Note: 'required' is NOT sent - it's auto-computed from toggle context on the backend
     const variablesWithMetadata = detectedVariables.map(v => ({
       name: v.name,
       description: variableMetadata[v.name]?.description || '',
-      example: variableMetadata[v.name]?.example || '',
-      required: variableMetadata[v.name]?.required || false
+      example: variableMetadata[v.name]?.example || ''
+      // 'required' is auto-computed by backend based on toggle context
     }));
 
     // Merge detected toggles with their metadata
@@ -368,6 +405,7 @@ const App = () => {
         excerptName,
         category,
         bespoke,
+        headless,
         content: macroBody,
         excerptId,
         variableMetadata: variablesWithMetadata,
@@ -447,6 +485,8 @@ const App = () => {
         setCategory={setCategory}
         bespoke={bespoke}
         setBespoke={setBespoke}
+        headless={headless}
+        setHeadless={setHeadless}
         categoryOptions={categoryOptions}
         isLoading={isLoadingExcerpt}
         isLoadingCategories={isLoadingCategories}
@@ -495,18 +535,9 @@ const App = () => {
               isDisabled={isSavingExcerpt}
               onClick={async () => {
                 try {
-                  // Use dynamically fetched admin URL, or fallback to hardcoded URL
-                  const urlToUse = adminUrl || '/wiki/admin/forge?id=ari%3Acloud%3Aecosystem%3A%3Aextension%2Fbe1ff96b-d44d-4975-98d3-25b80a813bdd%2Fbbebcb82-f8af-4cd4-8ddb-38c88a94d142%2Fstatic%2Fblueprint-standards-admin';
-                  
-                  // Extract just the path and query from the full URL if needed
-                  let pathToNavigate = urlToUse;
-                  if (urlToUse.startsWith('http://') || urlToUse.startsWith('https://')) {
-                    // Extract path and query from full URL
-                    const urlObj = new URL(urlToUse);
-                    pathToNavigate = urlObj.pathname + urlObj.search;
-                  }
-                  
-                  await router.open(pathToNavigate);
+                  // Use hardcoded URL
+                  const urlToUse = 'https://seatgeek.atlassian.net/wiki/admin/forge/apps/be1ff96b-d44d-4975-98d3-25b80a813bdd/bbebcb82-f8af-4cd4-8ddb-38c88a94d142/blueprint-standards-admin';
+                  await router.open(urlToUse);
                 } catch (err) {
                   logger.errors('Navigation error:', err);
                 }

@@ -920,6 +920,7 @@ export async function bulkPublishChapters(req) {
           heading: chapter.name || excerpt.name,
           bodyContent: storageContent,
           complianceLevel,
+          headless: excerpt.headless || false,
           isBespoke: excerpt.bespoke || false,
           documentationLinks: excerpt.documentationLinks || []
         });

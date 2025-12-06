@@ -33,7 +33,8 @@ import api, { route } from '@forge/api';
 import { updateProgress, calculatePhaseProgress } from './helpers/progress-tracker.js';
 import { extractVariablesFromAdf } from '../utils/adf-utils.js';
 import { validateExcerptData } from '../utils/storage-validator.js';
-import { detectVariableOccurrences, mergeOccurrencesIntoVariables } from '../utils/detection-utils.js';
+import { detectVariableOccurrences, mergeOccurrencesIntoVariables, detectVariablesWithToggleContext } from '../utils/detection-utils.js';
+import { calculateContentHash } from '../utils/hash-utils.js';
 import { logFunction, logPhase, logSuccess, logFailure, logWarning } from '../utils/forge-logger.js';
 
 /**
@@ -155,7 +156,9 @@ export async function handler(event) {
     const excerptsByPage = new Map(); // pageId -> [excerpts]
     const skippedExcerpts = [];
     let bespokeBackfillCount = 0;
+    let headlessBackfillCount = 0;
     let smartCaseBackfillCount = 0;
+    let variableRequiredBackfillCount = 0;
 
     for (const excerpt of allExcerpts) {
       if (!excerpt) continue;
@@ -167,6 +170,22 @@ export async function handler(event) {
         await storage.set(`excerpt:${excerpt.id}`, excerpt);
         bespokeBackfillCount++;
         logPhase('checkSourcesWorker', 'Backfilled bespoke property', { 
+          excerptId: excerpt.id, 
+          excerptName: excerpt.name 
+        });
+      }
+
+      // BACKFILL: Set headless to false if undefined or null
+      // This ensures all Sources have an explicit headless property
+      // One-time migration - can be removed after all Sources are backfilled
+      if (excerpt.headless === undefined || excerpt.headless === null) {
+        excerpt.headless = false;
+        excerpt.updatedAt = new Date().toISOString();
+        // Recalculate content hash since we modified the object
+        excerpt.contentHash = calculateContentHash(excerpt);
+        await storage.set(`excerpt:${excerpt.id}`, excerpt);
+        headlessBackfillCount++;
+        logPhase('checkSourcesWorker', 'Backfilled headless property', { 
           excerptId: excerpt.id, 
           excerptName: excerpt.name 
         });
@@ -208,6 +227,73 @@ export async function handler(event) {
         }
       }
 
+      // BACKFILL: Re-compute variable 'required' property based on toggle context
+      // Variables outside toggles are auto-required, variables only inside toggles are auto-optional
+      // This converts from manually-set required values to auto-computed values
+      const needsVariableRequiredBackfill = excerpt.variables && 
+        Array.isArray(excerpt.variables) && 
+        excerpt.variables.length > 0 &&
+        excerpt.content && 
+        typeof excerpt.content === 'object';
+      
+      if (needsVariableRequiredBackfill) {
+        try {
+          // Detect variables with toggle context to get auto-computed required values
+          const detectedVariables = detectVariablesWithToggleContext(excerpt.content);
+          
+          // Build a map of variable name -> auto-computed required
+          const computedRequired = new Map();
+          for (const v of detectedVariables) {
+            computedRequired.set(v.name, v.required);
+          }
+          
+          // Check if any required values would change
+          let hasChanges = false;
+          const changes = [];
+          
+          for (const v of excerpt.variables) {
+            const newRequired = computedRequired.has(v.name) ? computedRequired.get(v.name) : false;
+            const oldRequired = v.required || false;
+            
+            if (newRequired !== oldRequired) {
+              hasChanges = true;
+              changes.push({
+                variable: v.name,
+                oldRequired,
+                newRequired
+              });
+            }
+          }
+          
+          // Only update if there are actual changes
+          if (hasChanges) {
+            // Update variables with new required values
+            excerpt.variables = excerpt.variables.map(v => ({
+              ...v,
+              required: computedRequired.has(v.name) ? computedRequired.get(v.name) : false
+            }));
+            
+            excerpt.updatedAt = new Date().toISOString();
+            excerpt.contentHash = calculateContentHash(excerpt);
+            
+            await storage.set(`excerpt:${excerpt.id}`, excerpt);
+            variableRequiredBackfillCount++;
+            logPhase('checkSourcesWorker', 'Backfilled variable required property', { 
+              excerptId: excerpt.id, 
+              excerptName: excerpt.name,
+              changes
+            });
+          }
+        } catch (backfillError) {
+          // Log warning but don't fail the entire operation
+          logWarning('checkSourcesWorker', 'Failed to backfill variable required property', {
+            excerptId: excerpt.id,
+            excerptName: excerpt.name,
+            error: backfillError.message
+          });
+        }
+      }
+
       // Skip if this excerpt doesn't have page info
       if (!excerpt.sourcePageId || !excerpt.sourceLocalId) {
         logWarning('checkSourcesWorker', 'Skipping excerpt - missing page info', {
@@ -232,7 +318,9 @@ export async function handler(event) {
       totalPages: excerptsByPage.size,
       skippedCount: skippedExcerpts.length,
       bespokeBackfillCount,
-      smartCaseBackfillCount
+      headlessBackfillCount,
+      smartCaseBackfillCount,
+      variableRequiredBackfillCount
     });
 
     await updateProgress(progressId, {
@@ -566,8 +654,14 @@ export async function handler(event) {
     if (bespokeBackfillCount > 0) {
       statusMessage += `, ${bespokeBackfillCount} backfilled with bespoke:false`;
     }
+    if (headlessBackfillCount > 0) {
+      statusMessage += `, ${headlessBackfillCount} backfilled with headless:false`;
+    }
     if (smartCaseBackfillCount > 0) {
       statusMessage += `, ${smartCaseBackfillCount} backfilled with smart case data`;
+    }
+    if (variableRequiredBackfillCount > 0) {
+      statusMessage += `, ${variableRequiredBackfillCount} backfilled with auto-computed required`;
     }
 
     const finalResults = {
@@ -577,7 +671,9 @@ export async function handler(event) {
       skippedCount: skippedExcerpts.length,
       contentConversionsCount,
       bespokeBackfillCount,
+      headlessBackfillCount,
       smartCaseBackfillCount,
+      variableRequiredBackfillCount,
       completedAt: new Date().toISOString()
     };
 
@@ -591,7 +687,9 @@ export async function handler(event) {
       activeCount: checkedSources.length,
       contentConversionsCount,
       bespokeBackfillCount,
+      headlessBackfillCount,
       smartCaseBackfillCount,
+      variableRequiredBackfillCount,
       results: finalResults
     });
 
@@ -603,7 +701,9 @@ export async function handler(event) {
       skippedCount: skippedExcerpts.length,
       conversionsCount: contentConversionsCount,
       bespokeBackfillCount,
-      smartCaseBackfillCount
+      headlessBackfillCount,
+      smartCaseBackfillCount,
+      variableRequiredBackfillCount
     });
 
     return {
@@ -616,7 +716,9 @@ export async function handler(event) {
         skippedCount: skippedExcerpts.length,
         contentConversionsCount,
         bespokeBackfillCount,
-        smartCaseBackfillCount
+        headlessBackfillCount,
+        smartCaseBackfillCount,
+        variableRequiredBackfillCount
       }
     };
 
