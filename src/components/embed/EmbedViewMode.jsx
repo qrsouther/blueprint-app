@@ -143,7 +143,7 @@ export function EmbedViewMode({
               </Button>
               {onInsertChapterAbove && (
                 <Button
-                  appearance="subtle"
+                  appearance="default"
                   onClick={onInsertChapterAbove}
                   shouldFitContainer={false}
                   spacing="compact"
@@ -201,7 +201,7 @@ export function EmbedViewMode({
               </Button>
               {onInsertChapterAbove && (
                 <Button
-                  appearance="subtle"
+                  appearance="default"
                   onClick={onInsertChapterAbove}
                   shouldFitContainer={false}
                   spacing="compact"
@@ -306,7 +306,7 @@ export function EmbedViewMode({
             </Button>
             {onInsertChapterAbove && (
               <Button
-                appearance="subtle"
+                appearance="default"
                 onClick={onInsertChapterAbove}
                 shouldFitContainer={false}
                 spacing="compact"

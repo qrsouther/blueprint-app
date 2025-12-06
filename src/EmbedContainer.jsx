@@ -138,6 +138,15 @@ const App = () => {
   const isEditing = context?.extension?.isEditing;
   const effectiveLocalId = context?.localId;
 
+  // Track initial mount to show "Loading Editor..." immediately
+  // This prevents Forge's default spinner during iframe initialization
+  const isInitialMount = React.useRef(true);
+  
+  // Mark as no longer initial mount after first render
+  React.useEffect(() => {
+    isInitialMount.current = false;
+  }, []);
+
   // ============================================================================
   // LOCKED PAGE MODEL: Local edit state
   // ============================================================================
@@ -778,6 +787,30 @@ const App = () => {
   // CONDITIONAL RENDERS
   // ============================================================================
 
+  // Early loading state: Show "Loading Editor..." immediately on first render in view mode
+  // This prevents Forge's default spinner from showing during iframe initialization
+  // Show on initial mount OR if we're in view mode and don't have data yet
+  if (!isEditing && !isEditingEmbed && (isInitialMount.current || (!selectedExcerptId && !variableValuesData))) {
+    return (
+      <Box xcss={styles}>
+        <Box xcss={editButtonBorderContainerStyle}>
+          <Inline space="space.100" alignBlock="center">
+            <Button
+              appearance="default"
+              onClick={undefined}
+              shouldFitContainer={false}
+              iconAfter="chevron-down"
+              spacing="compact"
+              isDisabled={true}
+            >
+              Loading Editor...
+            </Button>
+          </Inline>
+        </Box>
+      </Box>
+    );
+  }
+
   // View mode with no selectedExcerptId - show loading button OR unconfigured state
   if (!selectedExcerptId && !isEditing && !isEditingEmbed) {
     // If we're still loading variable values, show loading state
@@ -917,7 +950,10 @@ const App = () => {
   const isPublishedOrFreeform = publishStatus?.isPublished || hasFreeformContent;
   
   if (!content && !isEditing && !isEditingEmbed && !isPublishedOrFreeform) {
-    const isLoading = isLoadingCachedContent || isLoadingExcerpt;
+    // Show "Loading Editor..." immediately on initial mount or if we have an excerptId but no data loaded yet
+    // This prevents Forge's default spinner during iframe initialization
+    const hasExcerptIdButNoData = selectedExcerptId && !excerpt && !cachedContentData && !variableValuesData;
+    const isLoading = isInitialMount.current || isLoadingCachedContent || isLoadingExcerpt || hasExcerptIdButNoData;
     
     // If still loading, show loading button
     if (isLoading) {
